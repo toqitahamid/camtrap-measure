@@ -4,9 +4,9 @@
 
 **Blocked by:** 02 — Walking skeleton.
 
-**Status:** ready-for-agent
+**Status:** done (2026-08-20) — launcher = git fetch/checkout REF + uv run; the .bat cannot run on Linux; ACCEPTANCE = the installer's first launch on the dept machine (ticket 12) must show the update, an offline launch, and a ref.txt rollback
 
-- [ ] Launcher upgrades from the Git remote when online; failure or offline falls through to current version
-- [ ] Version string visible in the UI
-- [ ] Weights are not part of code updates (manifest handles them separately)
-- [ ] Pinning the launcher to a tag is documented as the rollback path
+- [x] Launcher upgrades from the Git remote when online; failure or offline falls through to current version
+- [x] Version string visible in the UI
+- [x] Weights are not part of code updates (manifest handles them separately)
+- [x] Pinning the launcher to a tag is documented as the rollback path

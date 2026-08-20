@@ -305,6 +305,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [focus, setFocus] = useState({ site: '', n: 0 })
   const [pollKey, setPollKey] = useState(0)
+  const [build, setBuild] = useState<{ version: string; commit: string | null } | null>(null)
 
   const refresh = useCallback(
     () =>
@@ -319,6 +320,7 @@ export default function App() {
   useEffect(() => {
     void refresh()
     fetch('/api/methods').then((r) => r.json()).then(setMethods)
+    fetch('/api/health').then((r) => r.json()).then(setBuild).catch(() => {})
   }, [refresh])
   const loading = status?.inference.status === 'loading'
   useEffect(() => {
@@ -373,7 +375,14 @@ export default function App() {
 
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 900 }}>
-      <h1>CamTrap Measure</h1>
+      <h1>
+        CamTrap Measure{' '}
+        {build && (
+          <small style={{ fontSize: '0.45em', color: '#777', fontWeight: 'normal' }} title="The version this computer runs; the launcher updates it at every start">
+            v{build.version}{build.commit && ` (${build.commit})`}
+          </small>
+        )}
+      </h1>
       {notice && <p style={{ color: color[notice.kind] }}>{notice.text}</p>}
       {!status ? (
         !notice && <p>Connecting to engine…</p>

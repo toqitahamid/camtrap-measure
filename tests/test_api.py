@@ -11,6 +11,7 @@ def test_health_reports_version():
     body = r.json()
     assert body["status"] == "ok"
     assert body["version"] == "0.1.0"
+    assert body["commit"] is None or (isinstance(body["commit"], str) and body["commit"])  # git describe of the checkout
 
 
 def test_root_serves_built_page():

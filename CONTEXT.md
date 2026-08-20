@@ -229,6 +229,31 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   sync → "offline — using calibrations from last sync"); ticket 10 adds the end-to-end
   test (`test_an_offline_day_still_measures`). The launcher's update skip is ticket 11.
 
+## Launcher and updates (ticket 11, 2026-08-20)
+
+- The dept install is a Git clone; `run.bat` is the updater: `git fetch` + detached
+  `checkout REF` (default `origin/main`), `uv sync --frozen` (the committed `uv.lock`,
+  exactly; uv never touches a tracked file, so the next checkout can never be refused
+  because of it), then `uv run --frozen --offline camtrap-measure`. Every failure
+  prints its reason and falls through to the version on disk; a failed dependency
+  install restores the previous commit and runs that — offline never blocks a launch.
+  `GIT_TERMINAL_PROMPT=0` so a private remote fails instead of hanging on a password
+  prompt (the installer stores the credential). cmd reads a running `.bat` by byte
+  offset and the checkout rewrites it, so everything after the checkout is one final
+  line ending in `exit /b`.
+- Open for ticket 12: the lock pins the CPU torch; a frozen sync on the dept machine
+  would replace an installer-provided CUDA torch. Resolve by pinning the CUDA wheel
+  index for Windows in `pyproject.toml` so the lock itself carries it, or by excluding
+  torch from the sync.
+- Rollback = an untracked `ref.txt` beside `run.bat` naming a known-good tag (not an
+  edit of `run.bat`: a dirty tracked file makes `checkout` refuse). Releases: bump
+  `pyproject.toml` version, push main, tag. `/api/health` reports version +
+  `git describe --tags --always --dirty` (None outside git) and the header shows them —
+  the describe string is the word to put in `ref.txt`.
+- The `.bat` cannot run here; its first real execution is the installer's first launch
+  (ticket 12), which is the acceptance step for this ticket.
+- Weights stay outside the code update entirely (`~/.camtrap-measure/weights/`, manifest).
+
 ## Auth
 
 Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS

@@ -1,4 +1,5 @@
 import io
+import subprocess
 import threading
 from contextlib import asynccontextmanager
 from datetime import date
@@ -16,6 +17,22 @@ __version__ = version("camtrap-measure")
 UI_DIR = Path(__file__).parent / "ui"
 
 
+def _commit() -> str | None:
+    """The checkout the app runs from, as `git describe --tags --always` (nearest tag + distance + SHA — the
+    word to write into ref.txt to pin it); None outside git. The launcher updates the checkout at every start."""
+    # ponytail: asks git about this file's folder, which is the clone because uv installs the project editable;
+    # a non-editable install would report the clone's HEAD, not the installed code's. Read from package
+    # metadata if that ever changes.
+    try:
+        return subprocess.run(["git", "describe", "--tags", "--always", "--dirty"], cwd=Path(__file__).parent,
+                              capture_output=True, text=True, timeout=5, check=True).stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+COMMIT = _commit()
+
+
 @asynccontextmanager
 async def lifespan(app):
     inference.state["status"] = "loading"  # set before the thread exists, so no request slips through on the fake
@@ -28,7 +45,7 @@ app = FastAPI(title="CamTrap Measure", lifespan=lifespan)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": __version__}
+    return {"status": "ok", "version": __version__, "commit": COMMIT}
 
 
 @app.get("/api/status")
