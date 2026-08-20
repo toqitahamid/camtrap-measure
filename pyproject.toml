@@ -7,13 +7,14 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "pywebview",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]
 camtrap-measure = "camtrap_measure.main:main"
 
 [dependency-groups]
-dev = ["pytest", "httpx"]
+dev = ["pytest"]
 
 [build-system]
 requires = ["hatchling"]

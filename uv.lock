@@ -48,28 +48,26 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pywebview" },
     { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pywebview" },
     { name = "uvicorn" },
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-]
+dev = [{ name = "pytest" }]
 
 [[package]]
 name = "certifi"

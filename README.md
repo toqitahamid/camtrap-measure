@@ -17,3 +17,9 @@ cd frontend && npm install && npm run build   # rebuild UI into src/camtrap_meas
 
 The built UI is committed so `uv run` from a fresh clone works without Node.
 Rebuild and commit it whenever `frontend/` changes.
+
+Local state (cached login session, SQLite mirror of cloud annotations/sites)
+lives in `~/.camtrap-measure/`; override with `CAMTRAP_DATA_DIR`.
+
+Supabase is read-only from this app: `supabase_ro.py` is the only client and
+exposes auth plus three reads; `tests/test_supabase_ro.py` enforces it.
