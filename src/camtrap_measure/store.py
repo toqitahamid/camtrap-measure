@@ -26,7 +26,7 @@ create table if not exists photos (
 create table if not exists detections (
     path text not null, idx integer not null, method text not null,
     x1 real, y1 real, x2 real, y2 real, species text, confidence real,
-    distance_m real, q05_m real, q95_m real,
+    distance_m real, q05_m real, q95_m real, match_score integer,
     primary key (path, idx, method));
 """
 
@@ -36,11 +36,12 @@ def _db() -> sqlite3.Connection:
     con = sqlite3.connect(DATA_DIR / "camtrap.db")
     con.row_factory = sqlite3.Row
     con.executescript(_SCHEMA)
-    if "match_score" not in {r["name"] for r in con.execute("pragma table_info(photos)")}:
-        try:
-            con.execute("alter table photos add column match_score integer")  # pre-ticket-07 dev databases
-        except sqlite3.OperationalError:  # another thread migrated first
-            pass
+    for table in ("photos", "detections"):  # pre-ticket-07 / pre-ticket-08 dev databases
+        if "match_score" not in {r["name"] for r in con.execute(f"pragma table_info({table})")}:
+            try:
+                con.execute(f"alter table {table} add column match_score integer")
+            except sqlite3.OperationalError:  # another thread migrated first
+                pass
     return con
 
 
@@ -159,7 +160,9 @@ def summary() -> dict:
 
 def record(photo: dict, method: str, detections: list[dict]) -> None:
     """One current answer per photo: upsert its row, replace its detections for this method.
-    A held photo (held_reason set) keeps no numbers at all — every method's rows go."""
+    A held photo (held_reason set) keeps no numbers at all — every method's rows go. The alignment
+    score is kept on each detection row too: a rerun with the other method re-aligns (RoMa is stochastic)
+    and must not rewrite the score the first method's numbers were read under."""
     # ponytail: photo key = absolute path; a moved folder simply re-measures.
     photo = {**photo, "measured_at": datetime.now().astimezone().isoformat(timespec="seconds")}
     with closing(_db()) as con, con:
@@ -171,9 +174,10 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
         else:
             con.execute("delete from detections where path=? and method=?", (photo["path"], method))
         con.executemany(
-            "insert into detections (path, idx, method, x1, y1, x2, y2, species, confidence, distance_m, q05_m, q95_m) "
-            "values (:path, :idx, :method, :x1, :y1, :x2, :y2, :species, :confidence, :distance_m, :q05_m, :q95_m)",
-            [{**d, "path": photo["path"], "idx": i, "method": method} for i, d in enumerate(detections)],
+            "insert into detections (path, idx, method, x1, y1, x2, y2, species, confidence, distance_m, q05_m, q95_m, match_score) "
+            "values (:path, :idx, :method, :x1, :y1, :x2, :y2, :species, :confidence, :distance_m, :q05_m, :q95_m, :match_score)",
+            [{**d, "path": photo["path"], "idx": i, "method": method, "match_score": photo.get("match_score")}
+             for i, d in enumerate(detections)],
         )
 
 
@@ -181,6 +185,6 @@ def detections() -> list[dict]:
     """Every detection row joined with its photo (camera, timestamp, EXIF make/model, calibration used)."""
     with closing(_db()) as con:
         rows = con.execute(
-            "select p.site, p.captured_at, p.make, p.model, p.calibration_image, p.match_score, d.* from detections d "
+            "select p.site, p.captured_at, p.make, p.model, p.calibration_image, d.* from detections d "
             "join photos p on p.path = d.path order by p.site, p.captured_at, d.path, d.method, d.idx").fetchall()
     return [dict(r) for r in rows]

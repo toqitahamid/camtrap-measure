@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import httpx
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from huggingface_hub.errors import RepositoryNotFoundError
@@ -224,3 +225,32 @@ def test_oom_detection_covers_cudnn_and_cublas_failures():
     assert inference._is_oom(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
     assert inference._is_oom(RuntimeError("cuDNN error: CUDNN_STATUS_NOT_INITIALIZED"))
     assert not inference._is_oom(RuntimeError("shape mismatch"))
+
+
+# --- precise method: ground contact from the SAM3 mask (pure numpy, no model needed) -----------
+
+def test_foot_pixel_is_the_median_column_of_the_lowest_mask_rows():
+    m = np.zeros((100, 100), bool)
+    m[20:60, 30:70] = True
+    assert inference.foot_pixel(m) == (49, 59)  # median of columns 30..69, lowest row
+    m[:] = False
+    m[60:80, 35:38] = True  # a thin leg, off-centre
+    assert inference.foot_pixel(m) == (36, 79)
+    assert inference.foot_pixel(np.zeros((4, 4), bool)) is None
+
+
+def test_contacts_take_the_mask_that_matches_each_box_else_the_box_bottom():
+    deer = np.zeros((100, 200), bool)
+    deer[20:90, 30:70] = True  # feet at column 49, row 89
+    far = np.zeros((100, 200), bool)
+    far[10:20, 150:160] = True
+    masks = [(far, [150, 10, 160, 20]), (deer, [30, 20, 70, 90])]  # SAM3 returns every instance it sees, any order
+    boxes = [[30, 20, 70, 90], [100, 40, 120, 60]]  # the deer, and a box SAM3 gave no mask for
+    assert inference.contacts(boxes, masks, 200, 100) == [(49.5 / 200, 89.5 / 100), (110 / 200, 60 / 100)]
+
+
+def test_methods_endpoint_names_the_default_and_explains_each_choice(client):
+    r = client.get("/api/methods").json()
+    assert r["default"] == inference.DEFAULT_METHOD == "md"
+    assert set(r["methods"]) == {"md", "sam3"}
+    assert "slower" in r["methods"]["sam3"]["hint"] and r["methods"]["md"]["label"]

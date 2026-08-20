@@ -109,7 +109,7 @@ def cameras():
 
 class RunRequest(BaseModel):
     folder: str
-    method: str = "md"
+    method: str = inference.DEFAULT_METHOD
 
 
 @app.post("/api/run")
@@ -132,7 +132,7 @@ def run_status():
 
 @app.get("/api/methods")
 def methods():
-    return inference.METHODS
+    return {"default": inference.DEFAULT_METHOD, "methods": inference.METHODS}
 
 
 @app.get("/api/results")

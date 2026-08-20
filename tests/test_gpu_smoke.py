@@ -1,4 +1,4 @@
-"""Real models end to end on one deer photo. Checks wiring, not model quality.
+"""Real models end to end on one deer photo, with both methods. Checks wiring, not model quality.
 
 Needs CUDA, the [inference] extra, CAMTRAP_WEIGHTS_DIR (a folder with manifest.json),
 CAMTRAP_SMOKE_PHOTO (a JPEG with a deer) and CAMTRAP_SMOKE_FLAG (the same camera's flag photo,
@@ -68,5 +68,15 @@ def test_real_models_measure_a_deer_through_the_api(cloud, tmp_path):
         assert r["distance_m"] is not None and 0.5 < r["distance_m"] < 40, r
         assert r["q05_m"] < r["distance_m"] < r["q95_m"], r
         assert r["calibration_image"] == flag.name
-        assert isinstance(inference.backend, inference.Real)
-        print("SMOKE", {k: r[k] for k in ("species", "confidence", "distance_m", "q05_m", "q95_m", "match_score")})
+        assert isinstance(inference.backend, inference.Real) and inference.backend.sam3 is None  # fast method never loads SAM3
+        print("SMOKE md", {k: r[k] for k in ("species", "confidence", "distance_m", "q05_m", "q95_m", "match_score")})
+        st = run(c, d, method="sam3", timeout=600)  # first precise run loads SAM3 (3.4 GB)
+        assert st["status"] == "done" and st["held"] == 0, st
+        assert inference.backend.sam3 is not None
+        rows = results(c)
+        assert {x["method"] for x in rows} == {"md", "sam3"}  # the other method's rows stay
+        p = next((x for x in rows if x["method"] == "sam3" and x["species"] == "white-tailed deer"), None)
+        assert p, rows
+        assert p["distance_m"] is not None and abs(p["distance_m"] - r["distance_m"]) < 3, (p, r)  # same deer, feet vs box bottom
+        assert p["q05_m"] < p["distance_m"] < p["q95_m"], p
+        print("SMOKE sam3", {k: p[k] for k in ("species", "confidence", "distance_m", "q05_m", "q95_m", "match_score")})

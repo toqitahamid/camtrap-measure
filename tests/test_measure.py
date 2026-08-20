@@ -22,14 +22,16 @@ def folder(tmp_path: Path, site="TON_CAM02", photos: dict[str, bytes] | None = N
     return d
 
 
-def run(c: TestClient, d: Path, method="md") -> dict:
-    r = c.post("/api/run", json={"folder": str(d), "method": method})
+def run(c: TestClient, d: Path, method: str | None = "md", timeout=4.0) -> dict:
+    """Start a run (method=None: let the API pick its default) and poll until it ends."""
+    r = c.post("/api/run", json={"folder": str(d), **({"method": method} if method else {})})
     assert r.status_code == 200, r.text
-    for _ in range(200):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         st = c.get("/api/run").json()
         if st["status"] != "running":
             return st
-        time.sleep(0.02)
+        time.sleep(min(1.0, timeout / 200))
     raise AssertionError("run did not finish")
 
 
@@ -237,3 +239,20 @@ def test_relative_folder_path_keys_the_same_photo(synced, tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     run(synced, Path("photos/TON_CAM02"))
     assert len({r["path"] for r in results(synced)}) == 1 and Path(results(synced)[0]["path"]).is_absolute()
+
+
+def test_run_without_a_method_uses_the_default(synced, tmp_path):
+    run(synced, folder(tmp_path), method=None)
+    assert {r["method"] for r in results(synced)} == {inference.DEFAULT_METHOD}
+
+
+def test_each_methods_rows_keep_the_alignment_score_they_were_read_under(synced, tmp_path, monkeypatch):
+    def realign(paths, calibration, method):  # RoMa samples matches: every run aligns a little differently
+        for res in inference.fake(paths, calibration, method):
+            yield inference.PhotoResult(res.detections, {"md": 300, "sam3": 120}[method])
+
+    monkeypatch.setattr(api.inference, "backend", realign)
+    d = folder(tmp_path)
+    run(synced, d, method="md")
+    run(synced, d, method="sam3")
+    assert {r["method"]: r["match_score"] for r in results(synced)} == {"md": 300, "sam3": 120}

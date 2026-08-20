@@ -157,6 +157,36 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   6.7 m [4.9, 9.2], ~500 inliers; 60–95 s including model load. `match_score`
   varies a few % run to run (RoMa samples matches stochastically).
 
+## Precise method (ticket 08, 2026-08-20)
+
+- Within a run the methods differ only in the readout point of the same distance map:
+  `md` at the box's bottom centre, `sam3` at the feet of a SAM3 mask prompted with that box (median column
+  of the mask's lowest 5% of rows, lowest row — the research contact-pixel rule,
+  `04_lindenthal_zeroshot/prep.py`). SAM3's box prompt is an exemplar and returns every
+  instance it sees, so the mask is matched to the box by IoU ≥ 0.5 (`MIN_MASK_IOU`); a
+  box SAM3 cannot outline falls back to the box bottom rather than losing its number.
+- SAM3 = transformers' port (`Sam3Model`, transformers ≥ 5 is already a dependency; no
+  vendored repo). Weights `sam3/` in manifest 2026.08.20c, mirrored from the gated
+  `facebook/sam3` hub repo minus its original-format `sam3.pt`. Loaded on the first
+  precise run of the engine's lifetime, never at start — the fast method pays no VRAM
+  for it (the 3.4 GB download itself is not lazy: `snapshot_download` mirrors the whole
+  repo at first start). The image is encoded once per photo; each box prompts on the
+  shared features. bf16 autocast as the research ran it; a card without bf16 runs SAM3
+  in fp32 (fp16 overflows its backbone), never fp16.
+- `DEFAULT_METHOD = "md"` (inference.py) until the research comparison (open item 2)
+  says otherwise; `/api/methods` returns the default plus a label and plain-language hint
+  per method, and the run screen shows the hint under the selector.
+- Rows are keyed (path, idx, method) since ticket 05: a rerun with the other method
+  adds rows, a rerun with the same method replaces only its own. Each detection row also
+  carries the `match_score` it was read under — every run re-aligns, so the photo-level
+  score (latest run, used for empty frames) cannot stand in for the other method's rows.
+- Verified 2026-08-20 on a GH200 (`sbatch scripts/gpu_smoke.sbatch`, jobs 2988962 and
+  2989015): the MAS_CAM22 deer reads 6.7 m [4.9, 9.2] at the box bottom and 6.4 m
+  [4.7, 8.7] at the mask's feet; SAM3 loads in ~40 s on first use. Across runs the fast
+  reading of the same photo moved 5.6 → 7.8 m with the RoMa draw (354 vs 524 inliers): the alignment's
+  run-to-run spread is larger than the method gap and is the thing to pin down before
+  the comparison that sets the default (fixed seed, or matches averaged over draws).
+
 ## Auth
 
 Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS

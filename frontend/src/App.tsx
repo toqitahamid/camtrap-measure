@@ -28,6 +28,7 @@ type Calibration = {
   reason: string | null
 }
 type Camera = { site: string; verdict: 'green' | 'red'; reason: string | null; calibrations: Calibration[] }
+type Methods = { default: string; methods: Record<string, { label: string; hint: string }> }
 type Run = {
   folder: string
   site: string
@@ -68,9 +69,11 @@ function ModelsLine({ inf }: { inf: Inference }) {
   )
 }
 
-function RunPanel({ methods, ready }: { methods: Record<string, string>; ready: boolean }) {
+function RunPanel({ methods, ready }: { methods: Methods; ready: boolean }) {
   const [run, setRun] = useState<Run | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [picked, setPicked] = useState<string | null>(null)
+  const method = picked ?? methods.default
   const running = run?.status === 'running'
 
   const poll = () => fetch('/api/run').then((r) => r.json()).then(setRun).catch(() => {}) // engine down: App's refresh says so
@@ -100,19 +103,20 @@ function RunPanel({ methods, ready }: { methods: Record<string, string>; ready: 
       {/* ponytail: typed/pasted path; a native folder picker needs a pywebview dialog bridge — add when the dept trips over this. */}
       <form onSubmit={start} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <input name="folder" placeholder="Photo folder named after the camera, e.g. D:\photos\TON_CAM02" required style={{ flex: 1, minWidth: 320 }} />
-        <select name="method" defaultValue="md">
-          {Object.entries(methods).map(([k, label]) => (
-            <option key={k} value={k}>{label}</option>
+        <select name="method" value={method} onChange={(e) => setPicked(e.target.value)}>
+          {Object.entries(methods.methods).map(([k, m]) => (
+            <option key={k} value={k}>{m.label}</option>
           ))}
         </select>
         <button type="submit" disabled={running || !ready}>{running ? 'Running…' : 'Measure'}</button>
       </form>
+      {methods.methods[method] && <p style={{ color: '#555', margin: '0.3rem 0 0' }}>{methods.methods[method].hint}</p>}
       {error && <p style={{ color: 'crimson' }}>{error}</p>}
       {run && (
         <div style={{ marginTop: '1rem' }}>
           <progress value={run.done} max={run.total} style={{ width: '100%' }} />
           <p>
-            {run.site} · {run.done}/{run.total} photos · {run.detections} animals · {run.held} held
+            {run.site} · {methods.methods[run.method]?.label ?? run.method} · {run.done}/{run.total} photos · {run.detections} animals · {run.held} held
             {running && run.eta_s !== null && ` · about ${duration(run.eta_s)} left`}
             {run.status === 'done' && ` · finished in ${duration(run.elapsed_s)}`}
           </p>
@@ -136,7 +140,7 @@ function RunPanel({ methods, ready }: { methods: Record<string, string>; ready: 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
   const [cameras, setCameras] = useState<Camera[]>([])
-  const [methods, setMethods] = useState<Record<string, string>>({})
+  const [methods, setMethods] = useState<Methods>({ default: '', methods: {} })
   const [notice, setNotice] = useState<{ text: string; kind: 'info' | 'warn' | 'error' } | null>(null)
   const [busy, setBusy] = useState(false)
 
