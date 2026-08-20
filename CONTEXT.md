@@ -207,6 +207,28 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   recorded (640 px JPEG); boxes are drawn by the page from the stored fractions.
   pywebview `ALLOW_DOWNLOADS` is on so the CSV link saves through the native dialog.
 
+## Resume, catch-up, offline (ticket 10, 2026-08-20)
+
+- A run writes per photo, so a cancel (`POST /api/run/cancel`, stops after the photo in
+  flight), a crash or a power cut loses at most one photo. There is no separate resume:
+  Measure on the same folder skips every photo that already has a *current answer* —
+  same method, same calibration image, same calibration version (the annotation's
+  `updated_at`; a relabel changes it and the photo is measured again). Versions are
+  compared, never clocks: the dept machine's and the cloud's need not agree. `rerun`
+  (a checkbox) replaces current answers too. So a folder that accumulates a season's
+  SD-card dumps is measured incrementally by the same button.
+- `photos` gained `method` and `calibration_version` for that rule. Run status gained
+  `skipped` and the `cancelled` state; the ETA counts only inferred photos.
+- After a successful sync the engine re-tries every held photo still on disk, each under
+  the method it was first asked with (`measure.start_held()`; response `remeasure` =
+  photos queued, `null` when a run is busy or models are not ready — they wait for the
+  next sync). Photos still uncalibrated are simply held again with the current reason.
+  Run progress is not persisted across restarts: the store is the record and a restart
+  means pressing Measure again.
+- Offline: every surface already degraded politely (weights check → cached copy notice;
+  sync → "offline — using calibrations from last sync"); ticket 10 adds the end-to-end
+  test (`test_an_offline_day_still_measures`). The launcher's update skip is ticket 11.
+
 ## Auth
 
 Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS

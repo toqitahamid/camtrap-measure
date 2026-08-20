@@ -4,10 +4,10 @@
 
 **Blocked by:** 05 — Measurement run on fake inference.
 
-**Status:** ready-for-agent
+**Status:** done (2026-08-20) — no separate resume: Measure skips photos with a current answer; sync re-tries held photos
 
-- [ ] Cancel mid-run; resume skips already-measured photos
-- [ ] App restart mid-run loses at most the in-flight batch
-- [ ] After a sync that calibrates held photos, they are measured without being re-requested
-- [ ] Offline states covered: launch, sync, weights check — each with a plain notice, none blocking measurement
-- [ ] Behaviors asserted through API tests with the fake
+- [x] Cancel mid-run; resume skips already-measured photos
+- [x] App restart mid-run loses at most the in-flight batch (results are written per photo: at most the photo in flight)
+- [x] After a sync that calibrates held photos, they are measured without being re-requested
+- [x] Offline states covered: launch, sync, weights check — each with a plain notice, none blocking measurement (weights check + sync + a run asserted end to end; the launcher's own update skip is ticket 11)
+- [x] Behaviors asserted through API tests with the fake

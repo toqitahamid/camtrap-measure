@@ -100,7 +100,8 @@ def sync():
     except sb.Offline:
         return {"ok": False, "offline": True, "last_sync": store.summary()["last_sync"]}
     last_sync = store.replace_mirror(annotations, sites, fits)
-    return {"ok": True, "last_sync": last_sync, "annotations": len(annotations), "sites": len(sites)}
+    remeasure = measure.start_held() if inference.state["status"] == "ready" else None  # held photos whose calibration may have arrived
+    return {"ok": True, "last_sync": last_sync, "annotations": len(annotations), "sites": len(sites), "remeasure": remeasure}
 
 
 @app.get("/api/cameras")
@@ -112,6 +113,7 @@ def cameras():
 class RunRequest(BaseModel):
     folder: str
     method: str = inference.DEFAULT_METHOD
+    rerun: bool = False  # replace current answers too; default measures only what has none yet
 
 
 @app.post("/api/run")
@@ -120,7 +122,7 @@ def start_run(body: RunRequest):
     if inference.state["status"] != "ready":
         raise HTTPException(503, inference.state["error"] or "Models are still loading — try again in a moment.")
     try:
-        return measure.start(body.folder, body.method)
+        return measure.start(body.folder, body.method, body.rerun)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
@@ -130,6 +132,12 @@ def start_run(body: RunRequest):
 @app.get("/api/run")
 def run_status():
     return measure.status()
+
+
+@app.post("/api/run/cancel")
+def cancel_run():
+    """Stop after the photo in flight. Finished photos keep their answers; Measure again continues."""
+    return measure.cancel()
 
 
 @app.get("/api/methods")

@@ -254,3 +254,17 @@ def test_methods_endpoint_names_the_default_and_explains_each_choice(client):
     assert r["default"] == inference.DEFAULT_METHOD == "md"
     assert set(r["methods"]) == {"md", "sam3"}
     assert "slower" in r["methods"]["sam3"]["hint"] and r["methods"]["md"]["label"]
+
+
+def test_an_offline_day_still_measures(cloud, hub, models_installed, start, tmp_path):
+    """Launch, sync and the weights check all fall back with a notice; the run itself never needed the internet."""
+    c, _ = start()
+    c.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    c.post("/api/sync")
+    hub["offline"] = cloud["offline"] = True
+    c, s = start()
+    assert s["status"] == "ready" and s["weights"].endswith("(offline — cached copy)") and s["warning"] is None
+    r = c.post("/api/sync").json()
+    assert r == {"ok": False, "offline": True, "last_sync": r["last_sync"]} and r["last_sync"]
+    assert run(c, folder(tmp_path))["status"] == "done"
+    assert c.get("/api/results").json()

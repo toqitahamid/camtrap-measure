@@ -22,10 +22,15 @@ def folder(tmp_path: Path, site="TON_CAM02", photos: dict[str, bytes] | None = N
     return d
 
 
-def run(c: TestClient, d: Path, method: str | None = "md", timeout=4.0) -> dict:
+def run(c: TestClient, d: Path, method: str | None = "md", timeout=4.0, rerun=False) -> dict:
     """Start a run (method=None: let the API pick its default) and poll until it ends."""
-    r = c.post("/api/run", json={"folder": str(d), **({"method": method} if method else {})})
+    r = c.post("/api/run", json={"folder": str(d), "rerun": rerun, **({"method": method} if method else {})})
     assert r.status_code == 200, r.text
+    return wait(c, timeout)
+
+
+def wait(c: TestClient, timeout=4.0) -> dict:
+    """Poll the current run until it ends."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         st = c.get("/api/run").json()
@@ -33,6 +38,16 @@ def run(c: TestClient, d: Path, method: str | None = "md", timeout=4.0) -> dict:
             return st
         time.sleep(min(1.0, timeout / 200))
     raise AssertionError("run did not finish")
+
+
+def spying():
+    """A fake backend that also records which photos it was asked for → (backend, seen)."""
+    seen: list[Path] = []
+
+    def spy(paths, calibration, method):
+        seen.extend(paths)
+        yield from inference.fake(paths, calibration, method)
+    return spy, seen
 
 
 def results(c: TestClient) -> list[dict]:
@@ -135,7 +150,7 @@ def test_inference_crash_is_an_error_and_keeps_earlier_answers(synced, tmp_path,
         yield
 
     monkeypatch.setattr(api.inference, "backend", boom)
-    st = run(synced, d)
+    st = run(synced, d, rerun=True)
     assert st["status"] == "error" and "CUDA out of memory" in st["error"]
     assert [r["distance_m"] for r in results(synced)] == [r["distance_m"] for r in before]  # rows replaced only once new ones exist
 
@@ -214,7 +229,9 @@ def test_photo_is_held_until_its_flag_photo_is_on_disk(synced, tmp_path):
     st = run(synced, folder(tmp_path))
     assert st["held"] == 1 and results(synced) == []
     assert "IMG_5304.JPG" in st["held_reasons"][0]["reason"] and "Sync" in st["held_reasons"][0]["reason"]
-    synced.post("/api/sync")  # refetches the missing flag photo
+    assert synced.post("/api/sync").json()["remeasure"] == 1  # refetches the missing flag photo, then measures the held photo
+    wait(synced)
+    assert results(synced)
     assert run(synced, folder(tmp_path / "again"))["held"] == 0
 
 
@@ -256,3 +273,115 @@ def test_each_methods_rows_keep_the_alignment_score_they_were_read_under(synced,
     run(synced, d, method="md")
     run(synced, d, method="sam3")
     assert {r["method"]: r["match_score"] for r in results(synced)} == {"md": 300, "sam3": 120}
+
+
+# --- cancel, resume, rerun (ticket 10) -------------------------------------------------
+
+def gated_backend(gate: threading.Semaphore, seen: list):
+    """A backend that needs one gate release per photo and records which photos it was asked for."""
+    def slow(paths, calibration, method):
+        seen.extend(paths)
+        for p in paths:
+            assert gate.acquire(timeout=5), "test never released the gate"
+            yield from inference.fake([p], calibration, method)
+    return slow
+
+
+def test_cancel_stops_between_photos_and_the_next_run_picks_up_the_rest(synced, tmp_path, monkeypatch):
+    gate, seen = threading.Semaphore(0), []
+    monkeypatch.setattr(api.inference, "backend", gated_backend(gate, seen))
+    names = [f"IMG_{i}.JPG" for i in range(4)]
+    d = folder(tmp_path, photos={n: jpeg(IN_WINDOW) for n in names})
+    synced.post("/api/run", json={"folder": str(d), "method": "md"})
+    gate.release()
+    for _ in range(200):  # cancel once the first photo is in
+        if synced.get("/api/run").json()["done"] >= 1:
+            break
+        time.sleep(0.01)
+    assert synced.post("/api/run/cancel").status_code == 200
+    gate.release(3)
+    st = wait(synced)
+    assert st["status"] == "cancelled" and 1 <= st["done"] < 4
+    finished = st["done"]
+    seen.clear()
+    st = run(synced, d)  # the same button again: only what is left
+    assert st["status"] == "done" and st["skipped"] == finished and st["done"] == 4
+    assert len(seen) == 4 - finished and len(results(synced)) == expected_detections(names)
+
+
+def test_crash_midway_keeps_finished_photos_and_the_next_run_measures_only_the_rest(synced, tmp_path, monkeypatch):
+    names = [f"IMG_{i}.JPG" for i in range(3)]
+    d = folder(tmp_path, photos={n: jpeg(IN_WINDOW) for n in names})
+    seen = []
+
+    def dies_after_one(paths, calibration, method):
+        seen.extend(paths)
+        yield from inference.fake(paths[:1], calibration, method)
+        raise RuntimeError("CUDA error: device-side assert")  # or the power went out
+
+    monkeypatch.setattr(api.inference, "backend", dies_after_one)
+    assert run(synced, d)["status"] == "error"
+    assert synced.get("/api/summary").json()["photos"] == 1  # exactly the finished photo is on record
+    monkeypatch.setattr(api.inference, "backend", inference.fake)
+    seen.clear()
+    st = run(synced, d)
+    assert st["status"] == "done" and st["skipped"] == 1 and len(results(synced)) == expected_detections(names)
+
+
+def test_new_photos_in_a_folder_are_measured_without_redoing_old_ones_unless_rerun(synced, tmp_path, monkeypatch):
+    spy, seen = spying()
+    monkeypatch.setattr(api.inference, "backend", spy)
+    d = folder(tmp_path)
+    run(synced, d)
+    (d / "IMG_0006.JPG").write_bytes(jpeg(IN_WINDOW))  # next SD-card dump into the same folder
+    seen.clear()
+    st = run(synced, d)
+    assert [p.name for p in seen] == ["IMG_0006.JPG"] and st["skipped"] == 1
+    seen.clear()
+    run(synced, d, rerun=True)
+    assert sorted(p.name for p in seen) == ["IMG_0005.JPG", "IMG_0006.JPG"]
+
+
+def test_relabeled_flag_photo_remeasures_its_photos_on_the_next_run(cloud, synced, tmp_path, monkeypatch):
+    spy, seen = spying()
+    monkeypatch.setattr(api.inference, "backend", spy)
+    d = folder(tmp_path)
+    run(synced, d)
+    assert run(synced, d)["skipped"] == 1
+    cloud["annotations"] = [{**ANN, "updated_at": "2026-08-01T00:00:00+00:00"}]  # relabeled in FlagLabel: new geometry
+    synced.post("/api/sync")
+    seen.clear()
+    st = run(synced, d)
+    assert st["skipped"] == 0 and [p.name for p in seen] == ["IMG_0005.JPG"]
+
+
+# --- held photos are measured after the sync that calibrates them --------------------------
+
+def test_sync_measures_held_photos_once_their_calibration_arrives(cloud, client, tmp_path):
+    cloud["annotations"] = []  # camera registered, no flag photo labeled yet
+    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/sync")
+    d = folder(tmp_path)
+    st = run(client, d)
+    assert st["held"] == 1 and results(client) == []
+    cloud["annotations"] = [ANN]  # the flag photo gets labeled
+    r = client.post("/api/sync").json()
+    assert r["ok"] and r["remeasure"] == 1
+    st = wait(client)
+    assert st["status"] == "done" and st["held"] == 0 and st["done"] == 1 and st["method"] is None and st["site"] == ""
+    assert len(results(client)) == expected_detections(["IMG_0005.JPG"])
+    assert client.post("/api/sync").json()["remeasure"] == 0  # nothing left to catch up on
+
+
+def test_photos_a_sync_can_never_fix_are_not_retried(synced, tmp_path):
+    d = folder(tmp_path, photos={"IMG_0001.JPG": jpeg(None), "IMG_0002.JPG": jpeg("2026:01:15 08:00:00")})
+    assert run(synced, d)["held"] == 2  # no capture date; before any flag photo
+    assert synced.post("/api/sync").json()["remeasure"] == 1  # only the dated one could be helped by a future flag photo
+
+
+def test_sync_during_a_run_leaves_held_photos_for_the_next_sync(cloud, synced, tmp_path, monkeypatch):
+    gate = threading.Semaphore(0)
+    monkeypatch.setattr(api.inference, "backend", gated_backend(gate, []))
+    synced.post("/api/run", json={"folder": str(folder(tmp_path)), "method": "md"})
+    assert synced.post("/api/sync").json()["remeasure"] is None  # busy: not attempted, not an error
+    gate.release()

@@ -18,7 +18,7 @@ type Status = {
   inference: Inference
 }
 type SyncResult =
-  | { ok: true; last_sync: string; annotations: number; sites: number }
+  | { ok: true; last_sync: string; annotations: number; sites: number; remeasure: number | null }
   | { ok: false; offline: true; last_sync: string | null }
 type Calibration = {
   image_name: string
@@ -50,11 +50,12 @@ type Methods = { default: string; methods: Record<string, { label: string; hint:
 type Run = {
   folder: string
   site: string
-  method: string
-  status: 'running' | 'done' | 'error'
+  method: string | null
+  status: 'running' | 'done' | 'cancelled' | 'error'
   total: number
   done: number
   held: number
+  skipped: number
   detections: number
   held_reasons: { reason: string; count: number }[]
   error: string | null
@@ -87,7 +88,7 @@ function ModelsLine({ inf }: { inf: Inference }) {
   )
 }
 
-function RunPanel({ methods, ready, onDone }: { methods: Methods; ready: boolean; onDone: (site: string) => void }) {
+function RunPanel({ methods, ready, pollKey, onDone }: { methods: Methods; ready: boolean; pollKey: number; onDone: (site: string) => void }) {
   const [run, setRun] = useState<Run | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [picked, setPicked] = useState<string | null>(null)
@@ -96,7 +97,7 @@ function RunPanel({ methods, ready, onDone }: { methods: Methods; ready: boolean
 
   const poll = () => fetch('/api/run').then((r) => r.json()).then(setRun).catch(() => {}) // engine down: App's refresh says so
 
-  useEffect(() => void poll(), [])
+  useEffect(() => void poll(), [pollKey]) // a sync may have started a catch-up run
   useEffect(() => {
     if (!running) return
     const id = setInterval(poll, 1000)
@@ -111,7 +112,7 @@ function RunPanel({ methods, ready, onDone }: { methods: Methods; ready: boolean
     e.preventDefault()
     const form = new FormData(e.currentTarget)
     setError(null)
-    const r = await post('/api/run', { folder: form.get('folder'), method: form.get('method') })
+    const r = await post('/api/run', { folder: form.get('folder'), method: form.get('method'), rerun: form.get('rerun') === 'on' })
     if (!r.ok) {
       setError((await r.json()).detail ?? `Could not start (${r.status})`)
       return
@@ -123,7 +124,7 @@ function RunPanel({ methods, ready, onDone }: { methods: Methods; ready: boolean
     <section style={{ marginTop: '2rem' }}>
       <h2>Measure</h2>
       {/* ponytail: typed/pasted path; a native folder picker needs a pywebview dialog bridge — add when the dept trips over this. */}
-      <form onSubmit={start} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+      <form id="run-form" onSubmit={start} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <input name="folder" placeholder="Photo folder named after the camera, e.g. D:\photos\TON_CAM02" required style={{ flex: 1, minWidth: 320 }} />
         <select name="method" value={method} onChange={(e) => setPicked(e.target.value)}>
           {Object.entries(methods.methods).map(([k, m]) => (
@@ -131,16 +132,23 @@ function RunPanel({ methods, ready, onDone }: { methods: Methods; ready: boolean
           ))}
         </select>
         <button type="submit" disabled={running || !ready}>{running ? 'Running…' : 'Measure'}</button>
+        {running && <button type="button" onClick={() => post('/api/run/cancel').then(poll)}>Cancel</button>}
       </form>
       {methods.methods[method] && <p style={{ color: '#555', margin: '0.3rem 0 0' }}>{methods.methods[method].hint}</p>}
+      <label style={{ color: '#555', fontSize: 13 }}>
+        <input type="checkbox" name="rerun" form="run-form" /> Re-measure photos that already have an answer (otherwise only new, held or
+        interrupted ones are measured — so Measure again also resumes a cancelled run)
+      </label>
       {error && <p style={{ color: 'crimson' }}>{error}</p>}
       {run && (
         <div style={{ marginTop: '1rem' }}>
           <progress value={run.done} max={run.total} style={{ width: '100%' }} />
           <p>
-            {run.site} · {methods.methods[run.method]?.label ?? run.method} · {run.done}/{run.total} photos · {run.detections} animals · {run.held} held
+            {run.site || 'Held photos, all cameras'} · {run.method ? methods.methods[run.method]?.label ?? run.method : 'each under its own method'} · {run.done}/{run.total} photos · {run.detections} animals · {run.held} held
+            {run.skipped > 0 && ` · ${run.skipped} already measured`}
             {running && run.eta_s !== null && ` · about ${duration(run.eta_s)} left`}
             {run.status === 'done' && ` · finished in ${duration(run.elapsed_s)}`}
+            {run.status === 'cancelled' && ` · cancelled after ${duration(run.elapsed_s)} — Measure again continues where it stopped`}
           </p>
           {run.status === 'error' && <p style={{ color: 'crimson' }}>Run failed: {run.error}</p>}
           {run.held_reasons.length > 0 && (
@@ -296,6 +304,7 @@ export default function App() {
   const [notice, setNotice] = useState<{ text: string; kind: 'info' | 'warn' | 'error' } | null>(null)
   const [busy, setBusy] = useState(false)
   const [focus, setFocus] = useState({ site: '', n: 0 })
+  const [pollKey, setPollKey] = useState(0)
 
   const refresh = useCallback(
     () =>
@@ -344,7 +353,9 @@ export default function App() {
     }
     const body: SyncResult = await r.json()
     if (body.ok) {
-      setNotice({ text: `Synced ${body.annotations} annotations, ${body.sites} cameras.`, kind: 'info' })
+      const catchUp = body.remeasure ? ` Re-checking ${body.remeasure} held photo${body.remeasure === 1 ? '' : 's'} now.` : ''
+      setNotice({ text: `Synced ${body.annotations} annotations, ${body.sites} cameras.${catchUp}`, kind: 'info' })
+      setPollKey((k) => k + 1)
     } else {
       setNotice({ text: `Offline — using calibrations from last sync ${when(body.last_sync)}.`, kind: 'warn' })
     }
@@ -419,7 +430,7 @@ export default function App() {
             </table>
           )}
           <ModelsLine inf={status.inference} />
-          <RunPanel methods={methods} ready={status.inference.status === 'ready'} onDone={(site) => setFocus((f) => ({ site, n: f.n + 1 }))} />
+          <RunPanel methods={methods} ready={status.inference.status === 'ready'} pollKey={pollKey} onDone={(site) => setFocus((f) => ({ site, n: f.n + 1 }))} />
           <ResultsPanel sites={cameras.map((c) => c.site)} focus={focus} />
         </>
       )}

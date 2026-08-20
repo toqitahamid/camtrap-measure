@@ -1,12 +1,13 @@
 """Shared fixtures: the Supabase wrapper faked at its seam, plus synthetic annotations and EXIF JPEGs."""
 
+import time
 from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from camtrap_measure import api, store
+from camtrap_measure import api, measure, store
 from camtrap_measure import supabase_ro as sb
 
 from tests.calib.synth import projective_photo
@@ -83,7 +84,11 @@ def cloud(monkeypatch, tmp_path):
         return got
 
     monkeypatch.setattr(api.sb, "download_object", download)
-    return state
+    yield state
+    for _ in range(250):  # a run started in this test (a sync's catch-up, say) must not write into the next test's store
+        if not measure.current or measure.current["status"] != "running":
+            break
+        time.sleep(0.02)
 
 
 @pytest.fixture

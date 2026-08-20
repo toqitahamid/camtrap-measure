@@ -22,7 +22,8 @@ create table if not exists calibrations (
     primary key (site, image_name));
 create table if not exists photos (
     path text primary key, site text not null, captured_at text, make text, model text,
-    calibration_image text, held_reason text, measured_at text not null, match_score integer);
+    calibration_image text, held_reason text, measured_at text not null, match_score integer, method text,
+    calibration_version text);
 create table if not exists detections (
     path text not null, idx integer not null, method text not null,
     x1 real, y1 real, x2 real, y2 real, species text, confidence real,
@@ -36,10 +37,11 @@ def _db() -> sqlite3.Connection:
     con = sqlite3.connect(DATA_DIR / "camtrap.db")
     con.row_factory = sqlite3.Row
     con.executescript(_SCHEMA)
-    for table in ("photos", "detections"):  # pre-ticket-07 / pre-ticket-08 dev databases
-        if "match_score" not in {r["name"] for r in con.execute(f"pragma table_info({table})")}:
+    for table, col, typ in (("photos", "match_score", "integer"), ("detections", "match_score", "integer"),
+                            ("photos", "method", "text"), ("photos", "calibration_version", "text")):  # pre-07/08/10 dev databases
+        if col not in {r["name"] for r in con.execute(f"pragma table_info({table})")}:
             try:
-                con.execute(f"alter table {table} add column match_score integer")
+                con.execute(f"alter table {table} add column {col} {typ}")
             except sqlite3.OperationalError:  # another thread migrated first
                 pass
     return con
@@ -167,8 +169,9 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
     photo = {**photo, "measured_at": datetime.now().astimezone().isoformat(timespec="seconds")}
     with closing(_db()) as con, con:
         con.execute("insert or replace into photos (path, site, captured_at, make, model, calibration_image, held_reason, "
-                    "measured_at, match_score) values (:path, :site, :captured_at, :make, :model, :calibration_image, "
-                    ":held_reason, :measured_at, :match_score)", {"match_score": None, **photo})
+                    "measured_at, match_score, method, calibration_version) values (:path, :site, :captured_at, :make, :model, "
+                    ":calibration_image, :held_reason, :measured_at, :match_score, :method, :calibration_version)",
+                    {"match_score": None, "calibration_version": None, **photo, "method": method})
         if photo["held_reason"]:
             con.execute("delete from detections where path=?", (photo["path"],))
         else:
