@@ -1,0 +1,113 @@
+# CamTrap Measure — CONTEXT
+
+Decisions from the 2026-08-19/20 grilling session. Each carries its why; change
+one only with a reason that beats the recorded one.
+
+## What this is
+
+Windows desktop app for the wildlife department. Measures the distance to each
+white-tailed deer in camera-trap photos, with a 90% interval per animal, feeding
+distance-sampling abundance analysis. Companion to cloud FlagLabel (labeling
+stays there; this app never annotates). Research provenance: the unified
+distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
+2026 paper; checkpoint `ckpt_unified_scratch_split2_rollfix`).
+
+## Division of labor
+
+- **Cloud FlagLabel** (exists, unchanged): dept uploads + labels flag photos →
+  schema-v2 JSON in Supabase `annotations.data` (project `uggjzcbozdxvuawxddrn`).
+- **CamTrap Measure** (this repo): Sync annotations → fit per-photo 4-param
+  calibration (`run_qc` logic) → detect + measure local photos on their GPU →
+  local results DB → CSV export.
+- Photos never upload; only annotation JSONs come down.
+
+## Stack (settled — do not relitigate)
+
+- **Backend**: uv-managed Python, FastAPI, PyTorch pipeline (MegaDetector,
+  optional SAM3, SpeciesNet, RoMa, unified net). All logic lives here, tested here.
+- **Frontend**: Vite + React + TypeScript → `dist/`, served by FastAPI. No
+  router, no state library. Frontend stays dumb: renders JSON, posts clicks.
+- **Shell**: pywebview (WebView2 window). Tauri rejected: Python sidecar
+  babysitting, updater targets the wrong layer, signing burden.
+- **Auto-update**: uv upgrade-on-launch from GitHub in `run.bat`; offline →
+  runs current version. Weights excluded from code updates.
+- **Weights**: private Hugging Face model repo, `hf_hub_download`, versioned
+  manifest checked at startup, token in app config.
+- **Results**: local SQLite (single GPU machine is the record — Q13); rerun of a
+  photo replaces its rows, so one current answer per photo. CSV is an export
+  view, never the store.
+
+## Pipeline decisions
+
+- **Detection**: MegaDetector always; SAM3 as a second selectable method
+  ("precise, slower"). Which is *default* is decided by a planned comparison on
+  existing labeled data in `../distance_estimation` (bbox-bottom vs mask ground
+  contact), not by assumption.
+- **Species**: SpeciesNet per detection. Export filter = white-tailed deer +
+  generic deer-family labels + unsure; unsure also goes to the suspicious
+  gallery; show-all toggle. Survey target is white-tailed deer only (Q10).
+- **Distance read**: aligned-reference (RoMa) is the deploy path; per-camera
+  reference features cached. RoMa match score doubles as misfile/moved-camera
+  alarm.
+- **Camera identity**: folder name == `annotations.site` (dept instruction,
+  enforced: folder must exist in `sites`). 167 cameras across MAS/MOR/SHB/SRF/TON
+  as of 2026-08-19.
+- **Calibration windows**: flag photo EXIF `DateTimeOriginal` (read from
+  Supabase Storage at sync) opens a window; photo matched by folder + its EXIF
+  timestamp → latest window ≤ timestamp. No window → photo held with a banner
+  naming the flags to label. **Ticket zero: verify EXIF survives Storage upload
+  on one SRF image; fallback = `captured_at` column filled at upload.**
+
+## Auth
+
+Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS
+verified 2026-08-20: `authenticated` role reads all of `annotations`, `sites`,
+and the `photos` bucket — no policy changes needed. No service key.
+
+## Trust / review UX (Q1=b, Q11=b)
+
+- Post-run summary screen: counts, distance histogram, per-camera stats.
+- Suspicious gallery only (no per-detection review): low RoMa score, low MD
+  confidence, unsure species, held photos.
+- **Soft export gate**: suspicious rows excluded from CSV by default; one
+  explicit checkbox includes them. Silent poisoning impossible; no hard review
+  requirement.
+
+## Performance envelope (Q5 — hardware unknown)
+
+Design floor: 8 GB VRAM, FP16, batch size auto-probed at startup. CPU fallback
+runs but warns loudly. Models load once and stay resident; JPEG decode
+prefetched in workers; incremental writes; runs resumable. "Fast but accurate":
+accuracy is never traded silently — speed knob is the MD/SAM3 method choice.
+
+## Offline (Q7=b)
+
+Internet needed only for Sync, update check, first weights download. Each fails
+politely (skip update; "offline — using calibrations from last sync <date>").
+Measurement is fully local.
+
+## Install (Q8=b)
+
+Self-install is a first-class deliverable: interactive script with preflight
+checks (GPU driver/CUDA visible, disk space, network, Supabase login) and
+plain-language fixes on failure. No expert in the room.
+
+## Export (Q12=a)
+
+Generic documented CSV, one row per detection:
+`photo, camera, timestamp, species, distance_m, q05_m, q95_m, confidence,
+method, flag`. Units/columns documented in the export. Distance-package-shaped
+export deferred until a real statistician's workflow is observed (needs effort/
+region facts the app doesn't have).
+
+## Name
+
+**CamTrap Measure** (Q9=a). Standalone — publishable beside the paper code
+without FlagLabel branding.
+
+## Open items (not decisions — work)
+
+1. Ticket zero: EXIF-survival check on one SRF Storage image.
+2. MD-only vs MD+SAM3 accuracy comparison on existing data → sets default method.
+3. Dept hardware facts (GPU model, photo volume) — collect at first install.
+4. Distance-ready export (Q12b) — after first season with a statistician.
