@@ -111,3 +111,13 @@ without FlagLabel branding.
 2. MD-only vs MD+SAM3 accuracy comparison on existing data → sets default method.
 3. Dept hardware facts (GPU model, photo volume) — collect at first install.
 4. Distance-ready export (Q12b) — after first season with a statistician.
+
+## Supabase is read-only from this app (hard constraint)
+
+CamTrap Measure never writes to Supabase — not annotations, sites, storage, or
+anything else. Enforced structurally: a single sync module wraps the Supabase
+client and exposes only three read operations (select annotations, select
+sites, download storage object); no write method exists to call. A test asserts
+the wrapper surface stays read-only and that no other Supabase client is
+constructed anywhere in the codebase. DB-level enforcement (RLS) deliberately
+untouched: the same user accounts must keep writing via cloud FlagLabel.
