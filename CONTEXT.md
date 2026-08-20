@@ -121,6 +121,9 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   add when out-of-region labels show up). Distance fields are NULL until 07.
 - CPU fallback is automatic with a loud warning; CUDA build of torch is the
   installer's job (ticket 12), the lockfile pins only CPU-agnostic packages.
+- Verified 2026-08-20: weights repo live (manifest 2026.08.20), first-start
+  download + no-op recheck work from the app venv; GPU smoke passed on a GH200
+  (`sbatch scripts/gpu_smoke.sbatch`, job 2988630, 34 s).
 
 ## Auth
 
