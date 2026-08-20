@@ -1,3 +1,5 @@
+import threading
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 from pathlib import Path
 
@@ -11,7 +13,15 @@ from . import supabase_ro as sb
 __version__ = version("camtrap-measure")
 UI_DIR = Path(__file__).parent / "ui"
 
-app = FastAPI(title="CamTrap Measure")
+
+@asynccontextmanager
+async def lifespan(app):
+    inference.state["status"] = "loading"  # set before the thread exists, so no request slips through on the fake
+    threading.Thread(target=inference.warmup, daemon=True).start()  # weights check + model load; UI polls /api/status
+    yield
+
+
+app = FastAPI(title="CamTrap Measure", lifespan=lifespan)
 
 
 @app.get("/api/health")
@@ -22,7 +32,7 @@ def health():
 @app.get("/api/status")
 def status():
     s = store.session()
-    return {"signed_in": s is not None, "email": s["email"] if s else None, **store.summary()}
+    return {"signed_in": s is not None, "email": s["email"] if s else None, **store.summary(), "inference": inference.state}
 
 
 def _remember(sess: dict) -> None:
@@ -103,6 +113,8 @@ class RunRequest(BaseModel):
 @app.post("/api/run")
 def start_run(body: RunRequest):
     """Measure every JPEG in a folder named after a camera. Progress via GET /api/run."""
+    if inference.state["status"] != "ready":
+        raise HTTPException(503, inference.state["error"] or "Models are still loading — try again in a moment.")
     try:
         return measure.start(body.folder, body.method)
     except ValueError as e:

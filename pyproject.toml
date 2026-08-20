@@ -11,10 +11,17 @@ dependencies = [
     "numpy>=2.5.2",
     "scipy>=1.18.0",
     "pillow>=12.3.0",
+    "huggingface-hub>=1.28.0",
 ]
 
 [project.scripts]
 camtrap-measure = "camtrap_measure.main:main"
+
+[project.optional-dependencies]
+inference = [
+    "megadetector",
+    "speciesnet",
+]
 
 [dependency-groups]
 dev = ["pytest"]

@@ -31,7 +31,7 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   babysitting, updater targets the wrong layer, signing burden.
 - **Auto-update**: uv upgrade-on-launch from GitHub in `run.bat`; offline →
   runs current version. Weights excluded from code updates.
-- **Weights**: private Hugging Face model repo, `hf_hub_download`, versioned
+- **Weights**: private Hugging Face model repo, `snapshot_download`, versioned
   manifest checked at startup, token in app config.
 - **Results**: local SQLite (single GPU machine is the record — Q13); rerun of a
   photo replaces its rows, so one current answer per photo. CSV is an export
@@ -95,6 +95,32 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   photo can never keep numbers from a window that has since gone red.
 - One run at a time; progress is polled (`GET /api/run`), not streamed — the
   page stays a dumb poller.
+
+## Weights and real inference (ticket 06, 2026-08-20)
+
+- Weights repo: private HF `toqi/camtrap-measure-weights` (move to the org later
+  via HF repo transfer; id is `CAMTRAP_WEIGHTS_REPO`). `manifest.json`
+  {version, megadetector, speciesnet}; `snapshot_download` into
+  `~/.camtrap-measure/weights/` is the entire update/resume/cache mechanism.
+  SpeciesNet's `info.json` has its detector entry pointed at the MegaDetector
+  file so loading never reaches for the internet.
+- Engine start: `inference.warmup()` in a thread — extra importable? weights
+  present or fetchable? models load? — result in `/api/status.inference`; runs
+  are refused (503) while loading or on error. No extra → fake backend with a
+  visible "numbers are made up" warning, never silently. `snapshot_download`
+  returns the local folder silently on *any* hub error, so reachability is
+  checked first: offline → "(offline — cached copy)" notice; rejected token →
+  cached copy plus a warning naming the token; nothing cached → error.
+- Real backend: MegaDetector v1000 animal boxes (conf ≥ 0.15) → SpeciesNet
+  v4.0.3a crop per box, batched; FP16 via autocast; SpeciesNet batch size is
+  half the largest of 64…1 whose forward pass fits the free VRAM at start
+  (the other half is headroom for MegaDetector), halved again on any OOM
+  mid-run; a card under 8 GB runs with a warning. Species
+  rule: any cervidae ≥ 0.2 → "white-tailed deer"; score < 0.2 → "unsure";
+  else SpeciesNet's common name. No geofence yet (research ran `--country USA`;
+  add when out-of-region labels show up). Distance fields are NULL until 07.
+- CPU fallback is automatic with a loud warning; CUDA build of torch is the
+  installer's job (ticket 12), the lockfile pins only CPU-agnostic packages.
 
 ## Auth
 

@@ -64,6 +64,14 @@ def save_session(s: dict | None) -> None:
             f.write(json.dumps(s))
 
 
+def config() -> dict:
+    """Installer-written settings (`hf_token`, ...); {} when absent."""
+    try:
+        return json.loads((DATA_DIR / "config.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 # --- mirror ------------------------------------------------------------------
 
 def replace_mirror(annotations: list[dict], sites: list[dict], fits: list[dict] = ()) -> str:

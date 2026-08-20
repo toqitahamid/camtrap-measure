@@ -9,7 +9,8 @@ from tests.conftest import ANN, flag_photo_data, jpeg
 
 def test_fresh_install_is_signed_out_and_never_synced(client):
     s = client.get("/api/status").json()
-    assert s == {"signed_in": False, "email": None, "last_sync": None, "annotations": 0, "sites": 0}
+    assert {k: s[k] for k in ("signed_in", "email", "last_sync", "annotations", "sites")} == {
+        "signed_in": False, "email": None, "last_sync": None, "annotations": 0, "sites": 0}
 
 
 def test_login_rejects_bad_password_with_server_message(client):

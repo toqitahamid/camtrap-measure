@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
+type Inference = {
+  status: 'loading' | 'ready' | 'error'
+  backend: 'fake' | 'real'
+  device: string | null
+  batch: number | null
+  weights: string | null
+  warning: string | null
+  error: string | null
+}
 type Status = {
   signed_in: boolean
   email: string | null
   last_sync: string | null
   annotations: number
   sites: number
+  inference: Inference
 }
 type SyncResult =
   | { ok: true; last_sync: string; annotations: number; sites: number }
@@ -44,7 +54,21 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : 'ne
 const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
 const duration = (s: number) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`)
 
-function RunPanel({ methods }: { methods: Record<string, string> }) {
+function ModelsLine({ inf }: { inf: Inference }) {
+  if (inf.status === 'loading') return <p>Loading models…</p>
+  if (inf.status === 'error') return <p style={{ color: 'crimson' }}>Models unavailable: {inf.error}</p>
+  return (
+    <p>
+      Models:{' '}
+      {inf.backend === 'real'
+        ? `MegaDetector + SpeciesNet ${inf.weights} on ${inf.device} (batch ${inf.batch})`
+        : 'none'}
+      {inf.warning && <span style={{ color: 'darkorange' }}> · ⚠ {inf.warning}</span>}
+    </p>
+  )
+}
+
+function RunPanel({ methods, ready }: { methods: Record<string, string>; ready: boolean }) {
   const [run, setRun] = useState<Run | null>(null)
   const [error, setError] = useState<string | null>(null)
   const running = run?.status === 'running'
@@ -81,7 +105,7 @@ function RunPanel({ methods }: { methods: Record<string, string> }) {
             <option key={k} value={k}>{label}</option>
           ))}
         </select>
-        <button type="submit" disabled={running}>{running ? 'Running…' : 'Measure'}</button>
+        <button type="submit" disabled={running || !ready}>{running ? 'Running…' : 'Measure'}</button>
       </form>
       {error && <p style={{ color: 'crimson' }}>{error}</p>}
       {run && (
@@ -130,6 +154,12 @@ export default function App() {
     void refresh()
     fetch('/api/methods').then((r) => r.json()).then(setMethods)
   }, [refresh])
+  const loading = status?.inference.status === 'loading'
+  useEffect(() => {
+    if (!loading) return
+    const id = setInterval(refresh, 1000) // model load / weights download in progress
+    return () => clearInterval(id)
+  }, [loading, refresh])
 
   async function login(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -231,7 +261,8 @@ export default function App() {
               </tbody>
             </table>
           )}
-          <RunPanel methods={methods} />
+          <ModelsLine inf={status.inference} />
+          <RunPanel methods={methods} ready={status.inference.status === 'ready'} />
         </>
       )}
     </main>
