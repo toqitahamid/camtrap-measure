@@ -4,13 +4,13 @@
 
 **Blocked by:** 04 — Calibration fit, windows, verdicts.
 
-**Status:** ready-for-agent
+**Status:** done (2026-08-20)
 
-- [ ] Inference boundary defined: photos in → detections out (box, species, confidence, distance, q05/q95, match score); fake implementation for tests
-- [ ] Folder whose name matches no registered camera is refused with a clear message
-- [ ] Photo → calibration window matched by folder camera + photo EXIF timestamp
-- [ ] No valid window → photo held, banner names the flags to label first; held photos never get numbers
-- [ ] Progress display with counts and time estimate during a run
-- [ ] Results keyed by photo + detection + method; rerun replaces
-- [ ] EXIF Make/Model stored per photo
-- [ ] All rules asserted through API tests with the fake
+- [x] Inference boundary defined: photos in → detections out (box, species, confidence, distance, q05/q95, match score); fake implementation for tests
+- [x] Folder whose name matches no registered camera is refused with a clear message
+- [x] Photo → calibration window matched by folder camera + photo EXIF timestamp
+- [x] No valid window → photo held, banner names the flags to label first; held photos never get numbers
+- [x] Progress display with counts and time estimate during a run
+- [x] Results keyed by photo + detection + method; rerun replaces
+- [x] EXIF Make/Model stored per photo
+- [x] All rules asserted through API tests with the fake

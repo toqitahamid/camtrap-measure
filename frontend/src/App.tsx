@@ -18,6 +18,20 @@ type Calibration = {
   reason: string | null
 }
 type Camera = { site: string; verdict: 'green' | 'red'; reason: string | null; calibrations: Calibration[] }
+type Run = {
+  folder: string
+  site: string
+  method: string
+  status: 'running' | 'done' | 'error'
+  total: number
+  done: number
+  held: number
+  detections: number
+  held_reasons: { reason: string; count: number }[]
+  error: string | null
+  elapsed_s: number
+  eta_s: number | null
+}
 
 const post = (url: string, body?: unknown) =>
   fetch(url, {
@@ -28,10 +42,77 @@ const post = (url: string, body?: unknown) =>
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : 'never')
 const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
+const duration = (s: number) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`)
+
+function RunPanel({ methods }: { methods: Record<string, string> }) {
+  const [run, setRun] = useState<Run | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const running = run?.status === 'running'
+
+  const poll = () => fetch('/api/run').then((r) => r.json()).then(setRun).catch(() => {}) // engine down: App's refresh says so
+
+  useEffect(() => void poll(), [])
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(poll, 1000)
+    return () => clearInterval(id)
+  }, [running])
+
+  async function start(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const form = new FormData(e.currentTarget)
+    setError(null)
+    const r = await post('/api/run', { folder: form.get('folder'), method: form.get('method') })
+    if (!r.ok) {
+      setError((await r.json()).detail ?? `Could not start (${r.status})`)
+      return
+    }
+    setRun(await r.json())
+  }
+
+  return (
+    <section style={{ marginTop: '2rem' }}>
+      <h2>Measure</h2>
+      {/* ponytail: typed/pasted path; a native folder picker needs a pywebview dialog bridge — add when the dept trips over this. */}
+      <form onSubmit={start} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <input name="folder" placeholder="Photo folder named after the camera, e.g. D:\photos\TON_CAM02" required style={{ flex: 1, minWidth: 320 }} />
+        <select name="method" defaultValue="md">
+          {Object.entries(methods).map(([k, label]) => (
+            <option key={k} value={k}>{label}</option>
+          ))}
+        </select>
+        <button type="submit" disabled={running}>{running ? 'Running…' : 'Measure'}</button>
+      </form>
+      {error && <p style={{ color: 'crimson' }}>{error}</p>}
+      {run && (
+        <div style={{ marginTop: '1rem' }}>
+          <progress value={run.done} max={run.total} style={{ width: '100%' }} />
+          <p>
+            {run.site} · {run.done}/{run.total} photos · {run.detections} animals · {run.held} held
+            {running && run.eta_s !== null && ` · about ${duration(run.eta_s)} left`}
+            {run.status === 'done' && ` · finished in ${duration(run.elapsed_s)}`}
+          </p>
+          {run.status === 'error' && <p style={{ color: 'crimson' }}>Run failed: {run.error}</p>}
+          {run.held_reasons.length > 0 && (
+            <div style={{ background: '#fff4e5', borderLeft: '4px solid darkorange', padding: '0.6rem 0.8rem' }}>
+              <strong>{run.held} photo{run.held === 1 ? '' : 's'} held — not measured.</strong> After fixing, Sync and run this folder again:
+              <ul style={{ margin: '0.4rem 0 0' }}>
+                {run.held_reasons.map((h) => (
+                  <li key={h.reason}>{h.reason} ({h.count} photo{h.count === 1 ? '' : 's'})</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
   const [cameras, setCameras] = useState<Camera[]>([])
+  const [methods, setMethods] = useState<Record<string, string>>({})
   const [notice, setNotice] = useState<{ text: string; kind: 'info' | 'warn' | 'error' } | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -45,7 +126,10 @@ export default function App() {
         .catch((e) => setNotice({ text: `Engine unreachable: ${e}`, kind: 'error' })),
     [],
   )
-  useEffect(() => void refresh(), [refresh])
+  useEffect(() => {
+    void refresh()
+    fetch('/api/methods').then((r) => r.json()).then(setMethods)
+  }, [refresh])
 
   async function login(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -147,6 +231,7 @@ export default function App() {
               </tbody>
             </table>
           )}
+          <RunPanel methods={methods} />
         </>
       )}
     </main>

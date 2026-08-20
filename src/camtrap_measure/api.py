@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calibration, store
+from . import calibration, inference, measure, store
 from . import supabase_ro as sb
 
 __version__ = version("camtrap-measure")
@@ -93,6 +93,38 @@ def sync():
 def cameras():
     """Per-camera calibration verdict, reason, and validity windows."""
     return calibration.cameras(store.sites(), store.calibrations())
+
+
+class RunRequest(BaseModel):
+    folder: str
+    method: str = "md"
+
+
+@app.post("/api/run")
+def start_run(body: RunRequest):
+    """Measure every JPEG in a folder named after a camera. Progress via GET /api/run."""
+    try:
+        return measure.start(body.folder, body.method)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.get("/api/run")
+def run_status():
+    return measure.status()
+
+
+@app.get("/api/methods")
+def methods():
+    return inference.METHODS
+
+
+@app.get("/api/results")
+def results():
+    """One row per detection, joined with its photo."""
+    return store.detections()
 
 
 # Built React page (frontend/ → npm run build). Mounted last so /api/* wins.

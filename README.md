@@ -21,5 +21,10 @@ Rebuild and commit it whenever `frontend/` changes.
 Local state (cached login session, SQLite mirror of cloud annotations/sites)
 lives in `~/.camtrap-measure/`; override with `CAMTRAP_DATA_DIR`.
 
+Measurement runs go through the inference boundary in `inference.py`; until real
+weights land (ticket 06) the shipped `fake` backend produces deterministic
+detections per file name, so the whole app runs without a GPU. Set
+`CAMTRAP_FAKE_DELAY=0.3` (seconds per photo) to watch the progress display.
+
 Supabase is read-only from this app: `supabase_ro.py` is the only client and
 exposes auth plus three reads; `tests/test_supabase_ro.py` enforces it.

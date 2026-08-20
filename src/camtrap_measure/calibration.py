@@ -22,17 +22,23 @@ from .calib.qc import loo_cv
 
 LOO_MAX_REL = 0.5  # |held-out prediction - label| / label; 0.5 flags ~11% of research photos
 TRANSECT = {"L": "left", "C": "centre", "R": "right"}
-_DATE_TIME_ORIGINAL, _EXIF_IFD = 0x9003, 0x8769
+_DATE_TIME_ORIGINAL, _EXIF_IFD, _MAKE, _MODEL = 0x9003, 0x8769, 0x010F, 0x0110
 
 
-def capture_date(jpeg: bytes) -> str | None:
-    """EXIF DateTimeOriginal as naive local ISO ('2026-03-13T12:37:33'); None if absent.
-    Naive on purpose: trail cameras have no zone, and local photos are matched on the same field."""
+def read_exif(src) -> dict:
+    """{captured_at, make, model} from a path or file object; every field None if unreadable.
+    captured_at is DateTimeOriginal as naive local ISO ('2026-03-13T12:37:33') — naive on purpose:
+    trail cameras have no zone, and flag photos and local photos are matched on the same field."""
+    out = {"captured_at": None, "make": None, "model": None}
     try:
-        raw = Image.open(BytesIO(jpeg)).getexif().get_ifd(_EXIF_IFD).get(_DATE_TIME_ORIGINAL)
-        return datetime.strptime(raw, "%Y:%m:%d %H:%M:%S").isoformat()
-    except (OSError, TypeError, ValueError):
-        return None
+        with Image.open(src) as im:
+            exif = im.getexif()
+            out["make"], out["model"] = exif.get(_MAKE), exif.get(_MODEL)
+            raw = exif.get_ifd(_EXIF_IFD).get(_DATE_TIME_ORIGINAL)
+        out["captured_at"] = datetime.strptime(raw, "%Y:%m:%d %H:%M:%S").isoformat()
+    except Exception:  # truncated file, corrupt EXIF (Pillow raises SyntaxError/struct.error), missing/odd date
+        pass
+    return out
 
 
 LABEL_KEYS = ("wire_ground_points", "flag_to_ground_spans", "flag_vertical_spans", "flag_horizontal_spans")
@@ -47,7 +53,7 @@ def fit(annotation: dict, jpeg: bytes | None) -> dict:
     if jpeg is None:
         row["reason"] = f"{image} is missing from cloud storage — re-upload it in FlagLabel."
         return row
-    row["captured_at"] = capture_date(jpeg)  # dated even when unlabeled, so a fresh re-flag closes the old window
+    row["captured_at"] = read_exif(BytesIO(jpeg))["captured_at"]  # dated even when unlabeled, so a fresh re-flag closes the old window
     data = annotation.get("data") or {}
     if annotation.get("status") != "annotated" or not any(data.get(k) for k in LABEL_KEYS):
         row["reason"] = f"{image} is not labeled yet — label its flags in FlagLabel."
@@ -109,3 +115,23 @@ def cameras(sites: list[str], rows: list[dict]) -> list[dict]:
             reason = dated[-1]["reason"] if dated else None
         out.append({"site": site, "verdict": "red" if reason else "green", "reason": reason, "calibrations": windows})
     return out
+
+
+def window_for(site: str, rows: list[dict], captured_at: str | None) -> tuple[dict | None, str | None]:
+    """Match one local photo to its calibration: the latest dated flag photo of `site` taken at or before
+    `captured_at`. → (calibration row, None) or (None, plain-language reason it is held)."""
+    if captured_at is None:
+        return None, "Photo has no capture date in its EXIF — it cannot be placed in a calibration window."
+    mine = [r for r in rows if r["site"] == site]
+    undated = [r for r in mine if not r["captured_at"]]
+    if undated:  # same rule as the camera verdict: a flag photo that cannot be placed in time may be a re-flag
+        return None, undated[0]["reason"]
+    dated = sorted((r for r in mine if r["captured_at"]), key=lambda r: r["captured_at"])
+    before = [r for r in dated if r["captured_at"] <= captured_at]
+    if not before:
+        day = captured_at[:10]
+        return None, (f"No flag photo of {site} taken on or before {day} — upload and label one in FlagLabel, "
+                      f"or its photos from before {dated[0]['captured_at'][:10]} cannot be measured."
+                      if dated else f"No flag photo of {site} taken on or before {day} — upload and label one in FlagLabel.")
+    row = before[-1]
+    return (row, None) if row["ok"] else (None, row["reason"])

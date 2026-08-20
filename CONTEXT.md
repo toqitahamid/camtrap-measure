@@ -78,6 +78,24 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
 - Red rows are re-fitted on every sync (a re-upload or storage blip fixes
   itself); green rows refit only when the annotation's `updated_at` changes.
 
+## Measurement runs (ticket 05, 2026-08-20)
+
+- Inference boundary = `inference.backend(paths, calibration, method)`, one
+  call per calibration window so a real backend can batch; yields one
+  detection list per photo. The shipped `fake` is deterministic per file name.
+- A photo matches the latest dated flag photo of its folder's camera taken at
+  or before its EXIF timestamp (a photo taken at the re-flag instant belongs
+  to the new window). Held when: no EXIF date, no flag photo before it, the
+  matching window is red, or the camera has an undated flag photo (same rule
+  as the verdict) — the hold reason is the window's own red reason.
+- Results: `photos` keyed by absolute path (EXIF make/model, window used,
+  hold reason); `detections` keyed by (path, idx, method). A measured photo
+  replaces its rows for that method only once the new ones exist (a crash
+  keeps earlier answers); a held photo drops its rows for every method, so a
+  photo can never keep numbers from a window that has since gone red.
+- One run at a time; progress is polled (`GET /api/run`), not streamed — the
+  page stays a dumb poller.
+
 ## Auth
 
 Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS

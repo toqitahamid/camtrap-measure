@@ -1,4 +1,4 @@
-"""Local state: cached login session (JSON file) and the SQLite mirror of cloud data."""
+"""Local state: cached login session (JSON file), the SQLite mirror of cloud data, and measurement results."""
 
 import json
 import os
@@ -20,6 +20,14 @@ create table if not exists calibrations (
     site text not null, image_name text not null, updated_at text,
     captured_at text, ok integer not null, reason text, model text,
     primary key (site, image_name));
+create table if not exists photos (
+    path text primary key, site text not null, captured_at text, make text, model text,
+    calibration_image text, held_reason text, measured_at text not null);
+create table if not exists detections (
+    path text not null, idx integer not null, method text not null,
+    x1 real, y1 real, x2 real, y2 real, species text, confidence real,
+    distance_m real, q05_m real, q95_m real, match_score real,
+    primary key (path, idx, method));
 """
 
 
@@ -119,3 +127,33 @@ def summary() -> dict:
             "annotations": con.execute("select count(*) from annotations").fetchone()[0],
             "sites": con.execute("select count(*) from sites").fetchone()[0],
         }
+
+
+# --- results -----------------------------------------------------------------
+
+def record(photo: dict, method: str, detections: list[dict]) -> None:
+    """One current answer per photo: upsert its row, replace its detections for this method.
+    A held photo (held_reason set) keeps no numbers at all — every method's rows go."""
+    # ponytail: photo key = absolute path; a moved folder simply re-measures.
+    photo = {**photo, "measured_at": datetime.now().astimezone().isoformat(timespec="seconds")}
+    with closing(_db()) as con, con:
+        con.execute("insert or replace into photos (path, site, captured_at, make, model, calibration_image, held_reason, measured_at) "
+                    "values (:path, :site, :captured_at, :make, :model, :calibration_image, :held_reason, :measured_at)", photo)
+        if photo["held_reason"]:
+            con.execute("delete from detections where path=?", (photo["path"],))
+        else:
+            con.execute("delete from detections where path=? and method=?", (photo["path"], method))
+        con.executemany(
+            "insert into detections values (:path, :idx, :method, :x1, :y1, :x2, :y2, :species, :confidence, "
+            ":distance_m, :q05_m, :q95_m, :match_score)",
+            [{**d, "path": photo["path"], "idx": i, "method": method} for i, d in enumerate(detections)],
+        )
+
+
+def detections() -> list[dict]:
+    """Every detection row joined with its photo (camera, timestamp, EXIF make/model, calibration used)."""
+    with closing(_db()) as con:
+        rows = con.execute(
+            "select p.site, p.captured_at, p.make, p.model, p.calibration_image, d.* from detections d "
+            "join photos p on p.path = d.path order by p.site, p.captured_at, d.path, d.method, d.idx").fetchall()
+    return [dict(r) for r in rows]
