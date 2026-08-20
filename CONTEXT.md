@@ -107,7 +107,7 @@ without FlagLabel branding.
 
 ## Open items (not decisions — work)
 
-1. Ticket zero: EXIF-survival check on one SRF Storage image.
+1. ~~Ticket zero: EXIF-survival check~~ RESOLVED 2026-08-20: SRF_CAM08/IMG_3792.JPG downloaded from Storage carries full EXIF (DateTimeOriginal 2026-03-13 12:37:33, Browning BTC-7E). Uploads preserve bytes; windows key on EXIF as designed; no captured_at column needed.
 2. MD-only vs MD+SAM3 accuracy comparison on existing data → sets default method.
 3. Dept hardware facts (GPU model, photo volume) — collect at first install.
 4. Distance-ready export (Q12b) — after first season with a statistician.
