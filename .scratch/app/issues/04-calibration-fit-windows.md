@@ -4,11 +4,11 @@
 
 **Blocked by:** 01 — EXIF survival check; 03 — Read-only sync and login.
 
-**Status:** ready-for-agent
+**Status:** done (2026-08-20)
 
-- [ ] Calibration fit and QC ported from the research repo with their unit tests, source commit pinned
-- [ ] Fit runs automatically as part of Sync for new/changed annotations
-- [ ] Validity window per calibration keyed on flag photo EXIF capture date
-- [ ] Per-camera green/red verdict in the UI; red states the reason and the photo to fix
-- [ ] Cameras list shows calibration date and window for each camera
-- [ ] All behavior tested through the API with a faked Supabase wrapper
+- [x] Calibration fit and QC ported from the research repo with their unit tests, source commit pinned
+- [x] Fit runs automatically as part of Sync for new/changed annotations
+- [x] Validity window per calibration keyed on flag photo EXIF capture date
+- [x] Per-camera green/red verdict in the UI; red states the reason and the photo to fix
+- [x] Cameras list shows calibration date and window for each camera
+- [x] All behavior tested through the API with a faked Supabase wrapper

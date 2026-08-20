@@ -100,6 +100,12 @@ def select_sites(access_token: str) -> list[dict]:
     return _select("sites", access_token, "name", "name")
 
 
-def download_object(access_token: str, path: str, bucket: str = "photos") -> bytes:
-    """Raw bytes of one storage object (flag photo, EXIF intact)."""
-    return _get(f"/storage/v1/object/{bucket}/{path}", access_token).content
+def download_object(access_token: str, path: str, bucket: str = "photos") -> bytes | None:
+    """Raw bytes of one storage object (flag photo, EXIF intact); None if it no longer exists."""
+    r = _send("GET", f"/storage/v1/object/{bucket}/{path}", headers={"Authorization": f"Bearer {access_token}"})
+    if r.status_code == 404:
+        return None
+    if r.status_code == 401:
+        raise AuthError("Session expired — please sign in again")
+    r.raise_for_status()
+    return r.content

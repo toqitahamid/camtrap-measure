@@ -58,6 +58,20 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   naming the flags to label. **Ticket zero: verify EXIF survives Storage upload
   on one SRF image; fallback = `captured_at` column filled at upload.**
 
+## Calibration verdicts (ticket 04, 2026-08-20)
+
+- Fit + QC ported verbatim from `../distance_estimation@6a6eed5` into
+  `calib/`; change the math there first.
+- Research QC is diagnostic, not pass/fail: all 122 research photos have some
+  monotonicity violation and LOO error >1 m somewhere. Red therefore means only
+  a genuinely unusable photo: not labeled, no EXIF date, too few labels, or a
+  flag whose leave-one-out prediction is off by >50% of its label
+  (`LOO_MAX_REL`; 14/122 research photos, each naming a clear outlier such as
+  an "8 m" flag measuring 12.6 m). Tune the constant with real dept feedback.
+- A window closes when the next flag photo of that camera is taken, good or
+  bad — a re-flag may mean a moved camera, so old geometry is never extended
+  past it. Capture dates are naive local time (trail cameras have no zone).
+
 ## Auth
 
 Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS

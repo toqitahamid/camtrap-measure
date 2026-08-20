@@ -59,6 +59,8 @@ def recorded(monkeypatch):
                 json={"access_token": "at", "refresh_token": "rt", "user": {"email": "a@b"}},
             )
         if req.url.path.startswith("/storage/v1/object/"):
+            if req.url.path.endswith("/gone.JPG"):
+                return httpx.Response(404, json={"error": "not_found"})
             return httpx.Response(200, content=b"\xff\xd8jpeg")
         return httpx.Response(200, json=[])
 
@@ -74,8 +76,9 @@ def test_every_data_request_is_a_get(recorded):
     sb.select_annotations("at")
     sb.select_sites("at")
     assert sb.download_object("at", "SRF_CAM08/IMG_3792.JPG") == b"\xff\xd8jpeg"
+    assert sb.download_object("at", "SRF_CAM08/gone.JPG") is None  # deleted in the cloud: caller decides
     data_reqs = [r for r in recorded if not r.url.path.startswith("/auth/")]
-    assert len(data_reqs) == 3
+    assert len(data_reqs) == 4
     assert {r.method for r in data_reqs} == {"GET"}
     assert all(r.headers["authorization"] == "Bearer at" for r in data_reqs)
 

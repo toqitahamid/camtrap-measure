@@ -16,6 +16,10 @@ create table if not exists annotations (
     status text, labeler text, updated_at text, data text,
     primary key (site, image_name));
 create table if not exists meta (key text primary key, value text);
+create table if not exists calibrations (
+    site text not null, image_name text not null, updated_at text,
+    captured_at text, ok integer not null, reason text, model text,
+    primary key (site, image_name));
 """
 
 
@@ -54,8 +58,9 @@ def save_session(s: dict | None) -> None:
 
 # --- mirror ------------------------------------------------------------------
 
-def replace_mirror(annotations: list[dict], sites: list[dict]) -> str:
-    """Atomically replace the local copy of cloud tables; returns the sync time."""
+def replace_mirror(annotations: list[dict], sites: list[dict], fits: list[dict] = ()) -> str:
+    """Atomically replace the local copy of cloud tables and upsert new calibration fits;
+    calibrations of annotations gone from the cloud are dropped. Returns the sync time."""
     # ponytail: full replace, not row upsert — also drops cloud-deleted rows. ~300 rows today.
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     with closing(_db()) as con, con:
@@ -70,6 +75,14 @@ def replace_mirror(annotations: list[dict], sites: list[dict]) -> str:
             ],
         )
         con.executemany("insert into sites values (?)", [(s["name"],) for s in sites])
+        con.executemany(
+            "insert or replace into calibrations values (?,?,?,?,?,?,?)",
+            [(f["site"], f["image_name"], f["updated_at"], f["captured_at"], f["ok"], f["reason"], f["model"])
+             for f in fits],
+        )
+        con.execute(
+            "delete from calibrations where (site, image_name) not in (select site, image_name from annotations)"
+        )
         con.execute("insert or replace into meta values ('last_sync', ?)", (now,))
     return now
 
@@ -83,6 +96,19 @@ def annotations() -> list[dict]:
 def sites() -> list[str]:
     with closing(_db()) as con:
         return [r["name"] for r in con.execute("select name from sites order by name")]
+
+
+def calibration_versions() -> dict[tuple[str, str], str | None]:
+    """{(site, image_name): annotation updated_at it was fitted from} — skip refits of unchanged rows."""
+    with closing(_db()) as con:
+        return {(r["site"], r["image_name"]): r["updated_at"]
+                for r in con.execute("select site, image_name, updated_at from calibrations")}
+
+
+def calibrations() -> list[dict]:
+    with closing(_db()) as con:
+        rows = con.execute("select * from calibrations order by site, image_name").fetchall()
+    return [{**dict(r), "ok": bool(r["ok"])} for r in rows]
 
 
 def summary() -> dict:
