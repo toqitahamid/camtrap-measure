@@ -76,9 +76,9 @@ def replace_mirror(annotations: list[dict], sites: list[dict], fits: list[dict] 
         )
         con.executemany("insert into sites values (?)", [(s["name"],) for s in sites])
         con.executemany(
-            "insert or replace into calibrations values (?,?,?,?,?,?,?)",
-            [(f["site"], f["image_name"], f["updated_at"], f["captured_at"], f["ok"], f["reason"], f["model"])
-             for f in fits],
+            "insert or replace into calibrations values "
+            "(:site, :image_name, :updated_at, :captured_at, :ok, :reason, :model)",
+            fits,
         )
         con.execute(
             "delete from calibrations where (site, image_name) not in (select site, image_name from annotations)"
@@ -99,10 +99,10 @@ def sites() -> list[str]:
 
 
 def calibration_versions() -> dict[tuple[str, str], str | None]:
-    """{(site, image_name): annotation updated_at it was fitted from} — skip refits of unchanged rows."""
+    """{(site, image_name): annotation updated_at} of every green calibration — skip their refits."""
     with closing(_db()) as con:
         return {(r["site"], r["image_name"]): r["updated_at"]
-                for r in con.execute("select site, image_name, updated_at from calibrations")}
+                for r in con.execute("select site, image_name, updated_at from calibrations where ok")}
 
 
 def calibrations() -> list[dict]:

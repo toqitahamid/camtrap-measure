@@ -35,24 +35,35 @@ def capture_date(jpeg: bytes) -> str | None:
         return None
 
 
+LABEL_KEYS = ("wire_ground_points", "flag_to_ground_spans", "flag_vertical_spans", "flag_horizontal_spans")
+
+
 def fit(annotation: dict, jpeg: bytes | None) -> dict:
-    """→ {site, image_name, updated_at, captured_at, ok, reason, model}. jpeg=None: not in storage."""
+    """→ {site, image_name, updated_at, captured_at, ok, reason, model}. jpeg=None: not in storage.
+    Never raises: a broken row becomes a red reason, not a failed sync."""
     image = annotation["image_name"]
     row = {"site": annotation["site"], "image_name": image, "updated_at": annotation.get("updated_at"),
            "captured_at": None, "ok": False, "reason": None, "model": None}
-    data = annotation.get("data") or {}
-    labeled = any(data.get(k) for k in ("wire_ground_points", "flag_to_ground_spans", "flag_vertical_spans"))
-    if annotation.get("status") != "annotated" or not labeled:
-        row["reason"] = f"{image} is not labeled yet — label its flags in FlagLabel."
-        return row
     if jpeg is None:
         row["reason"] = f"{image} is missing from cloud storage — re-upload it in FlagLabel."
         return row
-    row["captured_at"] = capture_date(jpeg)
+    row["captured_at"] = capture_date(jpeg)  # dated even when unlabeled, so a fresh re-flag closes the old window
+    data = annotation.get("data") or {}
+    if annotation.get("status") != "annotated" or not any(data.get(k) for k in LABEL_KEYS):
+        row["reason"] = f"{image} is not labeled yet — label its flags in FlagLabel."
+        return row
     if row["captured_at"] is None:
         row["reason"] = f"Could not read the capture date from {image} — re-upload the original camera file in FlagLabel."
         return row
-    photo = from_annotation({**data, "site": annotation["site"], "image": image})
+    try:
+        return _judge(row, data, image)
+    except Exception as e:  # malformed labels (missing keys, 0 m distance, ...) — one row must not sink the sync
+        row["reason"] = f"{image} could not be fitted ({type(e).__name__}: {e}) — relabel it in FlagLabel."
+        return row
+
+
+def _judge(row: dict, data: dict, image: str) -> dict:
+    photo = from_annotation({**data, "site": row["site"], "image": image})
     model = ModelB.fit(photo)
     if not model.ok:
         n, nd = len(photo.ground), len({g.dist for g in photo.ground})
@@ -61,6 +72,7 @@ def fit(annotation: dict, jpeg: bytes | None) -> dict:
         return row
     # A mislabeled flag also skews its neighbours' held-out predictions, so among the
     # flags over the relative threshold, blame the one furthest off in metres.
+    # ponytail: serial LOO (~0.2 s/photo, ~1 min first sync of 300) inside the request; thread pool if it drags.
     suspects = [r for r in loo_cv(photo) if r["pred_b"] is not None and abs(r["err_b"]) / r["dist"] > LOO_MAX_REL]
     if suspects:
         worst = max(suspects, key=lambda r: abs(r["err_b"]))
@@ -84,10 +96,16 @@ def cameras(sites: list[str], rows: list[dict]) -> list[dict]:
         windows = [{"image_name": c["image_name"], "captured_at": c["captured_at"],
                     "window_end": next((d for d in dates[i + 1:] if d), None) if c["captured_at"] else None,
                     "ok": c["ok"], "reason": c["reason"]} for i, c in enumerate(cals)]
-        bad = [w for w in windows if not w["ok"]]
+        # Verdict = the governing window (latest dated photo: it is what new photos match), plus any
+        # undated photo (cannot be placed in time, so it must be fixed). Older bad windows stay red in
+        # the row list only — they hold photos from their own period, not the camera.
+        dated = [w for w in windows if w["captured_at"]]
+        undated_bad = [w for w in windows if not w["captured_at"] and not w["ok"]]
         if not cals:
             reason = f"No flag photo for {site} in FlagLabel — upload and label one."
+        elif undated_bad:
+            reason = undated_bad[0]["reason"]
         else:
-            reason = bad[-1]["reason"] if bad else None  # latest problem first: it governs new photos
+            reason = dated[-1]["reason"] if dated else None
         out.append({"site": site, "verdict": "red" if reason else "green", "reason": reason, "calibrations": windows})
     return out

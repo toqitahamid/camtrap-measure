@@ -75,7 +75,10 @@ def cloud(monkeypatch, tmp_path):
     def download(tok, path, bucket="photos"):
         guard()
         state["downloads"].append(path)
-        return state["photos"].get(path)  # None: not in storage
+        got = state["photos"].get(path)  # None: not in storage
+        if isinstance(got, Exception):
+            raise got
+        return got
 
     monkeypatch.setattr(api.sb, "download_object", download)
     return state
@@ -277,5 +280,53 @@ def test_deleted_annotation_drops_its_calibration(cloud, synced):
 
 def test_offline_sync_keeps_verdicts(cloud, synced):
     cloud["offline"] = True
+    synced.post("/api/sync")
+    assert cameras(synced)["TON_CAM02"]["verdict"] == "green"
+
+
+def test_latest_good_window_governs_even_if_an_older_one_is_bad(cloud, synced):
+    # older photo (March) mislabeled; camera re-flagged and labeled cleanly in July
+    cloud["annotations"] = [
+        {**ANN, "data": flag_photo_data(relabel={("C", 4.0): 30}), "updated_at": "2026-07-01T00:00:00+00:00"},
+        {**ANN, "image_name": "IMG_7000.JPG", "storage_path": "TON_CAM02/IMG_7000.JPG", "data": flag_photo_data(image="IMG_7000.JPG")},
+    ]
+    cloud["photos"]["TON_CAM02/IMG_7000.JPG"] = jpeg("2026:07:04 09:00:00")
+    synced.post("/api/sync")
+    cam = cameras(synced)["TON_CAM02"]
+    assert cam["verdict"] == "green" and cam["reason"] is None
+    assert [c["ok"] for c in cam["calibrations"]] == [False, True]  # old window still marked for fixing
+
+
+def test_unlabeled_reflag_photo_closes_the_window_and_governs(cloud, synced):
+    cloud["annotations"].append({**ANN, "image_name": "IMG_7000.JPG", "storage_path": "TON_CAM02/IMG_7000.JPG",
+                                 "status": "empty", "data": None})
+    cloud["photos"]["TON_CAM02/IMG_7000.JPG"] = jpeg("2026:07:04 09:00:00")
+    synced.post("/api/sync")
+    cam = cameras(synced)["TON_CAM02"]
+    assert cam["verdict"] == "red" and "IMG_7000.JPG" in cam["reason"] and "not labeled" in cam["reason"]
+    assert cam["calibrations"][0]["window_end"] == "2026-07-04T09:00:00"
+
+
+def test_malformed_annotation_is_red_not_a_failed_sync(cloud, synced):
+    broken = {k: v for k, v in flag_photo_data().items() if k != "image_w"}  # KeyError inside the fit
+    cloud["annotations"] = [{**ANN, "data": broken, "updated_at": "2026-07-01T00:00:00+00:00"}]
+    r = synced.post("/api/sync")
+    assert r.status_code == 200 and r.json()["ok"] is True
+    cam = cameras(synced)["TON_CAM02"]
+    assert cam["verdict"] == "red" and "IMG_5304.JPG" in cam["reason"] and "could not" in cam["reason"]
+
+
+def test_storage_error_on_one_photo_does_not_fail_sync(cloud, synced):
+    cloud["photos"]["TON_CAM02/IMG_5304.JPG"] = RuntimeError("503 from storage")
+    cloud["annotations"] = [{**ANN, "updated_at": "2026-07-01T00:00:00+00:00"}]
+    assert synced.post("/api/sync").status_code == 200
+    assert cameras(synced)["TON_CAM02"]["verdict"] == "red"
+
+
+def test_red_photo_is_rechecked_next_sync_without_a_relabel(cloud, synced):
+    cloud["annotations"].append({**ANN, "image_name": "IMG_9999.JPG", "storage_path": "TON_CAM02/IMG_9999.JPG"})
+    synced.post("/api/sync")
+    assert "storage" in cameras(synced)["TON_CAM02"]["reason"]
+    cloud["photos"]["TON_CAM02/IMG_9999.JPG"] = jpeg("2026:07:04 09:00:00")  # tech re-uploaded it
     synced.post("/api/sync")
     assert cameras(synced)["TON_CAM02"]["verdict"] == "green"

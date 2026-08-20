@@ -66,10 +66,12 @@ def refresh(refresh_token: str) -> dict:
     return _token("refresh_token", refresh_token=refresh_token)
 
 
-def _get(path: str, access_token: str, **params) -> httpx.Response:
+def _get(path: str, access_token: str, params: dict | None = None, missing_ok: bool = False) -> httpx.Response | None:
     r = _send("GET", path, params=params, headers={"Authorization": f"Bearer {access_token}"})
     if r.status_code == 401:
         raise AuthError("Session expired — please sign in again")
+    if r.status_code == 404 and missing_ok:
+        return None
     r.raise_for_status()
     return r
 
@@ -79,7 +81,7 @@ def _select(table: str, access_token: str, select: str, order: str) -> list[dict
     while True:
         page = _get(
             f"/rest/v1/{table}", access_token,
-            select=select, order=order, limit=_PAGE, offset=len(rows),
+            {"select": select, "order": order, "limit": _PAGE, "offset": len(rows)},
         ).json()
         rows += page
         if len(page) < _PAGE:
@@ -102,10 +104,5 @@ def select_sites(access_token: str) -> list[dict]:
 
 def download_object(access_token: str, path: str, bucket: str = "photos") -> bytes | None:
     """Raw bytes of one storage object (flag photo, EXIF intact); None if it no longer exists."""
-    r = _send("GET", f"/storage/v1/object/{bucket}/{path}", headers={"Authorization": f"Bearer {access_token}"})
-    if r.status_code == 404:
-        return None
-    if r.status_code == 401:
-        raise AuthError("Session expired — please sign in again")
-    r.raise_for_status()
-    return r.content
+    r = _get(f"/storage/v1/object/{bucket}/{path}", access_token, missing_ok=True)
+    return None if r is None else r.content

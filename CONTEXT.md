@@ -68,9 +68,15 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   flag whose leave-one-out prediction is off by >50% of its label
   (`LOO_MAX_REL`; 14/122 research photos, each naming a clear outlier such as
   an "8 m" flag measuring 12.6 m). Tune the constant with real dept feedback.
-- A window closes when the next flag photo of that camera is taken, good or
-  bad — a re-flag may mean a moved camera, so old geometry is never extended
-  past it. Capture dates are naive local time (trail cameras have no zone).
+- A window closes when the next flag photo of that camera is taken, good, bad
+  or not yet labeled — a re-flag may mean a moved camera, so old geometry is
+  never extended past it. Capture dates are naive local time (trail cameras
+  have no zone).
+- The camera verdict is the governing window (latest dated flag photo) plus
+  any undated photo; an older bad window stays red in its own row only, since
+  it holds photos from its period without making the camera un-ready now.
+- Red rows are re-fitted on every sync (a re-upload or storage blip fixes
+  itself); green rows refit only when the annotation's `updated_at` changes.
 
 ## Auth
 

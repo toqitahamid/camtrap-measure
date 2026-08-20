@@ -51,15 +51,19 @@ def logout():
 
 
 def _fit_changed(annotations: list[dict], token: str) -> list[dict]:
-    """Fit every annotation that is new or relabeled since the last sync (EXIF read from storage)."""
-    known = store.calibration_versions()
+    """Fit every annotation that is new, relabeled, or still red since the last sync (EXIF read from storage)."""
+    known = store.calibration_versions()  # green rows only: red ones are re-checked every sync (re-uploads)
     fits = []
     for a in annotations:
         if known.get((a["site"], a["image_name"]), "") == a.get("updated_at"):
             continue
-        jpeg = None
-        if a.get("status") == "annotated" and a.get("storage_path"):
-            jpeg = sb.download_object(token, a["storage_path"])  # None: gone from storage → red, not a crash
+        try:
+            jpeg = sb.download_object(token, a["storage_path"]) if a.get("storage_path") else None
+        except (sb.Offline, sb.AuthError):
+            raise
+        except Exception as e:  # storage 5xx/403 on one photo: red row, sync goes on
+            fits.append({**calibration.fit(a, None), "reason": f"{a['image_name']} could not be fetched from cloud storage ({e}) — try Sync again later."})
+            continue
         fits.append(calibration.fit(a, jpeg))
     return fits
 

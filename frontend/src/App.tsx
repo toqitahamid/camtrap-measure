@@ -135,9 +135,9 @@ export default function App() {
                       </span>
                     </td>
                     <td style={{ padding: '0.4rem 0' }}>
-                      {c.calibrations.map((k) => (
-                        <div key={k.image_name} style={{ color: k.ok ? undefined : 'crimson' }}>
-                          {k.image_name} · {day(k.captured_at)} → {k.window_end ? day(k.window_end) : 'now'}
+                      {c.calibrations.map((cal) => (
+                        <div key={cal.image_name} style={{ color: cal.ok ? undefined : 'crimson' }}>
+                          {cal.image_name} · {day(cal.captured_at)} → {cal.window_end ? day(cal.window_end) : 'now'}
                         </div>
                       ))}
                       {c.reason && <div style={{ color: 'crimson' }}>{c.reason}</div>}
