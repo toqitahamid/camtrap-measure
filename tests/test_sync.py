@@ -241,3 +241,11 @@ def test_red_photo_is_rechecked_next_sync_without_a_relabel(cloud, synced):
     cloud["photos"]["TON_CAM02/IMG_9999.JPG"] = jpeg("2026:07:04 09:00:00")  # tech re-uploaded it
     synced.post("/api/sync")
     assert cameras(synced)["TON_CAM02"]["verdict"] == "green"
+
+
+def test_sync_caches_the_flag_photo_for_alignment(cloud, synced):
+    p = store.ref_path("TON_CAM02", "IMG_5304.JPG")
+    assert p.read_bytes() == cloud["photos"]["TON_CAM02/IMG_5304.JPG"]
+    p.unlink()
+    synced.post("/api/sync")  # green row, unchanged annotation — still refetched because the file is gone
+    assert p.exists() and cloud["downloads"] == ["TON_CAM02/IMG_5304.JPG"] * 2

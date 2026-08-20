@@ -38,7 +38,7 @@ def results(c: TestClient) -> list[dict]:
 
 
 def expected_detections(names: list[str]) -> int:
-    return sum(len(d) for d in inference.fake([Path(n) for n in names], {}, "md"))
+    return sum(len(r.detections) for r in inference.fake([Path(n) for n in names], {}, "md"))
 
 
 # --- folder validation ----------------------------------------------------------
@@ -80,6 +80,7 @@ def test_run_writes_one_row_per_detection_with_exif_make_model(synced, tmp_path)
     assert r["make"] == "Browning" and r["model"] == "BTC-7E" and r["calibration_image"] == "IMG_5304.JPG"
     assert {"species", "confidence", "distance_m", "q05_m", "q95_m", "match_score", "x1", "y1", "x2", "y2"} <= r.keys()
     assert r["q05_m"] <= r["distance_m"] <= r["q95_m"]
+    assert isinstance(r["match_score"], int)  # per photo: homography inliers against the flag photo
 
 
 def test_progress_reports_counts_and_time_estimate(synced, tmp_path, monkeypatch):
@@ -203,6 +204,31 @@ def test_corrupt_photo_is_held_not_a_crashed_run(synced, tmp_path):
     d = folder(tmp_path, photos={"IMG_0005.JPG": jpeg(IN_WINDOW)[:40], "IMG_0006.JPG": jpeg(IN_WINDOW)})
     st = run(synced, d)
     assert st["status"] == "done" and st["held"] == 1 and st["detections"] == expected_detections(["IMG_0006.JPG"])
+
+
+def test_photo_is_held_until_its_flag_photo_is_on_disk(synced, tmp_path):
+    from camtrap_measure import store
+    store.ref_path("TON_CAM02", "IMG_5304.JPG").unlink()
+    st = run(synced, folder(tmp_path))
+    assert st["held"] == 1 and results(synced) == []
+    assert "IMG_5304.JPG" in st["held_reasons"][0]["reason"] and "Sync" in st["held_reasons"][0]["reason"]
+    synced.post("/api/sync")  # refetches the missing flag photo
+    assert run(synced, folder(tmp_path / "again"))["held"] == 0
+
+
+def test_backend_gets_the_calibration_row_and_its_flag_photo(synced, tmp_path, monkeypatch):
+    seen = {}
+
+    def spy(paths, calibration, method):
+        seen.update(calibration)
+        yield from inference.fake(paths, calibration, method)
+
+    monkeypatch.setattr(api.inference, "backend", spy)
+    run(synced, folder(tmp_path))
+    assert seen["site"] == "TON_CAM02" and seen["image_name"] == "IMG_5304.JPG"
+    assert Path(seen["ref_path"]).read_bytes()[:2] == b"\xff\xd8"  # the cached flag photo
+    import json
+    assert json.loads(seen["model"])  # the fitted ModelB
 
 
 def test_relative_folder_path_keys_the_same_photo(synced, tmp_path, monkeypatch):

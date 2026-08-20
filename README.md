@@ -32,8 +32,8 @@ to watch the progress display.
 ### Model weights
 
 Weights live in the private Hugging Face repo `toqi/camtrap-measure-weights`
-(`manifest.json` + MegaDetector v1000 + SpeciesNet v4.0.3a; staged and pushed by
-`scripts/upload_weights.py`). At every start the engine compares the local copy
+(`manifest.json` + MegaDetector v1000 + SpeciesNet v4.0.3a + the paper's unified
+distance net + RoMa/DINOv2; staged and pushed by `scripts/upload_weights.py`). At every start the engine compares the local copy
 in `~/.camtrap-measure/weights/` with the hub and fetches only what changed
 (resumable); offline it uses the cached copy and says so. The read token comes
 from `HF_TOKEN` or `~/.camtrap-measure/config.json` (`{"hf_token": "..."}`,
@@ -43,8 +43,9 @@ folder and skips the hub. Bump `VERSION` in the upload script when a file change
 ### GPU smoke test (HPC)
 
 `tests/test_gpu_smoke.py` runs the real models through the API on one deer photo
-and is skipped unless CUDA, the extra, `CAMTRAP_WEIGHTS_DIR` and
-`CAMTRAP_SMOKE_PHOTO` are all present. On DeltaAI: `scripts/hpc_env.sh` once
+(detection, species, aligned-reference distance with its 90% band, match score)
+and is skipped unless CUDA, the extra, `CAMTRAP_WEIGHTS_DIR`, `CAMTRAP_SMOKE_PHOTO`
+and `CAMTRAP_SMOKE_FLAG` (the camera's flag photo + `.json`) are all present. On DeltaAI: `scripts/hpc_env.sh` once
 (layered venv on the module torch), then `sbatch scripts/gpu_smoke.sbatch`.
 On the department's Windows machine torch comes from the installer (ticket 12),
 not from `uv sync` — the lockfile deliberately does not pin a CUDA build.

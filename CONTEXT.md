@@ -125,6 +125,38 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   download + no-op recheck work from the app venv; GPU smoke passed on a GH200
   (`sbatch scripts/gpu_smoke.sbatch`, job 2988630, 34 s).
 
+## Real distance (ticket 07, 2026-08-20)
+
+- Port of the paper's deploy path, pinned to `../distance_estimation@6a6eed5`
+  in `distance.py`: RoMa (outdoor, pure-torch corr) matches the window's flag
+  photo to the target (both banner-cropped at row 995/1080), MAGSAC homography
+  target→reference, a stride-4 target grid warped into the reference and read
+  through the reference ModelB gives D_R (2–18 m, else 0), 7-channel input
+  [target RGB, reference RGB, D_R/20] at 518² into the unified DA-V2 net,
+  [q05, q50, q95] upsampled to the photo and read as a 5×5 nanmedian at each
+  box's bottom-centre. Raw band, no conformal widening (paper R4 rollfix).
+- Reference = the flag photo of the matched calibration window, cached at
+  sync under `~/.camtrap-measure/refs/<site>/<image>`; a green calibration
+  whose file is missing is refetched on the next sync, and a photo whose flag
+  photo is not on disk is held ("run Sync"). Reference tensors are computed
+  once per calibration per engine lifetime (RoMa features are not cacheable
+  through its API; ~1 s/photo on a GH200 is the ceiling).
+- `match_score` = homography inlier count, stored per photo; below
+  `distance.MIN_INLIERS` (15, the published gate) the photo is suspicious
+  (misfiled / moved camera). Empty frames skip alignment (`match_score` NULL).
+  The warp/displacement ratio half of the research gate is dropped: on RoMa it
+  only produced false abstentions (transport/gate_roma.py).
+- Weights manifest 2026.08.20b adds `unified/` (paper checkpoint
+  `ckpt_unified_scratch_split2_rollfix/best`, 1.3 GB), `roma/roma_outdoor.pth`
+  and `roma/dinov2_vitl14_pretrain.pth`. The [inference] extra gains
+  transformers≥5, safetensors, kornia, einops, loguru and `romatch` pinned to
+  RoMa@77f8d68 (HPC installs it --no-deps: poselib has no aarch64 wheel).
+- Unified net runs bf16 where supported, else fp16; RoMa keeps its fp16 default.
+- Verified 2026-08-20 on a GH200 (`sbatch scripts/gpu_smoke.sbatch`): MAS_CAM22
+  deer photo against its 2025-12-20 flag photo → white-tailed deer 0.968,
+  6.7 m [4.9, 9.2], ~500 inliers; 60–95 s including model load. `match_score`
+  varies a few % run to run (RoMa samples matches stochastically).
+
 ## Auth
 
 Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS

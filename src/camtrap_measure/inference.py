@@ -1,11 +1,12 @@
 """The inference boundary: photos in, detections out. Everything GPU/torch lives behind `backend`.
 
 `backend(paths, calibration, method)` takes the photos of one calibration window (so a real
-implementation can batch them), the window's fitted calibration (`ModelB.to_dict()`), and the
-method name; it yields one `list[Detection]` per path, in order.
+implementation can batch them), the window's calibration row ({site, image_name, model: ModelB
+json, ref_path: the flag photo on disk}), and the method name; it yields one `PhotoResult` per
+path, in order: the animals found plus the photo's alignment score against the flag photo.
 
 Two implementations: `fake` (deterministic per file name; ships so the app runs and demos without
-a GPU) and `Real` (MegaDetector boxes → SpeciesNet species; distance comes with ticket 07).
+a GPU) and `Real` (MegaDetector boxes → SpeciesNet species → RoMa-aligned unified net distance).
 `warmup()` picks one at engine start and records what it chose in `state` for the status line.
 """
 
@@ -18,7 +19,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import weights
+from . import distance, weights
 
 METHODS = {"md": "MegaDetector (fast)", "sam3": "MegaDetector + SAM3 (precise, slower)"}
 SPECIES = ["white-tailed deer", "white-tailed deer", "white-tailed deer", "raccoon", "unsure"]
@@ -36,13 +37,18 @@ class Detection:
     y2: float
     species: str
     confidence: float
-    distance_m: float | None
+    distance_m: float | None  # None: the photo did not align to its flag photo, or no ground under the animal
     q05_m: float | None
     q95_m: float | None
-    match_score: float | None  # RoMa alignment to the flag reference; low = misfiled / moved camera
 
 
-def fake(paths: list[Path], calibration: dict, method: str) -> Iterator[list[Detection]]:
+@dataclass
+class PhotoResult:
+    detections: list[Detection]
+    match_score: int | None  # homography inliers against the flag photo; < distance.MIN_INLIERS = misfiled / moved camera
+
+
+def fake(paths: list[Path], calibration: dict, method: str) -> Iterator[PhotoResult]:
     """Deterministic per file name, so tests and demos get stable numbers."""
     for p in paths:
         rng = random.Random(p.name)
@@ -51,10 +57,10 @@ def fake(paths: list[Path], calibration: dict, method: str) -> Iterator[list[Det
             d = rng.uniform(3, 25)
             x, y, w = rng.uniform(0, 0.7), rng.uniform(0.3, 0.7), rng.uniform(0.1, 0.3)
             dets.append(Detection(x, y, x + w, min(1, y + w * 0.8), rng.choice(SPECIES), rng.uniform(0.4, 0.99),
-                                  round(d, 2), round(d * 0.85, 2), round(d * 1.2, 2), rng.uniform(0.5, 0.99)))
+                                  round(d, 2), round(d * 0.85, 2), round(d * 1.2, 2)))
         if FAKE_DELAY_S:
             time.sleep(FAKE_DELAY_S)
-        yield dets
+        yield PhotoResult(dets, rng.choice([9, 60, 180, 320]) if dets else None)  # 9 < MIN_INLIERS: a few photos look misfiled
 
 
 def species_label(cls: str, score: float) -> str:
@@ -74,9 +80,9 @@ def _is_oom(e: Exception) -> bool:
 
 
 class Real:
-    """MegaDetector animal boxes, SpeciesNet species per box. Loaded once, kept resident.
-    FP16 via autocast on CUDA; SpeciesNet batch size probed against the VRAM actually free,
-    then halved on any out-of-memory during a run."""
+    """MegaDetector animal boxes, SpeciesNet species per box, RoMa-aligned unified-net distance at each
+    box's ground contact. Loaded once, kept resident. FP16 via autocast on CUDA; SpeciesNet batch size
+    probed against the VRAM actually free, then halved on any out-of-memory during a run."""
 
     def __init__(self, weights_dir: Path):
         import numpy as np
@@ -91,6 +97,7 @@ class Real:
         manifest = json.loads((weights_dir / "manifest.json").read_text())
         self.md = load_detector(str(weights_dir / manifest["megadetector"]), force_cpu=self.device == "cpu")
         self.sn = SpeciesNetClassifier(str(weights_dir / manifest["speciesnet"]), device=self.device)
+        self.dist = distance.Distance(weights_dir, self.device)
         if self.device == "cuda":
             gb = torch.cuda.get_device_properties(0).total_memory / 2**30
             if gb < VRAM_FLOOR_GB:
@@ -117,7 +124,7 @@ class Real:
                 self.torch.cuda.empty_cache()
         return 1
 
-    def __call__(self, paths: list[Path], calibration: dict, method: str) -> Iterator[list[Detection]]:
+    def __call__(self, paths: list[Path], calibration: dict, method: str) -> Iterator[PhotoResult]:
         from PIL import Image
 
         # ponytail: serial decode + one MegaDetector call per photo; thread-prefetch JPEG decode and
@@ -127,14 +134,21 @@ class Real:
                 im = im.convert("RGB")
             with self.torch.no_grad(), self._autocast():
                 out = self.md.generate_detections_one_image(self.np.array(im), image_id=p.name, detection_threshold=MD_CONF)
-            boxes = [d for d in out.get("detections", []) if str(d["category"]) == "1"]  # 1 = animal
-            names = self._species(im, [d["bbox"] for d in boxes])
+            animals = [d for d in out.get("detections", []) if str(d["category"]) == "1"]  # 1 = animal
+            if not animals:
+                # ponytail: empty frames skip alignment (most of a season); align them too if the
+                # moved-camera alarm should fire before the first animal shows up.
+                yield PhotoResult([], None)
+                continue
+            boxes = [d["bbox"] for d in animals]
+            names = self._species(im, boxes)
+            quantiles, inliers = self.dist.read(im, calibration, [(x + w / 2, y + h) for x, y, w, h in boxes])
             dets = []
-            for d, name in zip(boxes, names):
+            for d, name, q in zip(animals, names, quantiles):
                 x, y, w, h = d["bbox"]
-                # ponytail: distance/interval/match score are None until ticket 07 wires the unified net + RoMa.
-                dets.append(Detection(x, y, x + w, y + h, name, float(d["conf"]), None, None, None, None))
-            yield dets
+                q05, q50, q95 = q if q else (None, None, None)
+                dets.append(Detection(x, y, x + w, y + h, name, float(d["conf"]), q50, q05, q95))
+            yield PhotoResult(dets, inliers)
 
     def _species(self, im, boxes: list[list[float]]) -> list[str]:
         """One SpeciesNet crop per box (relative xywh), classified in VRAM-sized batches."""

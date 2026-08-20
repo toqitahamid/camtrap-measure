@@ -19,8 +19,14 @@ camtrap-measure = "camtrap_measure.main:main"
 
 [project.optional-dependencies]
 inference = [
+    "einops>=0.8.2",
+    "kornia>=0.8.3",
+    "loguru>=0.7.3",
     "megadetector",
+    "romatch",
+    "safetensors>=0.8.0",
     "speciesnet",
+    "transformers>=5",
 ]
 
 [dependency-groups]
@@ -35,3 +41,6 @@ packages = ["src/camtrap_measure"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+romatch = { git = "https://github.com/Parskatt/RoMa.git", rev = "77f8d68803526dcddfd9b7a46bc76125bdc25f15" }

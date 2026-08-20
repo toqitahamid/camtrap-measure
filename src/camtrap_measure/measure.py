@@ -4,7 +4,6 @@ window by its EXIF timestamp, stream everything with a window through the infere
 One run at a time (one GPU machine); progress lives in `current` and is polled by the UI.
 """
 
-import json
 import threading
 import time
 from collections import Counter
@@ -73,6 +72,8 @@ def _work(run: dict, photos: list[Path]) -> None:
         for p in photos:  # pass 1: EXIF + window match; held photos are finished here and never get numbers
             ex = calibration.read_exif(p)
             cal, reason = calibration.window_for(site, rows, ex["captured_at"])
+            if cal and not store.ref_path(site, cal["image_name"]).exists():
+                cal, reason = None, f"The flag photo {cal['image_name']} is not on this computer yet — run Sync, then measure again."
             photo = {"path": str(p), "site": site, **ex, "held_reason": reason,
                      "calibration_image": cal["image_name"] if cal else None}
             if cal:
@@ -84,11 +85,11 @@ def _work(run: dict, photos: list[Path]) -> None:
             run["done"] += 1
             run["held_reasons"] = [{"reason": r, "count": n} for r, n in held.most_common()]
         for cal, batch in groups.values():  # pass 2: one backend call per window so real models can batch
-            model = json.loads(cal["model"])
-            results = inference.backend([p for p, _ in batch], model, method)
-            for (_, photo), dets in zip(batch, results, strict=True):  # a photo's old rows go only once its new ones exist
-                store.record(photo, method, [asdict(d) for d in dets])
-                run["detections"] += len(dets)
+            cal = {**cal, "ref_path": str(store.ref_path(site, cal["image_name"]))}
+            results = inference.backend([p for p, _ in batch], cal, method)
+            for (_, photo), res in zip(batch, results, strict=True):  # a photo's old rows go only once its new ones exist
+                store.record({**photo, "match_score": res.match_score}, method, [asdict(d) for d in res.detections])
+                run["detections"] += len(res.detections)
                 run["done"] += 1
         outcome = ("done", None)
     except Exception as e:

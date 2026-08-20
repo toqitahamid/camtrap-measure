@@ -1,7 +1,8 @@
 """Stage the model weights folder and (optionally) upload it to the private Hugging Face repo.
 
-Run by the researcher, never by the app. Sources are the research caches on the HPC:
-MegaDetector v1000 from the HF hub cache, SpeciesNet v4.0.3a from the kagglehub cache.
+Run by the researcher, never by the app. Sources are the research caches on the HPC: MegaDetector v1000 from the HF hub cache, SpeciesNet
+v4.0.3a from the kagglehub cache, the paper checkpoint `ckpt_unified_scratch_split2_rollfix/best`
+from the research repo, RoMa outdoor + DINOv2 ViT-L/14 from the torch hub cache.
 
     python scripts/upload_weights.py --stage /path/to/folder            # build the folder only
     python scripts/upload_weights.py --stage /path/to/folder --upload   # ...and push it to REPO
@@ -18,7 +19,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from camtrap_measure.weights import REPO  # noqa: E402  one source of truth for the repo id
 
-VERSION = "2026.08.20"
+VERSION = "2026.08.20b"
+RESEARCH = Path("/work/nvme/bgte/tsarker/research/distance_estimation")
+UNIFIED = RESEARCH / "finetune/ckpt_unified_scratch_split2_rollfix/best"  # paper tab:main checkpoint, seed 1
+TORCH_HUB = Path("/work/nvme/bgte/tsarker/caches/torch/hub/checkpoints")
 MD = Path("/work/nvme/bgte/tsarker/hf_cache/hub/models--agentmorris--megadetector/snapshots/"
           "222d40e2cf24749c5ce3e67f2f3deb39df30d181/md_v1000.0.0-redwood.pt")
 SN = Path("/work/nvme/bgte/tsarker/caches/kagglehub/models/google/speciesnet/pyTorch/v4.0.3a/1")
@@ -32,6 +36,9 @@ Fetched by the CamTrap Measure desktop app at startup via `manifest.json`.
 - `megadetector/md_v1000.0.0-redwood.pt` — MegaDetector v1000 (agentmorris/megadetector, MIT).
 - `speciesnet/` — SpeciesNet v4.0.3a always-crop classifier (google/speciesnet, Apache-2.0).
   Its `info.json` points the detector entry at the MegaDetector file so nothing else is downloaded.
+- `unified/` — the paper's unified distance+CQR net (Depth-Anything-V2-Large backbone, 7-channel
+  input, [q05, q50, q95] output); `ckpt_unified_scratch_split2_rollfix/best` of the research repo.
+- `roma/` — RoMa outdoor (Edstedt et al., MIT) and its DINOv2 ViT-L/14 backbone (Meta, Apache-2.0).
 """
 
 
@@ -46,8 +53,15 @@ def stage(out: Path) -> None:
         shutil.copy2(SN / info[key], sn / info[key])
     info["detector"] = f"../megadetector/{MD.name}"  # a local path: ModelInfo only downloads http(s) entries
     (sn / "info.json").write_text(json.dumps(info, indent=2))
+    (out / "unified").mkdir(exist_ok=True)
+    for f in ("config.json", "model.safetensors"):
+        shutil.copy2(UNIFIED / f, out / "unified" / f)
+    (out / "roma").mkdir(exist_ok=True)
+    for f in ("roma_outdoor.pth", "dinov2_vitl14_pretrain.pth"):
+        shutil.copy2(TORCH_HUB / f, out / "roma" / f)
     (out / "manifest.json").write_text(json.dumps(
-        {"version": VERSION, "megadetector": f"megadetector/{MD.name}", "speciesnet": "speciesnet"}, indent=2))
+        {"version": VERSION, "megadetector": f"megadetector/{MD.name}", "speciesnet": "speciesnet",
+         "unified": "unified", "roma": "roma/roma_outdoor.pth", "dinov2": "roma/dinov2_vitl14_pretrain.pth"}, indent=2))
     (out / "README.md").write_text(README)
     print(f"staged {VERSION} in {out}")
 

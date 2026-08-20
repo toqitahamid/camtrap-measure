@@ -74,6 +74,8 @@ def _fit_changed(annotations: list[dict], token: str) -> list[dict]:
         except Exception as e:  # storage 5xx/403 on one photo: red row, sync goes on
             fits.append({**calibration.fit(a, None), "reason": f"{a['image_name']} could not be fetched from cloud storage ({e}) — try Sync again later."})
             continue
+        if jpeg:
+            store.save_ref(a["site"], a["image_name"], jpeg)  # the distance net aligns every photo to this flag photo
         fits.append(calibration.fit(a, jpeg))
     return fits
 

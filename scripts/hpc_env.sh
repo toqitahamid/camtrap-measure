@@ -14,6 +14,10 @@ source "$ENV/bin/activate"
 pip install -q megadetector pytest
 pip install -q --no-deps speciesnet onnx2torch
 pip install -q absl-py cloudpathlib kagglehub reverse_geocoder humanfriendly yolov5
+# ticket 07: unified net (transformers>=5 shadows the module's 4.57, which refuses huggingface-hub 1.x)
+# and RoMa without its training-only deps (wandb, h5py, albumentations, poselib: no aarch64 wheel)
+pip install -q "transformers>=5" safetensors einops kornia loguru
+pip install -q --no-deps "git+https://github.com/Parskatt/RoMa.git@77f8d68803526dcddfd9b7a46bc76125bdc25f15"
 pip install -q -e "$REPO"
 python - <<'PY'
 import torch, megadetector, speciesnet, fastapi, camtrap_measure
