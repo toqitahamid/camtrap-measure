@@ -187,6 +187,26 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   run-to-run spread is larger than the method gap and is the thing to pin down before
   the comparison that sets the default (fixed seed, or matches averaged over draws).
 
+## Summary, gallery, export (ticket 09, 2026-08-20)
+
+- `report.py` is a pure view over the store; nothing is stored about suspicion, it is
+  recomputed from the row (`report.reasons`): match_score NULL (no alignment) or
+  < `distance.MIN_INLIERS`; confidence < `report.LOW_CONF` (0.5, tune with the first
+  season); species "unsure"; aligned but no ground under the animal. Held photos join the
+  gallery with their hold reason. Every reason names its threshold.
+- Summary histogram and per-camera median are over deer rows (white-tailed deer +
+  unsure, the export default); counts of animals are over everything. Bins are 2 m.
+- Export: `GET /api/export.csv?site&date_from&date_to&all_species&include_suspicious`.
+  Capture dates are compared as YYYY-MM-DD in the camera's local time. The file opens
+  with `#` lines — filters used, how many suspicious rows were left out (or that they
+  are in, with `flag` naming why), and every column's meaning and unit — so it is
+  unambiguous without the app (R `comment.char="#"`, pandas `comment="#"`). Columns are
+  the spec's ten plus `match_score`. `photo` is the file name; camera + timestamp make
+  it unique enough for a statistician; the absolute path stays in the store.
+- Gallery thumbnails come from `GET /api/photo?path=` which serves only paths a run has
+  recorded (640 px JPEG); boxes are drawn by the page from the stored fractions.
+  pywebview `ALLOW_DOWNLOADS` is on so the CSV link saves through the native dialog.
+
 ## Auth
 
 Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS

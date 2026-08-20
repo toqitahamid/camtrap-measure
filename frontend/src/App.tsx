@@ -28,6 +28,24 @@ type Calibration = {
   reason: string | null
 }
 type Camera = { site: string; verdict: 'green' | 'red'; reason: string | null; calibrations: Calibration[] }
+type Summary = {
+  photos: number
+  held: number
+  detections: number
+  deer: number
+  suspicious: number
+  histogram: { lo: number; hi: number; n: number }[]
+  cameras: { site: string; photos: number; held: number; detections: number; deer: number; median_m: number | null; suspicious: number }[]
+}
+type Suspect = {
+  path: string
+  photo: string
+  site: string
+  captured_at: string | null
+  held: boolean
+  reasons: string[]
+  detections: { x1: number; y1: number; x2: number; y2: number; species: string; confidence: number; distance_m: number | null; method: string }[]
+}
 type Methods = { default: string; methods: Record<string, { label: string; hint: string }> }
 type Run = {
   folder: string
@@ -69,7 +87,7 @@ function ModelsLine({ inf }: { inf: Inference }) {
   )
 }
 
-function RunPanel({ methods, ready }: { methods: Methods; ready: boolean }) {
+function RunPanel({ methods, ready, onDone }: { methods: Methods; ready: boolean; onDone: (site: string) => void }) {
   const [run, setRun] = useState<Run | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [picked, setPicked] = useState<string | null>(null)
@@ -82,7 +100,11 @@ function RunPanel({ methods, ready }: { methods: Methods; ready: boolean }) {
   useEffect(() => {
     if (!running) return
     const id = setInterval(poll, 1000)
-    return () => clearInterval(id)
+    return () => {
+      clearInterval(id)
+      if (run) onDone(run.site) // left the running state: show that camera's results
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running])
 
   async function start(e: FormEvent<HTMLFormElement>) {
@@ -137,12 +159,143 @@ function RunPanel({ methods, ready }: { methods: Methods; ready: boolean }) {
   )
 }
 
+
+function ResultsPanel({ sites, focus }: { sites: string[]; focus: { site: string; n: number } }) {
+  const [pick, setPick] = useState<{ site: string; n: number } | null>(null)
+  const site = pick && pick.n === focus.n ? pick.site : focus.site // a finished run refocuses on its camera; the user can re-pick after
+  const setSite = (s: string) => setPick({ site: s, n: focus.n })
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [allSpecies, setAllSpecies] = useState(false)
+  const [includeSuspicious, setIncludeSuspicious] = useState(false)
+  const [summary, setSummary] = useState<Summary | null>(null)
+  const [suspects, setSuspects] = useState<Suspect[]>([])
+
+  const scope = new URLSearchParams()
+  if (site) scope.set('site', site)
+  if (from) scope.set('date_from', from)
+  if (to) scope.set('date_to', to)
+  const qs = scope.toString()
+
+  useEffect(() => {
+    fetch(`/api/summary?${qs}${allSpecies ? '&all_species=true' : ''}`).then((r) => r.json()).then(setSummary).catch(() => {})
+    fetch(`/api/suspicious?${qs}`).then((r) => r.json()).then(setSuspects).catch(() => {})
+  }, [qs, allSpecies, focus])
+
+  const exportQs = new URLSearchParams(scope)
+  if (allSpecies) exportQs.set('all_species', 'true')
+  if (includeSuspicious) exportQs.set('include_suspicious', 'true')
+  const peak = Math.max(1, ...(summary?.histogram.map((b) => b.n) ?? [1]))
+
+  return (
+    <section style={{ marginTop: '2rem' }}>
+      <h2>Results</h2>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={site} onChange={(e) => setSite(e.target.value)}>
+          <option value="">All cameras</option>
+          {sites.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <label>from <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label>to <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+      </div>
+      {!summary || summary.photos === 0 ? (
+        <p>No measured photos in this range yet.</p>
+      ) : (
+        <>
+          <p>
+            {summary.photos} photos ({summary.held} held) · {summary.detections} animals · {summary.deer} deer ·{' '}
+            {summary.suspicious} suspicious{allSpecies ? '' : ' deer'} rows
+          </p>
+          {summary.histogram.length > 0 && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 80 }}>
+                {summary.histogram.map((b) => (
+                  <div key={b.lo} title={`${b.lo}–${b.hi} m: ${b.n}`} style={{ flex: 1, textAlign: 'center', fontSize: 11 }}>
+                    <div style={{ background: 'seagreen', height: (70 * b.n) / peak }} />
+                    {b.lo}
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: '#555' }}>Deer distances, metres ({summary.histogram[0].hi - summary.histogram[0].lo} m bins)</div>
+            </div>
+          )}
+          <table style={{ borderCollapse: 'collapse', width: '100%', marginTop: '0.8rem' }}>
+            <thead>
+              <tr style={{ textAlign: 'left' }}>
+                <th>Camera</th><th>Photos</th><th>Held</th><th>Animals</th><th>Deer</th><th>Median m</th><th>Suspicious</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.cameras.map((c) => (
+                <tr key={c.site} style={{ borderTop: '1px solid #ddd' }}>
+                  <td>{c.site}</td><td>{c.photos}</td><td>{c.held}</td><td>{c.detections}</td><td>{c.deer}</td>
+                  <td>{c.median_m ?? '—'}</td><td>{c.suspicious}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 style={{ marginTop: '1.5rem' }}>Needs a look ({suspects.length})</h3>
+          {suspects.length === 0 ? (
+            <p>Nothing suspicious — no review needed.</p>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
+              {suspects.map((s) => (
+                <figure key={s.path} style={{ margin: 0 }}>
+                  <div style={{ position: 'relative' }}>
+                    <img src={`/api/photo?path=${encodeURIComponent(s.path)}`} alt={s.photo} style={{ width: '100%', display: 'block' }} />
+                    {s.detections.map((d, i) => (
+                      <div
+                        key={i}
+                        title={`${d.species} ${d.confidence.toFixed(2)}${d.distance_m !== null ? ` · ${d.distance_m.toFixed(1)} m` : ''}`}
+                        style={{ position: 'absolute', border: '2px solid darkorange', left: `${d.x1 * 100}%`, top: `${d.y1 * 100}%`,
+                                 width: `${(d.x2 - d.x1) * 100}%`, height: `${(d.y2 - d.y1) * 100}%` }}
+                      />
+                    ))}
+                  </div>
+                  <figcaption style={{ fontSize: 13 }}>
+                    <strong>{s.site} · {s.photo}</strong> · {s.captured_at ? new Date(s.captured_at).toLocaleString() : 'no date'}
+                    <ul style={{ margin: '0.2rem 0 0', paddingLeft: '1.2rem', color: s.held ? 'crimson' : 'darkorange' }}>
+                      {s.reasons.map((r) => (
+                        <li key={r}>{r}</li>
+                      ))}
+                    </ul>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
+
+          <h3 style={{ marginTop: '1.5rem' }}>Export</h3>
+          <div style={{ display: 'grid', gap: '0.4rem' }}>
+            <label>
+              <input type="checkbox" checked={allSpecies} onChange={(e) => setAllSpecies(e.target.checked)} /> All species (default: white-tailed deer and unsure only)
+            </label>
+            <label>
+              <input type="checkbox" checked={includeSuspicious} onChange={(e) => setIncludeSuspicious(e.target.checked)} />{' '}
+              Include the {summary.suspicious} suspicious row{summary.suspicious === 1 ? '' : 's'} (they carry their reason in the flag column)
+            </label>
+            <p style={{ margin: 0 }}>
+              <a href={`/api/export.csv?${exportQs}`} download>Download CSV</a>
+              {!includeSuspicious && summary.suspicious > 0 && ` — ${summary.suspicious} suspicious row${summary.suspicious === 1 ? '' : 's'} will be left out`}
+              <span style={{ color: '#555' }}> · columns and units are documented in the file's header lines</span>
+            </p>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
   const [cameras, setCameras] = useState<Camera[]>([])
   const [methods, setMethods] = useState<Methods>({ default: '', methods: {} })
   const [notice, setNotice] = useState<{ text: string; kind: 'info' | 'warn' | 'error' } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [focus, setFocus] = useState({ site: '', n: 0 })
 
   const refresh = useCallback(
     () =>
@@ -266,7 +419,8 @@ export default function App() {
             </table>
           )}
           <ModelsLine inf={status.inference} />
-          <RunPanel methods={methods} ready={status.inference.status === 'ready'} />
+          <RunPanel methods={methods} ready={status.inference.status === 'ready'} onDone={(site) => setFocus((f) => ({ site, n: f.n + 1 }))} />
+          <ResultsPanel sites={cameras.map((c) => c.site)} focus={focus} />
         </>
       )}
     </main>

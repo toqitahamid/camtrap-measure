@@ -181,6 +181,18 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
         )
 
 
+def photos() -> list[dict]:
+    """Every photo a run has seen — measured or held — with its hold reason and latest alignment score."""
+    with closing(_db()) as con:
+        return [dict(r) for r in con.execute("select * from photos order by site, captured_at, path")]
+
+
+def photo_known(path: str) -> bool:
+    """Has a run recorded this exact path? (The photo endpoint serves nothing else.)"""
+    with closing(_db()) as con:
+        return con.execute("select 1 from photos where path=?", (path,)).fetchone() is not None
+
+
 def detections() -> list[dict]:
     """Every detection row joined with its photo (camera, timestamp, EXIF make/model, calibration used)."""
     with closing(_db()) as con:

@@ -1,13 +1,15 @@
+import io
 import threading
 from contextlib import asynccontextmanager
+from datetime import date
 from importlib.metadata import version
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calibration, inference, measure, store
+from . import calibration, inference, measure, report, store
 from . import supabase_ro as sb
 
 __version__ = version("camtrap-measure")
@@ -139,6 +141,50 @@ def methods():
 def results():
     """One row per detection, joined with its photo."""
     return store.detections()
+
+
+def _iso(d: date | None) -> str | None:
+    return d.isoformat() if d else None
+
+
+@app.get("/api/summary")
+def summary(site: str | None = None, date_from: date | None = None, date_to: date | None = None, all_species: bool = False):
+    """Counts, deer-distance histogram, per-camera stats for the chosen site / capture-date range (YYYY-MM-DD, inclusive)."""
+    return report.summary(site, _iso(date_from), _iso(date_to), all_species)
+
+
+@app.get("/api/suspicious")
+def suspicious(site: str | None = None, date_from: date | None = None, date_to: date | None = None):
+    """The photos that need a look, each with its reasons — nothing else requires review."""
+    return report.suspicious(site, _iso(date_from), _iso(date_to))
+
+
+@app.get("/api/photo")
+def photo(path: str):
+    """A measured photo, shrunk for the gallery. Only paths a run has recorded are served."""
+    from PIL import Image
+
+    if not store.photo_known(path):
+        raise HTTPException(404, "Not a measured photo")
+    try:
+        with Image.open(path) as im:
+            im.draft("RGB", (640, 640))  # JPEG decodes at reduced size: a 20-MP frame never lands in memory whole
+            im = im.convert("RGB")
+            im.thumbnail((640, 640))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=80)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Photo unreadable or moved")
+    return Response(buf.getvalue(), media_type="image/jpeg")
+
+
+@app.get("/api/export.csv")
+def export(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
+           all_species: bool = False, include_suspicious: bool = False):
+    """The documented CSV. Suspicious rows stay out unless include_suspicious is set — never silently."""
+    name = f"camtrap-measure_{site or 'all'}_{date_from or 'start'}_{date_to or 'end'}.csv"
+    return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, include_suspicious),
+                    media_type="text/csv; charset=utf-8", headers={"content-disposition": f'attachment; filename="{name}"'})
 
 
 # Built React page (frontend/ → npm run build). Mounted last so /api/* wins.

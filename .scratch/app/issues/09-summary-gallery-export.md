@@ -4,11 +4,11 @@
 
 **Blocked by:** 05 — Measurement run on fake inference.
 
-**Status:** ready-for-agent
+**Status:** done (2026-08-20) — tests/test_report.py asserts every rule through the API over a scripted backend
 
-- [ ] Post-run summary: counts, distance histogram, per-camera stats
-- [ ] Suspicious gallery with per-case reason; nothing else requires review
-- [ ] Export dialog: site + date range; deer-default species filter with show-all toggle
-- [ ] Soft gate: suspicious rows excluded by default, one checkbox includes them, exclusion count shown
-- [ ] CSV columns and units documented in the export artifact itself
-- [ ] Gate and filter rules asserted through API tests with the fake
+- [x] Post-run summary: counts, distance histogram, per-camera stats
+- [x] Suspicious gallery with per-case reason; nothing else requires review
+- [x] Export dialog: site + date range; deer-default species filter with show-all toggle
+- [x] Soft gate: suspicious rows excluded by default, one checkbox includes them, exclusion count shown
+- [x] CSV columns and units documented in the export artifact itself
+- [x] Gate and filter rules asserted through API tests with the fake

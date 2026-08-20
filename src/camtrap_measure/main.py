@@ -46,5 +46,6 @@ def main() -> None:
         return
     import webview  # imported late: needs a GUI toolkit (WebView2 on Windows)
 
+    webview.settings["ALLOW_DOWNLOADS"] = True  # the CSV export is a plain download link
     webview.create_window("CamTrap Measure", url, width=1200, height=800)
     webview.start()
