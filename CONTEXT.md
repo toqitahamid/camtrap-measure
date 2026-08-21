@@ -280,6 +280,18 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
 - Not verified end to end: no Windows machine here. Acceptance = the dept install; the
   README's install section is the script's contract.
 
+## UI design pass (ticket 13, 2026-08-20)
+
+- One stylesheet, `frontend/src/index.css`: colour/spacing/type tokens as CSS custom properties,
+  `color-scheme: light dark` + `light-dark()` so dark mode follows the OS with no toggle and no
+  JS (WebView2 is evergreen Chromium; both are safe there). Inter Variable (OFL, `frontend/src/fonts/`) is
+  bundled by Vite into `ui/assets/` — the page fetches nothing at runtime.
+- Components are CSS classes, not React abstractions (the one exception is the three-line `Stat` markup helper): `.card`, `.btn`/`.btn-primary`, `.badge`,
+  `.notice{,-warn,-error}`, `.stats`/`.stat`, `.hist`, `.gallery`/`.thumb`/`.bbox`, styled native
+  `<progress>`. Layout = sticky top bar (title, version, account) over a single column of cards:
+  Cameras (with sync + models line), Measure, Results, Needs a look, Export.
+- No behaviour or API change; `App.tsx` keeps its state and fetches verbatim.
+
 ## Auth
 
 Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS

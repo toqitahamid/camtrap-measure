@@ -4,9 +4,9 @@
 
 **Blocked by:** 09 — Summary, suspicious gallery, gated export.
 
-**Status:** ready-for-agent
+**Status:** done (2026-08-20) — `frontend/src/index.css` tokens + bundled Inter; dark mode follows the OS; tests and `tsc`/`oxlint`/`vite build` green
 
-- [ ] Design tokens + bundled font; no network fetch at runtime
-- [ ] All screens restyled consistently (login, sync, cameras, run, summary, gallery, export, settings)
-- [ ] Dark mode
-- [ ] No behavior or API changes; existing tests stay green
+- [x] Design tokens + bundled font; no network fetch at runtime
+- [x] All screens restyled consistently (login, sync, cameras, run, summary, gallery, export; there is no settings screen)
+- [x] Dark mode
+- [x] No behavior or API changes; existing tests stay green
