@@ -38,7 +38,16 @@ def main() -> None:
         action="store_true",
         help="serve the API only, no desktop window (Linux dev / headless)",
     )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="installer checks: GPU, disk, network, weights token, FlagLabel login; exit 1 if any hard check fails",
+    )
     args = parser.parse_args()
+    if args.preflight:
+        from . import preflight  # imports the engine lazily: this runs before the first launch
+
+        raise SystemExit(preflight.run())
     url = start_engine()
     if args.no_window:
         print(f"CamTrap Measure engine at {url}  (Ctrl+C to stop)", flush=True)

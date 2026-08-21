@@ -17,4 +17,4 @@ set GIT_TERMINAL_PROMPT=0
 set REF=origin/main
 if exist ref.txt set /p REF=<ref.txt
 for /f %%h in ('git rev-parse HEAD') do set PREV=%%h
-git fetch --quiet --tags origin || echo Offline or no remote - running the current version. & git -c advice.detachedHead=false checkout --quiet --detach %REF% || echo Could not switch to %REF% - running the current version. & uv sync --frozen || (echo Dependencies could not be installed - going back to the previous version. & git -c advice.detachedHead=false checkout --quiet --detach %PREV% & uv sync --frozen --offline) & uv run --frozen --offline camtrap-measure || pause & exit /b
+git fetch --quiet --tags origin || echo Offline or no remote - running the current version. & git -c advice.detachedHead=false checkout --quiet --detach %REF% || echo Could not switch to %REF% - running the current version. & uv sync --frozen --extra inference || (echo Dependencies could not be installed - going back to the previous version. & git -c advice.detachedHead=false checkout --quiet --detach %PREV% & uv sync --frozen --offline --extra inference) & uv run --frozen --offline camtrap-measure || pause & exit /b

@@ -26,8 +26,8 @@ class StubReal:
 
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch):
-    monkeypatch.setattr(inference, "state", {"status": "ready", "backend": "fake", "device": None,
-                                             "batch": None, "weights": None, "warning": None, "error": None})
+    monkeypatch.setattr(inference, "state", {"status": "ready", "backend": "fake", "device": None, "batch": None,
+                                             "weights": None, "warning": None, "error": None, "download": None})
     monkeypatch.setattr(inference, "backend", inference.fake)
     monkeypatch.delenv("CAMTRAP_WEIGHTS_DIR", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
@@ -52,6 +52,7 @@ def hub(monkeypatch, tmp_path):
         if calls["bad_token"]:
             resp = httpx.Response(401, request=httpx.Request("GET", "https://huggingface.co/api/models/x"))
             raise RepositoryNotFoundError("401 Client Error: Repository Not Found", response=resp)
+        return 7 * 2**30  # the repo's size, for the download progress
 
     def snapshot_download(repo, local_dir, token=None, **kw):
         calls["n"] += 1
@@ -95,7 +96,7 @@ def test_first_start_downloads_weights_and_loads_real_models(cloud, hub, models_
     c, s = start()
     assert hub["n"] == 1 and (tmp_path / "weights" / "manifest.json").exists()
     assert s == {"status": "ready", "backend": "real", "device": "cuda", "batch": 16, "weights": "2026.08.20",
-                 "warning": None, "error": None}
+                 "warning": None, "error": None, "download": None}
 
 
 def test_token_comes_from_env_or_installer_config(cloud, hub, models_installed, start, monkeypatch, tmp_path):
@@ -268,3 +269,21 @@ def test_an_offline_day_still_measures(cloud, hub, models_installed, start, tmp_
     assert r == {"ok": False, "offline": True, "last_sync": r["last_sync"]} and r["last_sync"]
     assert run(c, folder(tmp_path))["status"] == "done"
     assert c.get("/api/results").json()
+
+
+def test_weights_download_progress_is_reported(cloud, monkeypatch, tmp_path):
+    """The first start downloads ~6.5 GB; the status line shows how far it is."""
+    monkeypatch.setattr(weights, "hub_check", lambda token: 1000)  # total bytes the hub says the repo holds
+
+    def slow_download(repo, local_dir, token=None, **kw):
+        d = Path(local_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "big.bin").write_bytes(b"x" * 600)
+        time.sleep(0.7)  # a few watcher ticks (0.25 s) even on a loaded CI box
+        (d / "manifest.json").write_text(json.dumps({"version": "v", "megadetector": "md.pt", "speciesnet": "sn"}))
+        return str(local_dir)
+
+    monkeypatch.setattr(weights, "snapshot_download", slow_download)
+    seen = []
+    w = weights.ensure(progress=lambda done, total: seen.append((done, total)))
+    assert w["version"] == "v" and seen and seen[-1][1] == 1000 and any(600 <= d <= 1000 for d, _ in seen)

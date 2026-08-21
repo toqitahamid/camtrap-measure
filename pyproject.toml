@@ -26,6 +26,8 @@ inference = [
     "romatch",
     "safetensors>=0.8.0",
     "speciesnet",
+    "torch>=2.11",
+    "torchvision",
     "transformers>=5",
 ]
 
@@ -44,3 +46,12 @@ testpaths = ["tests"]
 
 [tool.uv.sources]
 romatch = { git = "https://github.com/Parskatt/RoMa.git", rev = "77f8d68803526dcddfd9b7a46bc76125bdc25f15" }
+# The dept's Windows machine gets the CUDA build of torch straight from the lockfile (CUDA 12.8 wheels: any
+# NVIDIA driver >= 570). Linux (HPC, dev) keeps PyPI's build; the HPC env uses the module torch anyway.
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'win32'" }]
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

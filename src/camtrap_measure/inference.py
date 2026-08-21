@@ -264,7 +264,7 @@ class Real:
 backend = fake
 # status: loading | ready | error. Starts ready-on-fake so the API works before/without warmup (tests, dev).
 state: dict = {"status": "ready", "backend": "fake", "device": None, "batch": None, "weights": None,
-               "warning": None, "error": None}
+               "warning": None, "error": None, "download": None}  # download: {done_gb, total_gb} while weights are fetched
 
 
 def models_installed() -> bool:
@@ -287,12 +287,15 @@ def warmup() -> None:
         return
     warnings = []
     try:
-        w = weights.ensure()
+        w = weights.ensure(progress=lambda done, total: state.update(download={"done_gb": round(done / 2**30, 2),
+                                                                               "total_gb": round(total / 2**30, 2)}))
+        state["download"] = None
         state["weights"] = w["version"] + (" (offline — cached copy)" if w["offline"] else "")
         if w["problem"]:
             warnings.append(f"Weights could not be checked for updates: {w['problem']}. Using the cached copy.")
         real = Real(w["dir"])
     except Exception as e:
+        state["download"] = None
         state.update(status="error", error=str(e) if isinstance(e, weights.WeightsMissing)
                      else f"Models failed to load ({type(e).__name__}: {e}).")
         return

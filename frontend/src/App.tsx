@@ -8,6 +8,7 @@ type Inference = {
   weights: string | null
   warning: string | null
   error: string | null
+  download: { done_gb: number; total_gb: number } | null
 }
 type Status = {
   signed_in: boolean
@@ -75,7 +76,13 @@ const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : 
 const duration = (s: number) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`)
 
 function ModelsLine({ inf }: { inf: Inference }) {
-  if (inf.status === 'loading') return <p>Loading models…</p>
+  if (inf.status === 'loading')
+    return (
+      <p>
+        {inf.download ? `Downloading model weights: ${inf.download.done_gb.toFixed(1)} / ${inf.download.total_gb.toFixed(1)} GB` : 'Loading models…'}
+        {inf.download && <progress value={inf.download.done_gb} max={inf.download.total_gb || 1} style={{ width: '100%' }} />}
+      </p>
+    )
   if (inf.status === 'error') return <p style={{ color: 'crimson' }}>Models unavailable: {inf.error}</p>
   return (
     <p>

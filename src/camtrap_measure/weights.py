@@ -14,6 +14,9 @@ entirely (offline installs, GPU smoke tests).
 
 import json
 import os
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from huggingface_hub import HfApi, snapshot_download
@@ -28,28 +31,57 @@ class WeightsMissing(Exception):
     """No weights on disk and none could be fetched."""
 
 
-def hub_check(token: str | None) -> None:
-    """Raises whatever the hub raises for this repo with this token; returns when it is reachable."""
-    HfApi(token=token).model_info(REPO)
+def hub_check(token: str | None) -> int:
+    """Raises whatever the hub raises for this repo with this token; returns the repo's total size in bytes."""
+    info = HfApi(token=token).model_info(REPO, files_metadata=True)
+    return sum(s.size or 0 for s in info.siblings)
 
 
-def ensure() -> dict:
-    """Check the manifest against the hub and fetch what changed.
-    → {dir, version, offline: bool, problem: str | None}. Raises WeightsMissing when nothing is on disk."""
+def _dir_bytes(local: Path) -> int:
+    # ponytail: bytes on disk stand in for bytes downloaded — files left from an older weights version count too,
+    # so the bar can sit at 100% while the last file still streams. Pass a tqdm_class to snapshot_download for exact.
+    n = 0
+    for f in local.rglob("*"):
+        try:
+            n += f.stat().st_size
+        except OSError:  # hf_hub renames .incomplete files under us; Windows refuses stat mid-rename
+            pass
+    return n
+
+
+def _watch(local: Path, total: int, progress: Callable[[int, int], None], stop: threading.Event) -> None:
+    """Report bytes on disk (finished + partial files) against the hub total while a download runs."""
+    while not stop.wait(0.25):
+        progress(min(_dir_bytes(local), total), total)
+
+
+def ensure(progress: Callable[[int, int], None] | None = None) -> dict:
+    """Check the manifest against the hub and fetch what changed, calling progress(done_bytes, total_bytes) along
+    the way. → {dir, version, offline: bool, problem: str | None}. Raises WeightsMissing when nothing is on disk."""
     pinned = os.environ.get("CAMTRAP_WEIGHTS_DIR")
     local = Path(pinned) if pinned else store.DATA_DIR / "weights"
     offline, problem = False, None
     if not pinned:
         token = os.environ.get("HF_TOKEN") or store.config().get("hf_token")
+        stop, watcher = threading.Event(), None
         try:
-            hub_check(token)
+            total = hub_check(token) or 0
+            if progress:
+                watcher = threading.Thread(target=_watch, args=(local, total, progress, stop), daemon=True)
+                watcher.start()
             snapshot_download(REPO, local_dir=local, token=token)
+            if progress:
+                progress(total, total)
         except (RepositoryNotFoundError, GatedRepoError) as e:
             problem = f"the weights repo {REPO} rejected the access token ({type(e).__name__}) — check hf_token in config.json"
         except HfHubHTTPError as e:
             problem = f"the weights server answered {e.response.status_code if e.response is not None else '?'} ({e})"
         except Exception:  # DNS, timeouts, connection refused: offline
             offline = True
+        finally:
+            stop.set()
+            if watcher:
+                watcher.join()  # no progress tick after the caller has moved on
         if (offline or problem) and not (local / "manifest.json").exists():
             raise WeightsMissing("Model weights are not downloaded yet and " + (
                 f"{problem}." if problem else "the download failed — connect to the internet and restart the app."))

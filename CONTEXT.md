@@ -241,10 +241,10 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   prompt (the installer stores the credential). cmd reads a running `.bat` by byte
   offset and the checkout rewrites it, so everything after the checkout is one final
   line ending in `exit /b`.
-- Open for ticket 12: the lock pins the CPU torch; a frozen sync on the dept machine
-  would replace an installer-provided CUDA torch. Resolve by pinning the CUDA wheel
-  index for Windows in `pyproject.toml` so the lock itself carries it, or by excluding
-  torch from the sync.
+- Resolved in ticket 12: `pyproject.toml` pins PyTorch's cu128 index for
+  `sys_platform == 'win32'`, so the one lockfile carries `torch 2.11.0+cu128` for the dept
+  machine and PyPI's build for Linux. The launcher syncs `--extra inference` — without
+  it `uv sync --frozen` would remove the GPU packages on every start.
 - Rollback = an untracked `ref.txt` beside `run.bat` naming a known-good tag (not an
   edit of `run.bat`: a dirty tracked file makes `checkout` refuse). Releases: bump
   `pyproject.toml` version, push main, tag. `/api/health` reports version +
@@ -253,6 +253,32 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
 - The `.bat` cannot run here; its first real execution is the installer's first launch
   (ticket 12), which is the acceptance step for this ticket.
 - Weights stay outside the code update entirely (`~/.camtrap-measure/weights/`, manifest).
+
+## Installer (ticket 12, 2026-08-20)
+
+- One pasted PowerShell line fetches `scripts/install.ps1` from GitHub and runs it:
+  winget installs Git + uv, clone into `%LOCALAPPDATA%\CamTrapMeasure`, `uv sync --frozen`
+  (small), `camtrap-measure --preflight` *before* the multi-GB inference extra, then
+  `uv sync --frozen --extra inference` + a torch-sees-GPU check, desktop shortcut to
+  `run.bat`, first launch. Re-runnable; `install.bat` in the clone repeats it for repairs.
+- The checks live in Python (`preflight.py`, `tests/test_preflight.py`), not in PowerShell,
+  so they are tested here: GPU via `nvidia-smi` (missing driver; driver < 570 = too old
+  for the cu128 wheels; driver fine but torch blind = reboot; < 8 GB = slow) — all
+  warnings, never stops: story 33 says loud warning, and the CPU fallback exists; ≥ 20 GB
+  free on the data drive and on the app drive; TCP 443 to github.com / huggingface.co /
+  the Supabase host (a plain socket — the read-only guard forbids any HTTP client outside
+  the wrapper — hence a warning only: a proxy git/uv went through fools it); WebView2
+  runtime (registry); HF token validated with `weights.hub_check` and saved to
+  `config.json` (mode 0600 where modes exist; the user profile's ACL on Windows);
+  FlagLabel login through the wrapper and saved as the app's session; and the engine's
+  own `/api/health` in-process — the "passing first health check". Hard failures: disk,
+  WebView2, engine, three rejected credentials. Three attempts per credential; an empty
+  token is a soft warning (fake numbers until set).
+- Weights download progress: `weights.ensure(progress)` watches bytes on disk against the
+  hub's total (`model_info(files_metadata=True)`) while `snapshot_download` runs;
+  `/api/status.inference.download` = {done_gb, total_gb}; the page shows a bar.
+- Not verified end to end: no Windows machine here. Acceptance = the dept install; the
+  README's install section is the script's contract.
 
 ## Auth
 

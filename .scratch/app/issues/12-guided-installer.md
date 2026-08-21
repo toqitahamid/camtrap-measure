@@ -4,10 +4,10 @@
 
 **Blocked by:** 03 — Read-only sync and login; 06 — Weights and real detection; 11 — Auto-update launcher.
 
-**Status:** ready-for-agent
+**Status:** done except end-to-end verification (2026-08-20) — no Windows machine here; acceptance = first dept install following the README
 
-- [ ] One-command entry point on a clean machine (installs uv, fetches app, creates launcher shortcut)
-- [ ] Preflights: GPU/CUDA, disk space, network, login — each failure gives a fix in plain language, not a stack trace
-- [ ] First-run weights download shown with progress
-- [ ] Recipe verified end to end in a clean environment
-- [ ] Install instructions in the README match the script
+- [x] One-command entry point on a clean machine (installs uv, fetches app, creates launcher shortcut)
+- [x] Preflights: GPU/CUDA, disk space, network, login — each failure gives a fix in plain language, not a stack trace
+- [x] First-run weights download shown with progress
+- [ ] Recipe verified end to end in a clean environment — needs a Windows machine; the Python checks are unit-tested, the PowerShell is not
+- [x] Install instructions in the README match the script

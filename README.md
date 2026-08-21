@@ -3,10 +3,44 @@
 Windows desktop app: distance to each white-tailed deer in camera-trap photos.
 Design context in `CONTEXT.md`; spec and tickets in `.scratch/app/`.
 
+## Install (department machine, Windows — no expert needed)
+
+Open PowerShell (Start → type "PowerShell" → Enter) and paste this one line:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/toqitahamid/camtrap-measure/main/scripts/install.ps1 | iex"
+```
+
+It installs Git and uv (via winget), downloads the app into `%LOCALAPPDATA%\CamTrapMeasure`,
+builds its environment (the CUDA build of PyTorch comes from the lockfile — a few GB once),
+runs the preflight checks before the big download and asks for two things:
+
+- the **Hugging Face read token** for the model weights (ask the researcher; Enter skips it
+  for now — the app then runs with made-up numbers until the token is set);
+- the **FlagLabel email and password** (the app remembers the login).
+
+Every failed check prints what it found and what to do, in plain words: GPU driver missing or
+older than 570 (install/update from nvidia.com/drivers — a warning, the app still installs and
+runs on the CPU), less than 20 GB free, a host that the network or firewall blocks
+(`github.com` for updates, `huggingface.co` for weights, the FlagLabel cloud for sync — a
+warning), WebView2 runtime missing, a rejected token, a wrong password, and finally the
+engine's own health check. Fix, run the same line again.
+
+It ends with a **CamTrap Measure** shortcut on the desktop and starts the app; the first start
+downloads the model weights (~7 GB) and shows the progress in the window. To repair an install
+later, double-click `install.bat` in the app folder — every step is a no-op when already done.
+
+Requirements: Windows 10/11, an NVIDIA GPU (8 GB recommended; less runs with a warning, none
+runs on the CPU slowly), ~20 GB free, the WebView2 runtime (built into Windows 11; the checks
+name the download if it is missing). The script installs Git and uv through winget (App
+Installer from the Microsoft Store); if winget is missing, install them by hand first —
+Git from https://git-scm.com/download/win, uv with
+`powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` — then
+paste the install line again. `CAMTRAP_INSTALL_DIR` overrides the install folder.
+
 ## Run (department machine, Windows)
 
-Double-click `run.bat`. Needs [uv](https://docs.astral.sh/uv/) and Git installed; the folder is a
-clone of this repository (the installer, ticket 12, makes it one).
+Double-click the desktop shortcut (= `run.bat` in the app folder).
 
 ### Updates and rollback
 

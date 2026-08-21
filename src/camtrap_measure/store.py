@@ -62,14 +62,20 @@ def session() -> dict | None:
         return None
 
 
-def save_session(s: dict | None) -> None:
+def _write_private(path: Path, data: dict) -> None:
+    """Owner-only file (0600 where modes exist; the user profile's ACL on Windows) for the two secrets we keep."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(data))
+
+
+def save_session(s: dict | None) -> None:
     if s is None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
         _session_file().unlink(missing_ok=True)
     else:
-        fd = os.open(_session_file(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(json.dumps(s))
+        _write_private(_session_file(), s)
 
 
 def config() -> dict:
@@ -78,6 +84,10 @@ def config() -> dict:
         return json.loads((DATA_DIR / "config.json").read_text())
     except (OSError, ValueError):
         return {}
+
+
+def save_config(cfg: dict) -> None:
+    _write_private(DATA_DIR / "config.json", cfg)  # holds the HF token
 
 
 # --- mirror ------------------------------------------------------------------
