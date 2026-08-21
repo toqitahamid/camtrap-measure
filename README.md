@@ -1,7 +1,8 @@
 # CamTrap Measure
 
 Windows desktop app: distance to each white-tailed deer in camera-trap photos.
-Design context in `CONTEXT.md`; spec and tickets in `.scratch/app/`.
+Design context in `CONTEXT.md`; spec and tickets in `.scratch/app/`; picking the work up on
+another machine: `HANDOFF.md`.
 
 ## Install (department machine, Windows — no expert needed)
 
