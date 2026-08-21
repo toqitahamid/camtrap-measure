@@ -1,2 +1,4 @@
 scripts/slurm-*.out
 ref.txt
+__pycache__/
+*.pyc
