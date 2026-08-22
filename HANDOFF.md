@@ -51,15 +51,16 @@ Things that do **not** travel with the clones (HPC-only, recreate only if you ne
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/toqitahamid/camtrap-measure/main/scripts/install.ps1 | iex"
 ```
 
-Installs Git + uv via winget, clones into `%LOCALAPPDATA%\CamTrapMeasure`, `uv sync --frozen`,
-preflight checks, `uv sync --frozen --extra inference` (torch 2.11 **cu128 from the lockfile**
-— a few GB), desktop shortcut to `run.bat`, first launch (~7 GB weights download with a
-progress bar). It asks for the HF read token and the FlagLabel login.
+No administrator needed: portable Git (MinGit) into `%LOCALAPPDATA%\Programs\MinGit`, uv via its
+own user-scope installer, clone into `%LOCALAPPDATA%\CamTrapMeasure`, `uv sync --frozen`
+(Python 3.12 from `.python-version`), preflight checks, `uv sync --frozen --extra inference`
+(torch 2.11 **cu128 from the lockfile** — a few GB), desktop shortcut to `run.bat`, first launch
+(~6.5 GB weights download with a progress bar). It asks for the HF read token and the FlagLabel
+email + the one-time code FlagLabel emails (no passwords — ticket 14).
 
-**This is the first thing to do on the workstation.** Tickets 11 (launcher/updater) and 12
-(installer) were written blind — no Windows machine on the HPC. `CONTEXT.md` says so under
-both tickets. Expect to fix small things in `run.bat` / `scripts/install.ps1`; the checks
-themselves live in `src/camtrap_measure/preflight.py` and are tested.
+Run on the workstation 2026-08-21 (CONTEXT "Windows acceptance"): everything above passed
+except the steps that need a FlagLabel mailbox (preflight login, the window's sign-in) — those
+are unit-tested and must be tried once by a real user.
 
 ### B. As a developer (your clone from §2)
 
@@ -109,15 +110,18 @@ Both A and B can coexist; they are separate clones and share only `~/.camtrap-me
 - GitHub: `toqitahamid` (private repos).
 - Hugging Face: a **read** token for `toqi/camtrap-measure-weights`; `scripts/upload_weights.py`
   needs a write token (only when changing weights; bump `VERSION` there).
-- Supabase/FlagLabel: a department user login (email + password); the app uses it through the
-  read-only wrapper. Project `uggjzcbozdxvuawxddrn` — no service key anywhere, keep it that way.
+- Supabase/FlagLabel: a department user account (email; sign-in is by one-time code emailed by
+  Supabase — no passwords); the app uses it through the read-only wrapper. Project
+  `uggjzcbozdxvuawxddrn` — no service key anywhere, keep it that way.
 
 ## 6. What is next (from `CONTEXT.md` open items)
 
-1. **Windows acceptance** of tickets 11 + 12 (install line, `run.bat` update/rollback,
-   weights download progress, WebView2 window, dark mode follows the OS theme — ticket 13
-   was also never seen in a real window).
-2. Collect dept hardware facts at first install (GPU model, photo volume) — open item 3.
+1. **First real sign-in**: a FlagLabel user runs `install.bat` (or the one-liner) once on the
+   dept machine and completes the email-code login in the preflight and in the window — the
+   only part of the 2026-08-21 Windows acceptance that needed a mailbox (CONTEXT "Windows
+   acceptance", ticket 14).
+2. Collect dept hardware facts at first install (GPU model, photo volume) — open item 3. The
+   workstation used for acceptance: RTX 2060 SUPER 8 GB, driver 581.95, Windows 11.
 3. MD-only vs MD+SAM3 comparison on existing labeled data in `distance_estimation` → sets
    `DEFAULT_METHOD` (`inference.py`); note the RoMa run-to-run spread recorded under ticket 08
    must be pinned first (fixed seed or averaged draws).
@@ -130,8 +134,11 @@ Both A and B can coexist; they are separate clones and share only `~/.camtrap-me
 - `gh` on the HPC needed `env -u GITHUB_TOKEN` (a stale token in the environment). On Windows a
   plain `gh auth login` is enough.
 - `uv sync --frozen` must be `--extra inference` on Windows or it *removes* the GPU packages.
-- `romatch` is a git dependency pinned to RoMa@77f8d68; it pulls `poselib`. The HPC installed it
-  `--no-deps` because poselib has no aarch64 wheel — *unverified* that the win64 wheel resolves
-  from the lockfile; if `uv sync --extra inference` fails on poselib, that is the first fix.
+- `romatch` is a git dependency pinned to RoMa@77f8d68; it pulls `poselib`, whose win64 cp312
+  wheel resolves from the lockfile (verified 2026-08-21). What did *not* resolve was `onnx`
+  (see `[tool.uv] override-dependencies` in `pyproject.toml`).
+- A developer machine with a cached Hugging Face login (`~/.cache/huggingface/token`) gives the
+  app weights access even without `hf_token`; the test suite is pinned offline so it cannot.
+- The dept machines have no administrator rights: nothing in the installer may need elevation.
 - Capture dates are naive local time; Windows locale affects only the UI's `toLocaleString`.
 - pywebview needs the WebView2 runtime (built into Windows 11; preflight names the download).

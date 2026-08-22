@@ -292,9 +292,65 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   Cameras (with sync + models line), Measure, Results, Needs a look, Export.
 - No behaviour or API change; `App.tsx` keeps its state and fetches verbatim.
 
+## Windows acceptance of tickets 11–13 (2026-08-21, RTX 2060 SUPER 8 GB, driver 581.95, Windows 11)
+
+The installer and launcher ran for the first time on a real Windows machine, as the dept will
+run them (`scripts/install.ps1` from a clone; the `irm | iex` form is the same file). Verdicts:
+
+- **Installer (12)**: tool check, clone, `uv sync --frozen`, preflight report (GPU, disk,
+  three hosts, WebView2, engine ✓; scripted bad login ✗ with its fix), desktop shortcut,
+  first launch — all as designed. Three things broke, all fixed:
+  1. `uv sync --frozen --extra inference` failed building `onnx 1.12.0` from source (no cp312
+     Windows wheel; needs CMake + Visual Studio + protoc). Cause: `megadetector 10.0.24 →
+     ultralytics-yolov5 0.1.1` pins `protobuf<=3.20.1`, the newest onnx tolerating that is
+     1.12.0. Fix: `[tool.uv] override-dependencies = ["protobuf>=3.20.2,<7"]` (wandb caps `<7`);
+     lock now onnx 1.22.0 / protobuf 6.33.6. Verified at runtime: SpeciesNet converts and
+     loads on CUDA. The HPC never noticed because it built onnx from the sdist.
+  2. No interpreter pin: a fresh machine gets whatever uv calls newest (3.14 today, 3.13 here).
+     `.python-version` = 3.12, the version the HPC tested; uv recreates the venv on its own.
+  3. `winget install Git.Git` is a machine-scope install — the dept machines have **no
+     administrator rights** (stated 2026-08-21). Git is now a portable MinGit unpacked into
+     `%LOCALAPPDATA%\Programs\MinGit`, uv comes from its own user-scope installer, winget is
+     not used; `run.bat` puts both on the PATH. MinGit alone serves `git fetch` and uv's git
+     dependency (romatch). The preflight's driver and WebView2 fixes now say "ask IT".
+- **Launcher (11)**: update (`198547c → b2a4a40`, `run.bat` rewrote itself to CRLF mid-run and
+  finished on its last line as designed), offline (`fetch` to an unreachable remote → "Offline
+  or no remote", cached sync, app up), rollback (`ref.txt` = a commit → that commit runs, the
+  header shows it). `set /p` strips a CRLF from `ref.txt`. `.gitattributes` pins `.bat` to
+  CRLF regardless of the clone's autocrlf.
+- **Window (13)**: WebView2 window opens; header `v0.1.0 (b2a4a40)`; dark mode followed the
+  OS; weights downloaded 6.5 GB in ~3 min. The sign-in card hid the download progress — the
+  `ModelsLine` now sits above the card while loading (ticket 14's UI change).
+- **Test hygiene**: the suite reached the real hub through a cached developer HF login and,
+  with the extra present, loaded real models on the GPU (28 failures, 7 GB pulled into the
+  data dir). `conftest` sets `HF_HUB_OFFLINE` and an autouse `hermetic` fixture (own data dir,
+  no inference extra); the GPU smoke test opts back in. 154 passed, 1 skipped here.
+- **Not verified**: the FlagLabel sign-in with a real mailbox (preflight and window) — no
+  account available to the agent; unit-tested, listed as the first HANDOFF next step.
+  The winget-free tool installs were exercised piecewise (MinGit unpack, uv's script) on a
+  machine that already had both.
+- Dept hardware fact for open item 3: this workstation = RTX 2060 SUPER 8 GB (VRAM floor
+  exactly met).
+
+## Email-code login (ticket 14, 2026-08-21)
+
+- FlagLabel accounts sign in with a one-time code that Supabase emails (stated by the
+  researcher during the acceptance); password login never applied. The wrapper gained
+  `request_code` (`POST /auth/v1/otp`, `create_user: false` so the app can never create an
+  account) and `verify_code` (`POST /auth/v1/verify`, `type: "email"`); `sign_in` is gone.
+  `tests/test_supabase_ro.py` lists the three auth POSTs as the only non-GETs — the read-only
+  guard is unchanged in spirit.
+- Engine: `POST /api/login/code {email}` then `POST /api/login {email, code}`; `Offline` is a
+  503 with a plain message (it used to be a 500). Window: two-step card with "Use a different
+  email". Preflight: three tries at an email that gets a code, then three tries at the code; a
+  wrong code never costs a new email (Supabase rate-limits one per 60 s per address).
+- 4xx/404/422/429 on the two auth calls are `AuthError` (user-actionable: unknown email, bad or
+  expired code, "only request this after N seconds"); `refresh` keeps its narrower rule so a
+  429 there cannot sign the user out.
+
 ## Auth
 
-Dept's existing FlagLabel logins (Supabase email auth), session cached. RLS
+Dept's existing FlagLabel accounts, signed in by one-time email code (ticket 14), session cached. RLS
 verified 2026-08-20: `authenticated` role reads all of `annotations`, `sites`,
 and the `photos` bucket — no policy changes needed. No service key.
 
@@ -343,8 +399,11 @@ without FlagLabel branding.
 
 1. ~~Ticket zero: EXIF-survival check~~ RESOLVED 2026-08-20: SRF_CAM08/IMG_3792.JPG downloaded from Storage carries full EXIF (DateTimeOriginal 2026-03-13 12:37:33, Browning BTC-7E). Uploads preserve bytes; windows key on EXIF as designed; no captured_at column needed.
 2. MD-only vs MD+SAM3 accuracy comparison on existing data → sets default method.
-3. Dept hardware facts (GPU model, photo volume) — collect at first install.
+3. Dept hardware facts (GPU model, photo volume) — collect at first install. Acceptance
+   workstation (2026-08-21): RTX 2060 SUPER 8 GB; photo volume still unknown.
 4. Distance-ready export (Q12b) — after first season with a statistician.
+5. First real email-code sign-in on the dept machine (preflight + window) — needs a FlagLabel
+   mailbox; everything else of the install was accepted 2026-08-21.
 
 ## Supabase is read-only from this app (hard constraint)
 

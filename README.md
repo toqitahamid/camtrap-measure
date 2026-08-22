@@ -20,13 +20,14 @@ download and asks for two things:
 
 - the **Hugging Face read token** for the model weights (ask the researcher; Enter skips it
   for now — the app then runs with made-up numbers until the token is set);
-- the **FlagLabel email and password** (the app remembers the login).
+- the **FlagLabel email**, then the **one-time code** FlagLabel emails to it (the app remembers
+  the login; there is no password).
 
 Every failed check prints what it found and what to do, in plain words: GPU driver missing or
 older than 570 (install/update from nvidia.com/drivers — a warning, the app still installs and
 runs on the CPU), less than 20 GB free, a host that the network or firewall blocks
 (`github.com` for updates, `huggingface.co` for weights, the FlagLabel cloud for sync — a
-warning), WebView2 runtime missing, a rejected token, a wrong password, and finally the
+warning), WebView2 runtime missing, a rejected token, an unknown email or a wrong code, and finally the
 engine's own health check. Fix, run the same line again.
 
 It ends with a **CamTrap Measure** shortcut on the desktop and starts the app; the first start
