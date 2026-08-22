@@ -1,34 +1,42 @@
 # CamTrap Measure installer for the department's Windows machine. Run by install.bat, or directly:
 #   powershell -ExecutionPolicy Bypass -File install.ps1
-# Installs Git and uv (winget), clones the app, builds its environment (CUDA torch comes from the lockfile),
-# runs the preflight checks (GPU, disk, network, weights token, FlagLabel login — each failure explains its
-# fix), puts a shortcut on the desktop and starts the app. Safe to run again: every step is a no-op when done.
+# Gets Git and uv without an administrator (a portable Git unpacked into the user profile, uv's own user-scope
+# installer), clones the app, builds its environment (CUDA torch comes from the lockfile), runs the preflight
+# checks (GPU, disk, network, weights token, FlagLabel login — each failure explains its fix), puts a shortcut on
+# the desktop and starts the app. Safe to run again: every step is a no-op when done. Nothing here needs admin
+# rights: the dept machines have none (2026-08-21).
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest's progress bar slows downloads badly on PowerShell 5
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Repo = "https://github.com/toqitahamid/camtrap-measure.git"
 $Dir = if ($env:CAMTRAP_INSTALL_DIR) { $env:CAMTRAP_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "CamTrapMeasure" }
+# Portable Git (MinGit: no installer, no registry, no admin). run.bat puts the same folder on the PATH at every start.
+$MinGitUrl = "https://github.com/git-for-windows/git/releases/download/v2.51.0.windows.1/MinGit-2.51.0-64-bit.zip"
+$MinGitDir = Join-Path $env:LOCALAPPDATA "Programs\MinGit"
+$UvBin = Join-Path $env:USERPROFILE ".local\bin"  # where uv's installer puts uv.exe
 
 function Step($msg) { Write-Host ""; Write-Host "==> $msg" -ForegroundColor Cyan }
 function Fail($msg) { Write-Host ""; Write-Host "STOPPED: $msg" -ForegroundColor Red; Read-Host "Press Enter to close"; exit 1 }
-function RefreshPath {
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
-}
-function Need($exe, $wingetId, $what) {
-    if (Get-Command $exe -ErrorAction SilentlyContinue) { Write-Host "$what is installed."; return }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Fail "$what is not installed and winget is missing. Install $what by hand (see the README), then run this again."
-    }
-    Step "Installing $what"
-    winget install --exact --id $wingetId --accept-source-agreements --accept-package-agreements --silent --disable-interactivity
-    if ($LASTEXITCODE -ne 0) { Fail "winget could not install $what (exit code $LASTEXITCODE). Install $what by hand (see the README), then run this again." }
-    RefreshPath
-    if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) {
-        Fail "$what was installed but is not on the PATH yet. Close this window, open a new one, and run the installer again."
-    }
-}
+function AddPath($p) { if ((Test-Path $p) -and (($env:Path -split ";") -notcontains $p)) { $env:Path = "$p;" + $env:Path } }
 
-Step "Checking tools"
-Need git Git.Git "Git"
-Need uv astral-sh.uv "uv"
+Step "Checking tools (nothing here needs an administrator)"
+AddPath (Join-Path $MinGitDir "cmd")
+AddPath $UvBin
+if (Get-Command git -ErrorAction SilentlyContinue) { Write-Host "Git is installed." } else {
+    Step "Getting a portable Git into $MinGitDir (40 MB)"
+    $zip = Join-Path $env:TEMP "MinGit.zip"
+    try { Invoke-WebRequest -Uri $MinGitUrl -OutFile $zip } catch { Fail "Could not download Git from $MinGitUrl ($($_.Exception.Message)). Check the internet connection (github.com must be reachable), then run this again." }
+    Expand-Archive -Path $zip -DestinationPath $MinGitDir -Force
+    Remove-Item $zip
+    AddPath (Join-Path $MinGitDir "cmd")
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail "Git was unpacked into $MinGitDir but git.exe is not there. Delete that folder and run this again." }
+}
+if (Get-Command uv -ErrorAction SilentlyContinue) { Write-Host "uv is installed." } else {
+    Step "Installing uv into $UvBin"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+    AddPath $UvBin
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Fail "uv did not install. Check the internet connection (astral.sh must be reachable), then run this again." }
+}
 
 Step "Getting the app into $Dir"
 if (Test-Path (Join-Path $Dir ".git")) {

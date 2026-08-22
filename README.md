@@ -12,9 +12,11 @@ Open PowerShell (Start → type "PowerShell" → Enter) and paste this one line:
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/toqitahamid/camtrap-measure/main/scripts/install.ps1 | iex"
 ```
 
-It installs Git and uv (via winget), downloads the app into `%LOCALAPPDATA%\CamTrapMeasure`,
-builds its environment (the CUDA build of PyTorch comes from the lockfile — a few GB once),
-runs the preflight checks before the big download and asks for two things:
+No administrator account is needed at any point. It gets Git (a portable copy unpacked into
+`%LOCALAPPDATA%\Programs\MinGit`) and uv (its own user-scope installer), downloads the app into
+`%LOCALAPPDATA%\CamTrapMeasure`, builds its environment (Python 3.12 and the CUDA build of
+PyTorch come from the lockfile — a few GB once), runs the preflight checks before the big
+download and asks for two things:
 
 - the **Hugging Face read token** for the model weights (ask the researcher; Enter skips it
   for now — the app then runs with made-up numbers until the token is set);
@@ -32,12 +34,10 @@ downloads the model weights (~7 GB) and shows the progress in the window. To rep
 later, double-click `install.bat` in the app folder — every step is a no-op when already done.
 
 Requirements: Windows 10/11, an NVIDIA GPU (8 GB recommended; less runs with a warning, none
-runs on the CPU slowly), ~20 GB free, the WebView2 runtime (built into Windows 11; the checks
-name the download if it is missing). The script installs Git and uv through winget (App
-Installer from the Microsoft Store); if winget is missing, install them by hand first —
-Git from https://git-scm.com/download/win, uv with
-`powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` — then
-paste the install line again. `CAMTRAP_INSTALL_DIR` overrides the install folder.
+runs on the CPU slowly) with its driver already installed (driver 570 or newer — the one thing
+that does need IT), ~20 GB free, the WebView2 runtime (built into Windows 11; the checks name
+the download if it is missing). A Git or uv already on the PATH is used as is.
+`CAMTRAP_INSTALL_DIR` overrides the install folder.
 
 ## Run (department machine, Windows)
 

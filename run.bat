@@ -13,6 +13,8 @@ rem
 rem The update rewrites this very file, and cmd reads a .bat by byte offset while it runs - so everything
 rem after the checkout is on the one last line below, which ends by exiting. Keep it that way.
 cd /d "%~dp0"
+rem The installer's portable Git and user-scope uv (no admin on the dept machines); harmless when they are elsewhere.
+set PATH=%LOCALAPPDATA%\Programs\MinGit\cmd;%USERPROFILE%\.local\bin;%PATH%
 set GIT_TERMINAL_PROMPT=0
 set REF=origin/main
 if exist ref.txt set /p REF=<ref.txt
