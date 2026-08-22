@@ -32,6 +32,16 @@ pytestmark = pytest.mark.skipif(
     reason="GPU smoke: needs CUDA, the [inference] extra, CAMTRAP_WEIGHTS_DIR, CAMTRAP_SMOKE_PHOTO and CAMTRAP_SMOKE_FLAG")
 
 
+@pytest.fixture(autouse=True)
+def real_models(monkeypatch):
+    """The one test that wants the real extra: undo conftest's hermetic stub."""
+    from camtrap_measure import inference
+
+    from tests.conftest import REAL_MODELS_INSTALLED
+
+    monkeypatch.setattr(inference, "models_installed", REAL_MODELS_INSTALLED)
+
+
 def test_real_models_measure_a_deer_through_the_api(cloud, tmp_path):
     from camtrap_measure import distance, inference
 

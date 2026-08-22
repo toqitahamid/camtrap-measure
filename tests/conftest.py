@@ -1,16 +1,35 @@
-"""Shared fixtures: the Supabase wrapper faked at its seam, plus synthetic annotations and EXIF JPEGs."""
+"""Shared fixtures: the Supabase wrapper faked at its seam, plus synthetic annotations and EXIF JPEGs.
 
-import time
-from io import BytesIO
+The suite needs no network and no GPU, and must stay that way on a developer's machine that has both:
+`HF_HUB_OFFLINE` keeps a cached Hugging Face login from quietly pulling the 7 GB weights (seen on the
+Windows workstation, 2026-08-21), and `hermetic` below keeps the real models out of every test but the
+GPU smoke test, which opts back in.
+"""
 
-import pytest
-from fastapi.testclient import TestClient
-from PIL import Image
+import os
 
-from camtrap_measure import api, measure, store
-from camtrap_measure import supabase_ro as sb
+os.environ["HF_HUB_OFFLINE"] = "1"  # read by huggingface_hub at import time: must precede the app imports
 
-from tests.calib.synth import projective_photo
+import time  # noqa: E402
+from io import BytesIO  # noqa: E402
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from PIL import Image  # noqa: E402
+
+from camtrap_measure import api, inference, measure, store  # noqa: E402
+from camtrap_measure import supabase_ro as sb  # noqa: E402
+
+from tests.calib.synth import projective_photo  # noqa: E402
+
+REAL_MODELS_INSTALLED = inference.models_installed  # the GPU smoke test restores this
+
+
+@pytest.fixture(autouse=True)
+def hermetic(monkeypatch, tmp_path):
+    """Every test writes to its own data dir and sees no inference extra, whatever the machine has."""
+    monkeypatch.setattr(store, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(inference, "models_installed", lambda: False)
 
 
 def flag_photo_data(site="TON_CAM02", image="IMG_5304.JPG", relabel=None, n=None) -> dict:

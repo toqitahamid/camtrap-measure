@@ -44,6 +44,13 @@ packages = ["src/camtrap_measure"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.uv]
+# megadetector -> ultralytics-yolov5 0.1.1 pins protobuf<=3.20.1 (a 2022 yolov5 workaround; nothing here reaches
+# protobuf through it), which drags onnx down to 1.12.0 - an sdist on Python 3.12 that needs CMake + Visual Studio +
+# protoc to build on the dept machine. Lifting the ceiling lets onnx/protobuf resolve to versions that ship wheels
+# (wandb wants protobuf<7). Seen at the first Windows install, 2026-08-21.
+override-dependencies = ["protobuf>=3.20.2,<7"]
+
 [tool.uv.sources]
 romatch = { git = "https://github.com/Parskatt/RoMa.git", rev = "77f8d68803526dcddfd9b7a46bc76125bdc25f15" }
 # The dept's Windows machine gets the CUDA build of torch straight from the lockfile (CUDA 12.8 wheels: any

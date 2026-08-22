@@ -12,6 +12,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,8 +58,9 @@ def check_gpu() -> Result:
     # fix is spelled out here, where a technician is still in setup mode.
     if out is None or out.returncode != 0 or not out.stdout.strip():
         return Result("GPU", False, "No NVIDIA driver found (nvidia-smi is missing or failed).",
-                      "Install the NVIDIA driver for this card from https://www.nvidia.com/drivers, reboot, and run the "
-                      "installer again. Without it the app runs on the CPU, many times slower.", hard=False)
+                      "Install the NVIDIA driver for this card from https://www.nvidia.com/drivers (needs an administrator — "
+                      "ask IT), reboot, and run the installer again. Without it the app runs on the CPU, many times slower.",
+                      hard=False)
     name, mem, driver = [s.strip() for s in out.stdout.strip().splitlines()[0].split(",")]  # first card of possibly several
     gb = int(re.sub(r"\D", "", mem) or 0) / 1024
     detail = f"{name}, {gb:.1f} GB memory, driver {driver}"
@@ -66,7 +68,8 @@ def check_gpu() -> Result:
     if major and major < MIN_DRIVER:
         return Result("GPU", False, detail,
                       f"The driver is {driver}; the app's CUDA 12.8 build needs driver {MIN_DRIVER} or newer — update the "
-                      f"NVIDIA driver from https://www.nvidia.com/drivers, reboot, and run the installer again.", hard=False)
+                      f"NVIDIA driver from https://www.nvidia.com/drivers (needs an administrator — ask IT), reboot, and run "
+                      f"the installer again.", hard=False)
     if _torch_cuda() is False:
         return Result("GPU", False, detail,
                       "The driver looks fine but PyTorch does not see the GPU. Reboot (a fresh driver needs one) and run the "
@@ -135,7 +138,8 @@ def check_window() -> Result | None:
     if not has:
         return Result("App window", False, "the Microsoft WebView2 runtime is not installed",
                       "Install the Evergreen WebView2 runtime from https://developer.microsoft.com/microsoft-edge/webview2/ "
-                      "(Windows 11 has it built in), then run the installer again.")
+                      "(Windows 11 has it built in; on Windows 10 the installer needs an administrator — ask IT), then run "
+                      "the installer again.")
     return Result("App window", True, "WebView2 runtime present")
 
 
@@ -165,10 +169,12 @@ def check_login(email: str, password: str) -> Result:
 def check_engine() -> Result:
     """Does the engine start and answer? In-process, no port, no network — the first health check."""
     try:
-        from fastapi.testclient import TestClient
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # library deprecation chatter is not a finding for the technician
+            from fastapi.testclient import TestClient
 
-        from .api import app, __version__
-        r = TestClient(app).get("/api/health")
+            from .api import app, __version__
+            r = TestClient(app).get("/api/health")
         ok = r.status_code == 200 and r.json().get("status") == "ok"
     except Exception as e:
         return Result("Engine", False, f"did not start ({type(e).__name__}: {e})",
