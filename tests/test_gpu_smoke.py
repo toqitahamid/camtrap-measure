@@ -60,7 +60,7 @@ def test_real_models_measure_a_deer_through_the_api(cloud, tmp_path):
             time.sleep(1)
         assert s["status"] == "ready" and s["backend"] == "real" and s["device"] == "cuda", s
         assert s["batch"] >= 1
-        c.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+        c.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
         c.post("/api/sync")
         cam = {x["site"]: x for x in c.get("/api/cameras").json()}[site]
         assert cam["verdict"] == "green", cam

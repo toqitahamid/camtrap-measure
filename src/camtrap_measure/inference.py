@@ -16,6 +16,7 @@ stay interpretable and a rerun with the other method adds rows instead of replac
 """
 
 import json
+import logging
 import os
 import random
 import time
@@ -285,6 +286,9 @@ def warmup() -> None:
         state.update(status="ready", warning="FAKE inference — no models installed (uv sync --extra inference). "
                                              "Numbers are made up.")
         return
+    # The models' libraries switch root logging to INFO on import, and the HTTP client then narrates every weights
+    # request into the launcher console (seen at the first Windows launch). Warnings only — the window shows the download.
+    logging.getLogger().setLevel(logging.WARNING)
     warnings = []
     try:
         w = weights.ensure(progress=lambda done, total: state.update(download={"done_gb": round(done / 2**30, 2),

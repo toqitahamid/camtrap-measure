@@ -344,6 +344,7 @@ export default function App() {
   const [focus, setFocus] = useState({ site: '', n: 0 })
   const [pollKey, setPollKey] = useState(0)
   const [build, setBuild] = useState<{ version: string; commit: string | null } | null>(null)
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null) // sign-in step two: a code is on its way to this address
 
   const refresh = useCallback(
     () =>
@@ -367,17 +368,32 @@ export default function App() {
     return () => clearInterval(id)
   }, [loading, refresh])
 
+  async function sendCode(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const email = String(new FormData(e.currentTarget).get('email'))
+    setBusy(true)
+    setNotice(null)
+    const r = await post('/api/login/code', { email })
+    setBusy(false)
+    if (!r.ok) {
+      setNotice({ text: (await r.json()).detail ?? 'Could not send a code', kind: 'error' })
+      return
+    }
+    setCodeSentTo(email)
+  }
+
   async function login(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const form = new FormData(e.currentTarget)
     setBusy(true)
     setNotice(null)
-    const r = await post('/api/login', { email: form.get('email'), password: form.get('password') })
+    const r = await post('/api/login', { email: codeSentTo, code: form.get('code') })
     setBusy(false)
     if (!r.ok) {
       setNotice({ text: (await r.json()).detail ?? 'Sign-in failed', kind: 'error' })
       return
     }
+    setCodeSentTo(null)
     await refresh()
   }
 
@@ -432,15 +448,35 @@ export default function App() {
         {!status ? (
           !notice && <p className="muted">Connecting to engine…</p>
         ) : !status.signed_in ? (
-          <form onSubmit={login} className="card center">
-            <h2>Sign in</h2>
-            <p className="muted small">Use your FlagLabel account.</p>
-            <input name="email" type="email" placeholder="Email" required autoFocus />
-            <input name="password" type="password" placeholder="Password" required />
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+          <>
+            {loading && (
+              <section className="card">
+                <ModelsLine inf={status.inference} />
+              </section>
+            )}
+            {codeSentTo === null ? (
+              <form onSubmit={sendCode} className="card center">
+                <h2>Sign in</h2>
+                <p className="muted small">Use your FlagLabel account: a one-time code is emailed to you.</p>
+                <input name="email" type="email" placeholder="Email" required autoFocus />
+                <button type="submit" className="btn btn-primary" disabled={busy}>
+                  {busy ? 'Sending…' : 'Email me a code'}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={login} className="card center">
+                <h2>Enter the code</h2>
+                <p className="muted small">Sent to {codeSentTo} — check the spam folder if it takes a minute.</p>
+                <input name="code" inputMode="numeric" autoComplete="one-time-code" placeholder="Code from the email" required autoFocus />
+                <button type="submit" className="btn btn-primary" disabled={busy}>
+                  {busy ? 'Signing in…' : 'Sign in'}
+                </button>
+                <button type="button" className="btn" onClick={() => setCodeSentTo(null)} disabled={busy}>
+                  Use a different email
+                </button>
+              </form>
+            )}
+          </>
         ) : (
           <>
             <section className="card">

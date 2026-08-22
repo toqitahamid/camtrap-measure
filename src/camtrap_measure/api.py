@@ -58,17 +58,36 @@ def _remember(sess: dict) -> None:
     store.save_session({"refresh_token": sess["refresh_token"], "email": sess["user"]["email"]})
 
 
+class Email(BaseModel):
+    email: str
+
+
 class Login(BaseModel):
     email: str
-    password: str
+    code: str
+
+
+@app.post("/api/login/code")
+def login_code(body: Email):
+    """Step one: Supabase emails a one-time code to an existing FlagLabel account."""
+    try:
+        sb.request_code(body.email)
+    except sb.AuthError as e:
+        raise HTTPException(401, str(e))
+    except sb.Offline:
+        raise HTTPException(503, "FlagLabel cloud not reachable — check the internet connection")
+    return {"ok": True}
 
 
 @app.post("/api/login")
 def login(body: Login):
+    """Step two: the code from the email becomes the remembered session."""
     try:
-        sess = sb.sign_in(body.email, body.password)
+        sess = sb.verify_code(body.email, body.code)
     except sb.AuthError as e:
         raise HTTPException(401, str(e))
+    except sb.Offline:
+        raise HTTPException(503, "FlagLabel cloud not reachable — check the internet connection")
     _remember(sess)
     return {"ok": True}
 

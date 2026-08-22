@@ -70,16 +70,20 @@ def cloud(monkeypatch, tmp_path):
     """Fake cloud: mutable tables + a switch to go offline."""
     monkeypatch.setattr(store, "DATA_DIR", tmp_path)
     state = {"annotations": [ANN], "sites": [{"name": "TON_CAM02"}], "offline": False, "refreshes": 0,
-             "photos": {"TON_CAM02/IMG_5304.JPG": jpeg()}, "downloads": []}
+             "photos": {"TON_CAM02/IMG_5304.JPG": jpeg()}, "downloads": [], "codes_sent": []}
 
     def guard():
         if state["offline"]:
             raise sb.Offline("no route to host")
 
-    def sign_in(email, password):
+    def request_code(email):
         guard()
-        if password != "pw":
-            raise sb.AuthError("Invalid login credentials")
+        state["codes_sent"].append(email)
+
+    def verify_code(email, code):
+        guard()
+        if code != "123456":
+            raise sb.AuthError("Token has expired or is invalid")
         return {"access_token": "at", "refresh_token": "rt0", "user": {"email": email}}
 
     def refresh(token):
@@ -89,7 +93,8 @@ def cloud(monkeypatch, tmp_path):
         state["refreshes"] += 1
         return {"access_token": "at", "refresh_token": f"rt{state['refreshes']}", "user": {"email": "tech@dept.gov"}}
 
-    monkeypatch.setattr(api.sb, "sign_in", sign_in)
+    monkeypatch.setattr(api.sb, "request_code", request_code)
+    monkeypatch.setattr(api.sb, "verify_code", verify_code)
     monkeypatch.setattr(api.sb, "refresh", refresh)
     monkeypatch.setattr(api.sb, "select_annotations", lambda tok: (guard(), list(state["annotations"]))[1])
     monkeypatch.setattr(api.sb, "select_sites", lambda tok: (guard(), list(state["sites"]))[1])
@@ -113,7 +118,7 @@ def cloud(monkeypatch, tmp_path):
 @pytest.fixture
 def synced(cloud):
     c = TestClient(api.app)
-    c.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    c.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     c.post("/api/sync")
     return c
 

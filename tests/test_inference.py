@@ -260,7 +260,7 @@ def test_methods_endpoint_names_the_default_and_explains_each_choice(client):
 def test_an_offline_day_still_measures(cloud, hub, models_installed, start, tmp_path):
     """Launch, sync and the weights check all fall back with a notice; the run itself never needed the internet."""
     c, _ = start()
-    c.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    c.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     c.post("/api/sync")
     hub["offline"] = cloud["offline"] = True
     c, s = start()

@@ -1,8 +1,8 @@
 """The only Supabase client in this app — and it can only read.
 
 Hard constraint (CONTEXT.md): CamTrap Measure never writes to Supabase. This
-module talks to the cloud over plain REST and exposes auth plus exactly three
-read operations. There is no write method to call; tests/test_supabase_ro.py
+module talks to the cloud over plain REST and exposes auth (an emailed one-time
+code, then a session refresh) plus exactly three read operations. There is no write method to call; tests/test_supabase_ro.py
 asserts that stays true and that no other module talks to Supabase.
 """
 
@@ -11,7 +11,8 @@ import httpx
 __all__ = [
     "AuthError",
     "Offline",
-    "sign_in",
+    "request_code",
+    "verify_code",
     "refresh",
     "select_annotations",
     "select_sites",
@@ -56,9 +57,23 @@ def _msg(r: httpx.Response) -> str:
         return r.text
 
 
-def sign_in(email: str, password: str) -> dict:
-    """Email/password sign-in → {access_token, refresh_token, user{email}}."""
-    return _token("password", email=email, password=password)
+def _auth_post(path: str, **body) -> httpx.Response:
+    """An auth POST whose 4xx/429 answers are the user's to act on (unknown email, bad code, too many requests)."""
+    r = _send("POST", path, json=body)
+    if r.status_code in (400, 401, 403, 404, 422, 429):
+        raise AuthError(_msg(r))
+    r.raise_for_status()
+    return r
+
+
+def request_code(email: str) -> None:
+    """Have Supabase email a one-time sign-in code to an existing FlagLabel account (never creates one)."""
+    _auth_post("/auth/v1/otp", email=email, create_user=False)
+
+
+def verify_code(email: str, code: str) -> dict:
+    """Trade the emailed code for a session → {access_token, refresh_token, user{email}}."""
+    return _auth_post("/auth/v1/verify", type="email", email=email, token=code.strip()).json()
 
 
 def refresh(refresh_token: str) -> dict:

@@ -1,5 +1,6 @@
 """Guard: the Supabase wrapper is read-only and is the only Supabase client."""
 
+import json
 import re
 from pathlib import Path
 
@@ -16,7 +17,8 @@ def test_public_surface_is_auth_plus_three_reads():
     assert set(sb.__all__) == {
         "AuthError",
         "Offline",
-        "sign_in",
+        "request_code",
+        "verify_code",
         "refresh",
         "select_annotations",
         "select_sites",
@@ -27,11 +29,13 @@ def test_public_surface_is_auth_plus_three_reads():
 
 
 def test_wrapper_source_has_no_write_verbs():
-    # All traffic goes through _send(); the only non-GET is the auth token grant.
+    # All traffic goes through _send(); the only non-GETs are the auth calls (token grant, code request, code check).
     assert WRAPPER_SRC.count("_http.") == 1 and "_http.request(method" in WRAPPER_SRC
     sends = re.findall(r'_send\("(\w+)", ([^,)]+)', WRAPPER_SRC)  # verb must be a literal
     assert WRAPPER_SRC.count("_send(") == len(sends) + 1  # +1: the def; no dynamic verbs
-    assert [(m, p) for m, p in sends if m != "GET"] == [("POST", '"/auth/v1/token"')]
+    assert [(m, p) for m, p in sends if m != "GET"] == [("POST", '"/auth/v1/token"'), ("POST", "path")]
+    auth_posts = re.findall(r'_auth_post\("([^"]+)"', WRAPPER_SRC)  # the one parameterised POST only ever sees these
+    assert auth_posts == ["/auth/v1/otp", "/auth/v1/verify"]
     assert "upsert" not in WRAPPER_SRC and "Prefer" not in WRAPPER_SRC
 
 
@@ -53,7 +57,9 @@ def recorded(monkeypatch):
 
     def handler(req: httpx.Request) -> httpx.Response:
         seen.append(req)
-        if req.url.path == "/auth/v1/token":
+        if req.url.path == "/auth/v1/otp":
+            return httpx.Response(200, json={})
+        if req.url.path in ("/auth/v1/token", "/auth/v1/verify"):
             return httpx.Response(
                 200,
                 json={"access_token": "at", "refresh_token": "rt", "user": {"email": "a@b"}},
@@ -71,7 +77,7 @@ def recorded(monkeypatch):
 
 
 def test_every_data_request_is_a_get(recorded):
-    sess = sb.sign_in("a@b", "pw")
+    sess = sb.verify_code("a@b", "123456")
     sb.refresh(sess["refresh_token"])
     sb.select_annotations("at")
     sb.select_sites("at")
@@ -91,7 +97,24 @@ def test_auth_error_surfaces_server_message(monkeypatch):
         sb, "_http", httpx.Client(base_url=sb._http.base_url, transport=httpx.MockTransport(handler))
     )
     with pytest.raises(sb.AuthError, match="Invalid login credentials"):
-        sb.sign_in("a@b", "wrong")
+        sb.verify_code("a@b", "000000")
+
+
+def test_code_request_never_creates_an_account_and_rate_limits_are_user_facing(recorded, monkeypatch):
+    sb.request_code("a@b")
+    assert recorded[-1].url.path == "/auth/v1/otp" and recorded[-1].method == "POST"
+    assert json.loads(recorded[-1].content) == {"email": "a@b", "create_user": False}
+    sb.verify_code("a@b", " 123456 ")
+    assert json.loads(recorded[-1].content) == {"type": "email", "email": "a@b", "token": "123456"}
+
+    def handler(req):
+        return httpx.Response(429, json={"msg": "For security purposes, you can only request this after 42 seconds."})
+
+    monkeypatch.setattr(
+        sb, "_http", httpx.Client(base_url=sb._http.base_url, transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(sb.AuthError, match="42 seconds"):
+        sb.request_code("a@b")
 
 
 def test_network_failure_raises_offline(monkeypatch):

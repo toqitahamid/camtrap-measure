@@ -13,15 +13,25 @@ def test_fresh_install_is_signed_out_and_never_synced(client):
         "signed_in": False, "email": None, "last_sync": None, "annotations": 0, "sites": 0}
 
 
-def test_login_rejects_bad_password_with_server_message(client):
-    r = client.post("/api/login", json={"email": "tech@dept.gov", "password": "nope"})
+def test_login_rejects_bad_code_with_server_message(client):
+    r = client.post("/api/login", json={"email": "tech@dept.gov", "code": "000000"})
     assert r.status_code == 401
-    assert r.json()["detail"] == "Invalid login credentials"
+    assert r.json()["detail"] == "Token has expired or is invalid"
     assert client.get("/api/status").json()["signed_in"] is False
 
 
+def test_code_request_goes_to_the_cloud_and_offline_is_a_503(client, cloud):
+    assert client.post("/api/login/code", json={"email": "tech@dept.gov"}).status_code == 200
+    assert cloud["codes_sent"] == ["tech@dept.gov"]
+    cloud["offline"] = True
+    r = client.post("/api/login/code", json={"email": "tech@dept.gov"})
+    assert r.status_code == 503 and "not reachable" in r.json()["detail"]
+    r = client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
+    assert r.status_code == 503 and client.get("/api/status").json()["signed_in"] is False
+
+
 def test_login_persists_session_across_engine_restarts(client):
-    assert client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"}).status_code == 200
+    assert client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"}).status_code == 200
     fresh = TestClient(api.app)  # new process would read the same cached session file
     s = fresh.get("/api/status").json()
     assert s["signed_in"] is True and s["email"] == "tech@dept.gov"
@@ -32,7 +42,7 @@ def test_sync_requires_login(client):
 
 
 def test_sync_pulls_annotations_and_sites_into_sqlite(client, cloud):
-    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     r = client.post("/api/sync")
     assert r.status_code == 200
     body = r.json()
@@ -44,7 +54,7 @@ def test_sync_pulls_annotations_and_sites_into_sqlite(client, cloud):
 
 
 def test_resync_picks_up_new_and_relabeled_annotations(client, cloud):
-    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     client.post("/api/sync")
     relabeled = {**ANN, "data": flag_photo_data(n=0), "updated_at": "2026-07-01T00:00:00+00:00"}
     new = {**ANN, "site": "SRF_CAM08", "image_name": "IMG_3792.JPG", "storage_path": "SRF_CAM08/IMG_3792.JPG"}
@@ -59,7 +69,7 @@ def test_resync_picks_up_new_and_relabeled_annotations(client, cloud):
 
 
 def test_offline_sync_reports_last_sync_instead_of_error(client, cloud):
-    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     first = client.post("/api/sync").json()
     cloud["offline"] = True
     r = client.post("/api/sync")
@@ -69,20 +79,20 @@ def test_offline_sync_reports_last_sync_instead_of_error(client, cloud):
 
 
 def test_offline_before_any_sync_has_no_date(client, cloud):
-    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     cloud["offline"] = True
     assert client.post("/api/sync").json() == {"ok": False, "offline": True, "last_sync": None}
 
 
 def test_sync_rotates_refresh_token(client, cloud):
-    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     client.post("/api/sync")
     client.post("/api/sync")
     assert store.session()["refresh_token"] == "rt2"
 
 
 def test_revoked_session_signs_out(client, cloud):
-    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     store.save_session({"refresh_token": "revoked", "email": "tech@dept.gov"})
     r = client.post("/api/sync")
     assert r.status_code == 401
@@ -90,7 +100,7 @@ def test_revoked_session_signs_out(client, cloud):
 
 
 def test_logout_clears_session_keeps_local_data(client, cloud):
-    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     client.post("/api/sync")
     client.post("/api/logout")
     s = client.get("/api/status").json()

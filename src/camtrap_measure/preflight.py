@@ -2,11 +2,11 @@
 
 Each check says what it found and, when it fails, what to do about it in plain words — never a stack
 trace. It also collects the two credentials the app needs (Hugging Face read token for the weights,
-FlagLabel login) and stores them where the app reads them, so the first real launch is already set up.
+FlagLabel login by emailed one-time code) and stores them where the app reads them, so the first real
+launch is already set up.
 The logic lives here (not in the PowerShell installer) so it is testable without a Windows machine.
 """
 
-import getpass
 import re
 import shutil
 import socket
@@ -154,14 +154,34 @@ def check_token(token: str) -> Result:
     return Result("Model weights access", True, "token accepted and saved")
 
 
-def check_login(email: str, password: str) -> Result:
+def check_code_sent(email: str) -> Result:
+    """Step one of the FlagLabel login: Supabase emails a one-time code to an existing account."""
     try:
-        sess = sb.sign_in(email, password)
+        sb.request_code(email)
     except sb.AuthError as e:
-        return Result("FlagLabel login", False, str(e), "Use the same email and password as on the FlagLabel website. "
-                                                        "Forgotten? Reset it there, then try again.")
+        return Result("FlagLabel login", False, f"no code sent to {email}: {e}",
+                      "Use the email of an existing FlagLabel account (the one you sign in with on the website). "
+                      "'Only request this after N seconds' means wait that long, then try again.")
     except sb.Offline:
         return Result("FlagLabel login", False, "FlagLabel cloud not reachable", "Check the internet connection and try again.")
+    except Exception as e:  # a 5xx or a malformed answer: the cloud's problem, not the technician's
+        return Result("FlagLabel login", False, f"FlagLabel cloud answered with an error ({type(e).__name__})",
+                      "Wait a minute and try again; if it repeats, send this message to the researcher.")
+    return Result("FlagLabel login", True, f"code emailed to {email}")
+
+
+def check_login(email: str, code: str) -> Result:
+    """Step two: the code from the email becomes the session the app remembers."""
+    try:
+        sess = sb.verify_code(email, code)
+    except sb.AuthError as e:
+        return Result("FlagLabel login", False, str(e), "Type the code from the newest FlagLabel email exactly (check the spam "
+                                                        "folder). An expired code: start again with the email.")
+    except sb.Offline:
+        return Result("FlagLabel login", False, "FlagLabel cloud not reachable", "Check the internet connection and try again.")
+    except Exception as e:
+        return Result("FlagLabel login", False, f"FlagLabel cloud answered with an error ({type(e).__name__})",
+                      "Wait a minute and try again; if it repeats, send this message to the researcher.")
     store.save_session({"refresh_token": sess["refresh_token"], "email": sess["user"]["email"]})
     return Result("FlagLabel login", True, f"signed in as {email}; the app will remember this")
 
@@ -183,7 +203,7 @@ def check_engine() -> Result:
                   None if ok else "Run the installer again; if this repeats, send this message to the researcher.")
 
 
-def run(ask=input, secret=getpass.getpass, say=print) -> int:
+def run(ask=input, say=print) -> int:
     """Interactive preflight. → exit code (0 = ready to launch)."""
     results = [r for r in (check_gpu(), *check_disk(), *check_network(), check_window(), check_engine()) if r]
     say("")
@@ -201,15 +221,18 @@ def run(ask=input, secret=getpass.getpass, say=print) -> int:
         say(f"  ✗ {r.detail}")
     else:
         results.append(r)
-    for _ in range(ATTEMPTS):
-        email = ask("FlagLabel email: ").strip()
-        r = check_login(email, secret("FlagLabel password: "))
+    for _ in range(ATTEMPTS):  # three tries at an email that gets a code; then three tries at typing that code
+        email = ask("FlagLabel email (a one-time sign-in code will be emailed to it): ").strip()
+        r = check_code_sent(email)
         if r.ok:
-            results.append(r)
-            break
-        say(f"  ✗ {r.detail}")
-    else:
-        results.append(r)
+            for _ in range(ATTEMPTS):
+                r = check_login(email, ask("Code from that email: "))
+                if r.ok:
+                    break
+                say(f"  ✗ {r.detail}")
+            break  # a code went out: that is the outcome, good or bad — another email would mean another code
+        say(f"  ✗ {r.detail}\n    → {r.fix}")
+    results.append(r)
     say("")
     failed = False
     for r in results:

@@ -359,7 +359,7 @@ def test_relabeled_flag_photo_remeasures_its_photos_on_the_next_run(cloud, synce
 
 def test_sync_measures_held_photos_once_their_calibration_arrives(cloud, client, tmp_path):
     cloud["annotations"] = []  # camera registered, no flag photo labeled yet
-    client.post("/api/login", json={"email": "tech@dept.gov", "password": "pw"})
+    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     client.post("/api/sync")
     d = folder(tmp_path)
     st = run(client, d)
