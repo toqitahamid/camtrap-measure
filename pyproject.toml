@@ -17,6 +17,10 @@ dependencies = [
 [project.scripts]
 camtrap-measure = "camtrap_measure.main:main"
 
+[project.gui-scripts]
+# The desktop shortcut starts this one: a pythonw executable, so no console window can appear behind the app.
+camtrap-measure-app = "camtrap_measure.main:main"
+
 [project.optional-dependencies]
 inference = [
     "einops>=0.8.2",

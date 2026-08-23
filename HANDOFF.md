@@ -54,8 +54,11 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/toq
 No administrator needed: portable Git (MinGit) into `%LOCALAPPDATA%\Programs\MinGit`, uv via its
 own user-scope installer, clone into `%LOCALAPPDATA%\CamTrapMeasure`, `uv sync --frozen`
 (Python 3.12 from `.python-version`), preflight checks, `uv sync --frozen --extra inference`
-(torch 2.11 **cu128 from the lockfile** — a few GB), desktop shortcut to `run.bat`, first launch
-(~6.5 GB weights download with a progress bar). It asks for the HF read token and the FlagLabel
+(torch 2.11 **cu128 from the lockfile** — a few GB), desktop and Start-menu shortcuts through `scripts\launch.vbs`
+(never `run.bat`: a shortcut to a .bat means a console window), an entry in Settings > Apps under HKCU,
+first launch
+(~6.5 GB weights download with a progress bar). The installer itself runs in a window;
+`install.ps1 -Console` is the console fallback. It asks for the HF read token and the FlagLabel
 email + the one-time code FlagLabel emails (no passwords — ticket 14).
 
 Run on the workstation 2026-08-21 (CONTEXT "Windows acceptance"): everything above passed

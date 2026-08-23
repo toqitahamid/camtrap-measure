@@ -567,3 +567,72 @@ sites, download storage object); no write method exists to call. A test asserts
 the wrapper surface stays read-only and that no other Supabase client is
 constructed anywhere in the codebase. DB-level enforcement (RLS) deliberately
 untouched: the same user accounts must keep writing via cloud FlagLabel.
+
+## 2026-08-23 - It installs and starts like an app (ticket 18)
+
+The researcher, on the shortcut we shipped: *"why does everytime i click the desktop shortcut button it
+opens a command prompt? why not make the app professional"*. One cause, three faults deep: a `.lnk` whose
+target is a `.bat` is run by `cmd.exe`, a console program, so Windows must give it a console; `run.bat`
+then ran the app in that console's foreground, so the black window stayed for the whole session and
+closing it killed the run; and `camtrap-measure.exe` was a `[project.scripts]` console executable of its
+own.
+
+**The shortcut runs `wscript.exe scripts\launch.vbs`.** wscript is not a console program, so nothing is
+opened. `powershell -WindowStyle Hidden` was the obvious alternative and was rejected: it still flashes a
+black window on the way up, which is exactly the complaint. The .vbs is four lines and does one thing.
+
+**The update moved out of `run.bat` into `scripts\launcher.ps1`.** Not a rewrite for its own sake: the
+launcher must now show a splash and report a failure in a dialog, and cmd can do neither. It also settles
+an old fragility - the checkout rewrites the launcher while it runs, and cmd re-reads a `.bat` by byte
+offset, which is why everything after the checkout had to sit on one last line. PowerShell parses a
+script whole before executing it. Every promise of ticket 11 is carried over and asserted in
+`tests/test_launcher.py`: `ref.txt`, the offline fallback, the rollback to the previous commit and its
+offline sync. `run.bat` stays as the console way in (`-Console`), one command long.
+
+Two rules learned in the writing. `Start-Process -PassThru` hands back a **null** ExitCode unless the
+process object's `.Handle` is touched while it lives - untouched, every step reads as a failure and the
+launcher would "go offline" on a working network (seen). And `-NoNewWindow` is what stops Windows giving
+a child process a console of its own when the parent has none.
+
+**A GUI entry point.** `[project.gui-scripts] camtrap-measure-app` builds a pythonw executable (PE
+subsystem 2, checked), so the app itself can never own a console. `camtrap-measure` stays for the
+terminal and for `--preflight`.
+
+**An icon, drawn from the mark the window already uses** (`scripts/make_icon.py` writes
+`src/camtrap_measure/assets/camtrap-measure.ico`, inside the package so it travels with an install).
+Below 32 px the four ticks blur into the brackets, so the small sizes are drawn without them. The window
+wears it through `win_icon.py`: a pywebview window is Python's until `WM_SETICON` says otherwise, and
+`SetCurrentProcessExplicitAppUserModelID` is what the taskbar groups a pinned button by. Both are
+cosmetic and best-effort - and both say why in plain words rather than failing silently, into the
+launcher's log.
+
+**One app at a time.** The launcher looks for a window titled "CamTrap Measure" and brings it forward
+instead of starting a second engine; two engines would fight over an 8 GB card.
+
+**The installer got a window** - steps, a progress bar, a details pane streaming what each command
+prints, and a dialog on failure - plus a Start-menu shortcut, a per-user Settings > Apps entry (HKCU, no
+administrator) and `scripts/uninstall.ps1` behind its UninstallString. The uninstaller asks twice: once
+about the app, once about `~/.camtrap-measure`, which holds the measurements and ~7 GB of weights and is
+kept unless it is asked for by name. It copies itself into TEMP first, because it deletes the folder it
+lives in.
+
+A real installer package (Inno Setup, MSI) was considered and left alone: building one needs a compiler
+on the build machine and an administrator to install that, the dept machines have neither, and the
+payload is a Git clone plus a multi-GB download that no installer package would carry anyway.
+
+## 2026-08-23 - Three faults in the window (same day)
+
+Reported from the running app: the camera list opened white-on-white, the chevron beside it did nothing,
+and RESULTS showed the last run's numbers before any folder had been chosen.
+
+A `<select>`'s dropdown is painted by the browser and takes its colours from the select element itself;
+ours is transparent, so the list landed on the light default while inheriting our light text. `select`
+now declares `color-scheme: dark` and the options carry their own colours. The chevron sat *beside* the
+select in the flex row, so a click on it hit the label: it is now positioned over the select's right end
+with `pointer-events: none`. The focus ring went amber with it - the browser's blue belonged to no
+palette here.
+
+RESULTS answers for the folder in the bar now: `/api/summary` and `/api/export.csv` take a `folder`, and
+"Everything measured" is a deliberate choice in the filter row rather than the default. Photos directly
+inside the folder count and nothing below it, because a run only ever reads one folder's JPEGs.
+

@@ -3,6 +3,7 @@
 import argparse
 import os
 import socket
+import sys
 import threading
 import time
 
@@ -52,6 +53,15 @@ def shutdown(exit_process=os._exit) -> None:
     exit_process(0)
 
 
+def _wear_icon() -> None:
+    """Runs once the GUI is up (pywebview gives it a thread): the window is Python's until this lands."""
+    from . import win_icon
+
+    why = win_icon.apply()
+    if why:  # cosmetic, so it never stops the app - but it is said out loud, into the launcher's log
+        print(f"window icon not set: {why}", file=sys.stderr, flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="camtrap-measure")
     parser.add_argument(
@@ -76,9 +86,12 @@ def main() -> None:
         return
     import webview  # imported late: needs a GUI toolkit (WebView2 on Windows)
 
-    from . import dialogs
+    from . import dialogs, win_icon
 
+    why = win_icon.identify()  # before the window exists: Windows reads this when it makes the taskbar button
+    if why:
+        print(f"application identity not set: {why}", file=sys.stderr, flush=True)
     webview.settings["ALLOW_DOWNLOADS"] = True  # the CSV export is a plain download link
-    dialogs.window = webview.create_window("CamTrap Measure", url, width=1200, height=800)  # Browse… opens its dialog
-    webview.start()
+    dialogs.window = webview.create_window(win_icon.TITLE, url, width=1200, height=800)  # Browse… opens its dialog
+    webview.start(_wear_icon)
     shutdown()  # webview.start() returns once the window is closed
