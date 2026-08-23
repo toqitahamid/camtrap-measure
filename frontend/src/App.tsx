@@ -449,7 +449,7 @@ export default function App() {
               <div className="spacer" />
               <span className="mono tiny" style={{ color: 'var(--faint)' }}>
                 {inf.backend === 'real'
-                  ? `MegaDetector + SpeciesNet · ${inf.device} · batch ${inf.batch}`
+                  ? `MegaDetector + SpeciesNet · ${inf.gpu ?? inf.device} · ${inf.precision} · batch ${inf.batch}`
                   : 'made-up numbers (no models installed)'}
               </span>
             </div>
@@ -479,7 +479,7 @@ export default function App() {
                 <span style={{ color: 'var(--line)' }}>·</span>
                 <span className="mono">
                   {inf.backend === 'real'
-                    ? `MegaDetector + SpeciesNet ${inf.weights} · ${inf.device} · batch ${inf.batch}`
+                    ? `MegaDetector + SpeciesNet ${inf.weights} · ${inf.gpu ?? inf.device} · ${inf.precision} · batch ${inf.batch}`
                     : 'made-up numbers (no models installed)'}
                 </span>
                 {inf.warning && <span className="warn">⚠ {inf.warning}</span>}

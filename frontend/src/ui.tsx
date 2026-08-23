@@ -5,6 +5,8 @@ export type Inference = {
   status: 'loading' | 'ready' | 'error'
   backend: 'fake' | 'real'
   device: string | null
+  gpu: string | null        // the card's own name, so "is it really using the GPU" is answered on screen
+  precision: string | null  // float16 / bfloat16: what the distance net actually runs in
   batch: number | null
   weights: string | null
   warning: string | null

@@ -30,6 +30,9 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], np.float32).reshape(3, 1, 1)
 BANNER_Y = 995  # of 1080: the camera's info strip below this row is identical across photos — cropped before matching
 STRIDE = 4
 D_MIN, D_MAX = 2.0, 18.0  # reference distance map is trusted only here (training range)
+UPSAMPLE_RES = 864       # RoMa's own default, and what the research ran
+UPSAMPLE_RES_TIGHT = 672  # the warp the dept's 8 GB card can hold while the desktop is also using it
+TIGHT_CARD_GB = 10        # below this much VRAM in total, the 864 warp does not fit and the run crawls
 MIN_INLIERS = 15  # published gate (reports/gate_57cam.md): fewer homography inliers = misfiled or moved camera
 HALF = 2  # 5×5 readout window
 
@@ -57,6 +60,40 @@ def read_at(pred: np.ndarray, u: float, v: float) -> float | None:
     return float(np.nanmedian(patch)) if patch.size and np.isfinite(patch).any() else None
 
 
+KDE_CHUNK = 4096  # rows of the density matrix computed at once; the whole matrix is 3.2 GB
+
+
+def kde_chunked(x, std=0.1, half=True, down=None, chunk=KDE_CHUNK):
+    """RoMa's match-density estimate, one band of rows at a time.
+
+    Verbatim arithmetic from romatch.utils.kde, which builds the whole N x N distance matrix at once:
+    with RoMa's own defaults N is 40000 (4x the 10000 samples, "balanced" mode), so that matrix is
+    3.2 GB in half precision and the expression materialises it several times over. On an 8 GB card
+    with a browser open the run died there before the first photo (seen 2026-08-23).
+
+    Chunked, the peak is chunk x N instead, the sum is the same one, and the sampling that follows is
+    unchanged - so the published inlier gate (MIN_INLIERS) still means what the research measured.
+    """
+    import torch
+
+    if half:
+        x = x.half()
+    ref = x[::down] if down is not None else x
+    scale = -1 / (2 * std**2)
+    out = torch.empty(len(x), device=x.device, dtype=x.dtype)
+    for i in range(0, len(x), chunk):
+        d = torch.cdist(x[i:i + chunk], ref)
+        out[i:i + chunk] = d.mul_(d).mul_(scale).exp_().sum(dim=-1)
+    return out
+
+
+def use_chunked_kde() -> None:
+    """Install `kde_chunked` where RoMa's sampler looks it up (it imported the name at module load)."""
+    from romatch.models import matcher
+
+    matcher.kde = kde_chunked
+
+
 def homography(src: np.ndarray, dst: np.ndarray):
     """MAGSAC homography src → dst (pixels). → (H | None, inlier count)."""
     import cv2
@@ -71,6 +108,20 @@ def normalize(im: Image.Image) -> np.ndarray:
     """RGB photo → (3, SIZE, SIZE) float32, ImageNet-normalized."""
     arr = np.asarray(im.resize((SIZE, SIZE), Image.BILINEAR), np.float32).transpose(2, 0, 1) / 255.0
     return (arr - IMAGENET_MEAN) / IMAGENET_STD
+
+
+def native_bf16(torch) -> bool:
+    """Does this card do bfloat16 in hardware?
+
+    `torch.cuda.is_bf16_supported()` answers True on cards that only emulate it, and the emulation is
+    slower than either alternative: on the dept's RTX 2060 SUPER (Turing, compute 7.5) the same
+    convolutions took 122 ms in bf16, 44 ms in fp32 and 25 ms in fp16 (measured 2026-08-23). The app
+    was picking bf16 on that card, so the unified net ran five times slower than it needed to.
+    """
+    try:
+        return bool(torch.cuda.is_bf16_supported(including_emulation=False))
+    except TypeError:  # older torch: no such argument, and compute capability is the same question
+        return torch.cuda.get_device_properties(0).major >= 8
 
 
 def load_unified(ckdir: Path, device: str):
@@ -127,15 +178,37 @@ class Distance:
         from romatch import roma_outdoor
 
         self.torch, self.device = torch, device
-        # ponytail: research ran bf16 only; fp16 on pre-Ampere cards is unverified for DA-V2-L — check on the dept GPU.
-        self.dtype = torch.bfloat16 if device == "cuda" and torch.cuda.is_bf16_supported() else torch.float16
+        use_chunked_kde()
+        self.dtype = torch.bfloat16 if device == "cuda" and native_bf16(torch) else torch.float16
         manifest = json.loads((weights_dir / "manifest.json").read_text())
+        self.upsample_res = self._upsample_res()
         # custom local_corr CUDA kernel is not built anywhere we run; pure-torch fallback as in the research runs
-        self.roma = roma_outdoor(device=device, use_custom_corr=False,
+        self.roma = roma_outdoor(device=device, use_custom_corr=False, upsample_res=self.upsample_res,
                                  weights=torch.load(weights_dir / manifest["roma"], map_location=device),
                                  dinov2_weights=torch.load(weights_dir / manifest["dinov2"], map_location=device))
         self.net = load_unified(weights_dir / manifest["unified"], device)
         self.refs: dict[tuple, tuple] = {}  # per calibration: (banner-cropped flag photo, its normalized tensor, ModelB)
+        if device == "cuda":
+            # Half weights, not just half arithmetic: under autocast the fp32 net is cast on every
+            # forward and the cast copies are kept for the region, ~0.6 GB that buys nothing here. Measured
+            # 2026-08-23: the metres move by 2-5 cm, inside RoMa's own 3-17 cm spread between repeat runs.
+            self.net = self.net.to(self.dtype)
+
+    def _upsample_res(self) -> int:
+        """RoMa's refinement resolution, chosen by the size of the card and never by what is free at this
+        moment, so the same computer always produces the same numbers.
+
+        Measured on the dept's 8 GB RTX 2060 SUPER (2026-08-23, scripts/profile_run.py): at 864 one photo
+        needs 6.3 GB, more than Windows leaves free with a browser open, so the driver quietly serves the
+        overflow from system memory over PCIe and a photo takes 3.6 to 26 seconds - the same run, the same
+        settings, a lottery. At 672 it needs 4.4 GB, fits, and takes about 2. The metres move by ~8 cm,
+        which is inside the 3-17 cm the method already moves between repeat runs of identical settings
+        (RoMa samples its matches at random). A card big enough for 864 keeps the research default.
+        """
+        if self.device != "cuda":
+            return UPSAMPLE_RES
+        total_gb = self.torch.cuda.get_device_properties(0).total_memory / 2**30
+        return UPSAMPLE_RES_TIGHT if total_gb < TIGHT_CARD_GB else UPSAMPLE_RES
 
     def reference(self, calibration: dict) -> tuple:
         """Reference features for one calibration window, computed once and kept. Keyed on the annotation

@@ -16,9 +16,16 @@ from camtrap_measure import api, inference, weights
 from tests.test_measure import folder, run
 
 
+class StubDist:
+    """Only what warmup reads off the real one: the precision the status line reports."""
+    dtype = "torch.float16"
+
+
 class StubReal:
     def __init__(self, weights_dir, device="cuda"):
         self.dir, self.device, self.batch, self.warning = weights_dir, device, 16, None
+        self.gpu = "NVIDIA GeForce RTX 4070 (12.0 GB)" if device == "cuda" else "CPU only - no GPU in use"
+        self.dist = StubDist()
 
     def __call__(self, paths, calibration, method):
         yield from inference.fake(paths, calibration, method)
@@ -26,8 +33,9 @@ class StubReal:
 
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch):
-    monkeypatch.setattr(inference, "state", {"status": "ready", "backend": "fake", "device": None, "batch": None,
-                                             "weights": None, "warning": None, "error": None, "download": None})
+    monkeypatch.setattr(inference, "state", {"status": "ready", "backend": "fake", "device": None, "gpu": None,
+                                             "precision": None, "batch": None, "weights": None, "warning": None,
+                                             "error": None, "download": None})
     monkeypatch.setattr(inference, "backend", inference.fake)
     monkeypatch.delenv("CAMTRAP_WEIGHTS_DIR", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
@@ -96,6 +104,7 @@ def test_first_start_downloads_weights_and_loads_real_models(cloud, hub, models_
     c, s = start()
     assert hub["n"] == 1 and (tmp_path / "weights" / "manifest.json").exists()
     assert s == {"status": "ready", "backend": "real", "device": "cuda", "batch": 16, "weights": "2026.08.20",
+                 "gpu": "NVIDIA GeForce RTX 4070 (12.0 GB)", "precision": "float16",
                  "warning": None, "error": None, "download": None}
 
 

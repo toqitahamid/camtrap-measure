@@ -44,6 +44,7 @@ FAKE_DELAY_S = float(os.environ.get("CAMTRAP_FAKE_DELAY", "0"))  # per photo, to
 MD_CONF = 0.15  # deliberately low: weak boxes are kept and land in the suspicious gallery (ticket 09), never silently binned
 MIN_SPECIES_SCORE = 0.2  # below this SpeciesNet is guessing → "unsure" (research knob, detect/speciesnet_wrap.py)
 VRAM_FLOOR_GB = 8  # CONTEXT "Performance envelope": the design floor; smaller cards run, with a warning
+RUN_VRAM_GB = 4.5  # what one photo needs, weights and working memory together (scripts/profile_run.py, 2026-08-23)
 FEET_BAND = 0.05  # the lowest 5% of a mask's rows are its feet (research 04_lindenthal_zeroshot/prep.py, 01_socrates)
 MIN_MASK_IOU = 0.5  # a SAM3 mask is the box's animal when box and mask box overlap this much (research detect/label_deer.py)
 SAM3_SCORE = 0.1  # keep weak SAM3 instances: the box match decides which mask is the animal's, not the score
@@ -145,6 +146,7 @@ class Real:
 
         self.np, self.torch, self.BBox = np, torch, BBox
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.gpu = self._gpu_name()
         self.warning = None
         self.weights_dir = weights_dir
         self.manifest = json.loads((weights_dir / "manifest.json").read_text())
@@ -157,14 +159,28 @@ class Real:
             gb, free_gb = total / 2**30, free / 2**30
             if round(gb) < VRAM_FLOOR_GB:  # an "8 GB" card reports ~7.99 GiB usable (seen on the dept RTX 2060 SUPER)
                 self.warning = f"This GPU has {gb:.1f} GB of memory, below the {VRAM_FLOOR_GB} GB the app is designed for — runs will be slow."
-            elif free_gb < VRAM_FLOOR_GB * 0.75:
-                # the dept machine shares its card with the desktop, Chrome and Teams; a run that starts
-                # with little left over dies on an out-of-memory error halfway through (seen 2026-08-23)
-                self.warning = (f"Only {free_gb:.1f} GB of the GPU's {gb:.1f} GB is free — other programs are using it. "
-                                "Close Chrome, Teams or other heavy windows if a run fails.")
+            elif free_gb < RUN_VRAM_GB:
+                # The dept machine shares its card with the desktop, Chrome and Teams. Short of memory the
+                # run does not usually fail — Windows quietly serves the overflow from system memory over
+                # PCIe, and the same photo takes ten times as long (33 s against 3 s, measured 2026-08-23).
+                self.warning = (f"Only {free_gb:.1f} GB of the GPU's {gb:.1f} GB is free, and a run needs about "
+                                f"{RUN_VRAM_GB:.1f} GB — other programs are using the card. Measuring will be "
+                                "several times slower until Chrome, Teams or other heavy windows are closed.")
             self.batch = self._probe_batch()
+            # The probe's largest successful trial stays in the allocator's cache — 2.9 GB of this card,
+            # held but unused (measured 2026-08-23). Nothing else can have it, and on a card this size the
+            # run then overflows into system memory, where a photo takes ten times as long.
+            torch.cuda.empty_cache()
         else:
             self.batch = 4
+
+    def _gpu_name(self) -> str:
+        """What the status line shows, so "is it really using the GPU?" has an answer on screen: the card's
+        own name, from the driver, or plainly that there is none."""
+        if self.device != "cuda":
+            return "CPU only — no GPU in use"
+        p = self.torch.cuda.get_device_properties(0)
+        return f"{p.name} ({p.total_memory / 2**30:.1f} GB)"
 
     def _autocast(self, dtype=None):
         """Mixed precision on CUDA (fp16 unless told otherwise), nothing on the CPU."""
@@ -271,8 +287,8 @@ class Real:
 
 backend = fake
 # status: loading | ready | error. Starts ready-on-fake so the API works before/without warmup (tests, dev).
-state: dict = {"status": "ready", "backend": "fake", "device": None, "batch": None, "weights": None,
-               "warning": None, "error": None, "download": None}  # download: {done_gb, total_gb} while weights are fetched
+state: dict = {"status": "ready", "backend": "fake", "device": None, "gpu": None, "precision": None,
+               "batch": None, "weights": None, "warning": None, "error": None, "download": None}  # download: {done_gb, total_gb} while weights are fetched
 
 
 def models_installed() -> bool:
@@ -316,5 +332,6 @@ def warmup() -> None:
                         "Check that the NVIDIA driver is installed and the card is seated.")
     if real.warning:
         warnings.append(real.warning)
-    state.update(status="ready", backend="real", device=real.device, batch=real.batch,
+    state.update(status="ready", backend="real", device=real.device, gpu=real.gpu, batch=real.batch,
+                 precision=str(real.dist.dtype).replace("torch.", ""),
                  warning=" · ".join(warnings) or None)

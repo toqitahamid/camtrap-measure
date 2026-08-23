@@ -674,3 +674,67 @@ double-click bringing the running window forward instead of starting a second en
 and its process going with it, and the installer's own window writing the shortcut, the Start-menu entry
 and the Settings > Apps registration.
 
+
+## Making a run fast, and proving the GPU is doing it (2026-08-23)
+
+A folder of 11 real photos took **364 s — 33 s a photo**. The same folder now takes 34 s: **3.1 s a
+photo, 1.65 s once warm**, about 1150 photos an hour instead of 109. Nothing about the method changed:
+the metres move by less than the method already moves between repeat runs of identical settings.
+
+The measurements are reproducible with `uv run python scripts/profile_run.py <folder> --site <camera>
+--flag <photo>`, which times every stage with the GPU drained on both sides (CUDA is asynchronous, so
+an unsynchronised timer bills the next stage for this one's work), records the peak VRAM each stage
+adds, and samples `nvidia-smi` while the run happens.
+
+### What was actually wrong
+
+The card was never the problem. **The app did not fit in it**, and Windows hides that: when a CUDA
+allocation does not fit in VRAM the driver serves it from system memory over PCIe instead of failing,
+so the app keeps working and simply crawls. The same run, unchanged, took 3.6 s a photo one minute and
+26 s the next depending on what Chrome had taken - a lottery, not a benchmark. Four causes, in the
+order they cost:
+
+1. **RoMa's `kde` builds the whole match-density matrix at once.** With its own defaults that is
+   40000 x 40000 in half precision - 3.2 GB, and the expression materialises it several times over.
+   This was not slow, it was fatal: on an 8 GB card the run died before the first photo with
+   `CUDA error: out of memory` inside `romatch/utils/kde.py`. `distance.kde_chunked` computes the same
+   sum a band of rows at a time and returns **bit-identical** results (`tests/test_performance.py`), so
+   the sampling that follows, and the published `MIN_INLIERS` gate, still mean what the research
+   measured.
+2. **bfloat16 was being used on a card that only emulates it.** `torch.cuda.is_bf16_supported()`
+   answers True on Turing, where bf16 is emulated: the same convolutions took **122 ms in bf16, 44 ms
+   in fp32, 25 ms in fp16**. The unified net now asks `native_bf16()`, which passes
+   `including_emulation=False`. SAM3 keeps the behaviour its comment already described - a card without
+   real bf16 runs it in fp32, slower but right.
+3. **RoMa's 864 x 864 refinement does not fit on an 8 GB card.** At 864 a photo needs 6.3 GB, more than
+   Windows leaves free with a browser open; at 672 it needs 4.4 GB and fits. `Distance._upsample_res`
+   chooses by the card's *total* memory, never by what happens to be free, so a given computer always
+   produces the same numbers; a card of 10 GB or more keeps RoMa's default, which is what the research
+   ran.
+4. **The SpeciesNet batch probe kept its largest trial.** 2.9 GB held in the allocator's cache, unused,
+   which is roughly the headroom the run then lacked. `empty_cache()` after the probe gives it back.
+
+Distances at each step, same five photos, against the previous setting: **2-8 cm**. RoMa samples its
+matches at random, and repeating one setting unchanged moves them **3-17 cm**; the app's own reported
+90% band on these photos is about **±3 m**. The change is far inside the noise it is measured against.
+
+Deliberately not changed: `symmetric=False` halves RoMa's encoder work and was 1.7x faster again, but
+it tripled the run-to-run spread (2.7 cm to 16.6 cm). Speed bought with reproducibility is the wrong
+trade for a measurement tool. **ponytail:** both this and the 672 warp should be checked against the
+research repo's labeled data when open item 3 (MD vs MD+SAM3) is run - the same evaluation answers both.
+
+### Where the time goes now
+
+Per photo, warm, on the dept card: **RoMa alignment 1.3 s (68%)**, MegaDetector ~0.27 s, SpeciesNet
+~0.11 s, unified net **0.079 s** (it was 15.8 s). GPU utilisation averaged 38% during the run, so the
+GPU is no longer the limit - the next real gain is RoMa, whose reference photo is the same for every
+photo of a run and is re-encoded every time. That is invasive (it means reaching inside `romatch`), so
+it waits for a folder big enough to justify it.
+
+### "Is it really using the GPU?"
+
+It has to be answerable from the app's own window, not from a terminal. The status line now reads
+`MegaDetector + SpeciesNet 2026.08.20c · NVIDIA GeForce RTX 2060 SUPER (8.0 GB) · float16 · batch 32`,
+from `torch.cuda.get_device_properties`, and says `CPU only — no GPU in use` when there is no card. The
+shared-card warning is calibrated to what a run now needs (`RUN_VRAM_GB = 4.5`) instead of a guess, and
+says what actually happens - several times slower, not "may fail".
