@@ -271,7 +271,7 @@ if ((Run "uv" @("sync", "--frozen") $Dir) -ne 0) {
 # supply, so the installer asks for it in its own window and hands it over in the environment; signing in
 # to FlagLabel happens in the app window, which has had its own sign-in since ticket 14.
 $cfg = Join-Path $env:USERPROFILE ".camtrap-measure\config.json"
-$hasToken = (Test-Path $cfg) -and ((Get-Content $cfg -Raw) -match '"hf_token"\s*:\s*"\S')
+$hasToken = $env:HF_TOKEN -or ((Test-Path $cfg) -and ((Get-Content $cfg -Raw) -match '"hf_token"\s*:\s*"\S'))  # already answered: do not ask again
 if (-not $hasToken) {
     $token = Ask-Token
     if ($token) { $env:HF_TOKEN = $token }
