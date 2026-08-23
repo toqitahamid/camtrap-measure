@@ -244,3 +244,6 @@ if ($app.HasExited -and $app.ExitCode -ne 0) {
 Log "app started (pid $($app.Id))"
 Close-Splash
 if ($Console) { $app.WaitForExit(); exit $app.ExitCode }
+# A form was shown without a message loop of its own; ending the script explicitly is what makes
+# the process go, rather than lingering with a closed window nobody can see.
+exit 0

@@ -333,3 +333,7 @@ if ($Form) {
     Write-Host ""
     Write-Host "Done. From now on, double-click '$Name' on the desktop." -ForegroundColor Green
 }
+
+# A form was shown without a message loop of its own; ending the script explicitly is what makes
+# the process go, rather than lingering with a closed window nobody can see.
+exit 0
