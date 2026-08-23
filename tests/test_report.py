@@ -245,10 +245,10 @@ def test_export_defaults_to_deer_rows_without_suspicious_ones_and_documents_itse
     assert rows[0]["distance_m"] == "5.0" and rows[0]["q05_m"] == "4.25" and rows[0]["q95_m"] == "6.0"
     assert rows[0]["method"] == "md" and rows[0]["flag"] == ""
     assert set(rows[0]) == {"photo", "camera", "timestamp", "species", "distance_m", "q05_m", "q95_m", "confidence",
-                            "method", "match_score", "flag"}
+                            "method", "fidelity", "match_score", "flag"}  # fidelity: which settings made the number
     text = "\n".join(doc)
     assert "3 suspicious rows excluded" in text and "metres" in text and "90%" in text
-    for col in ("distance_m", "q05_m", "q95_m", "confidence", "method", "flag", "timestamp"):
+    for col in ("distance_m", "q05_m", "q95_m", "confidence", "method", "fidelity", "flag", "timestamp"):
         assert col in text
 
 

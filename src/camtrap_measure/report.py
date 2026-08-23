@@ -15,7 +15,7 @@ from datetime import datetime
 from ntpath import basename  # splits on / and \ alike: paths come from the dept's Windows machine or a Linux test box
 from pathlib import Path
 
-from . import calibration, measure, store
+from . import calibration, inference, measure, store
 from .distance import MIN_INLIERS
 from .inference import DEFAULT_METHOD, MIN_SPECIES_SCORE
 
@@ -24,13 +24,15 @@ DEER = {"white-tailed deer", "unsure"}  # default export: the survey target plus
 BIN_M = 2  # histogram bin width, metres
 
 COLUMNS = ["photo", "camera", "timestamp", "species", "distance_m", "q05_m", "q95_m", "confidence", "method",
-           "match_score", "flag"]
+           "fidelity", "match_score", "flag"]
 DOC = """\
 # photo: file name; camera: site (the photo folder's name); timestamp: EXIF capture time in the camera's local time, no zone
 # species: SpeciesNet name — 'white-tailed deer' is any deer-family prediction, 'unsure' a weak one (score < {min_species})
 # distance_m: horizontal ground distance to the animal in metres (median estimate)
 # q05_m, q95_m: bounds of the 90% interval around distance_m, metres; empty when no distance could be read
 # confidence: MegaDetector box confidence, 0-1; method: md = distance read at the box bottom, sam3 = at the SAM3 mask's feet
+# fidelity: research = the published pipeline's settings, fast = the faster settings for a small GPU (see the app's docs);
+#           distances differ between the two by a few centimetres, well inside the q05-q95 band, but do not mix them silently
 # match_score: alignment inliers between this photo and its flag photo (fewer than {min_inliers} = suspicious)
 # flag: empty for a clean row, else why the row is suspicious (such rows are in this file only if you asked for them)
 """.format(min_inliers=MIN_INLIERS, min_species=MIN_SPECIES_SCORE)
@@ -160,7 +162,7 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
         if seen:
             row.update(captured_at=seen["captured_at"], match_score=seen["match_score"], method=seen["method"],
                        flag_image=seen["calibration_image"],
-                       stale=cal is not None and not measure.current_answer(seen, cal, method),
+                       stale=cal is not None and not measure.current_answer(seen, cal, method, inference.fidelity()),
                        reasons=[seen["held_reason"]] if seen["held_reason"] else [])
             for r in sorted(dets.get(str(p), []), key=lambda r: r["idx"]):
                 why = reasons(r)

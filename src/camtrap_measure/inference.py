@@ -44,7 +44,23 @@ FAKE_DELAY_S = float(os.environ.get("CAMTRAP_FAKE_DELAY", "0"))  # per photo, to
 MD_CONF = 0.15  # deliberately low: weak boxes are kept and land in the suspicious gallery (ticket 09), never silently binned
 MIN_SPECIES_SCORE = 0.2  # below this SpeciesNet is guessing → "unsure" (research knob, detect/speciesnet_wrap.py)
 VRAM_FLOOR_GB = 8  # CONTEXT "Performance envelope": the design floor; smaller cards run, with a warning
-RUN_VRAM_GB = 4.5  # what one photo needs, weights and working memory together (scripts/profile_run.py, 2026-08-23)
+RUN_VRAM_GB = {distance.RESEARCH: 6.5, distance.FAST: 4.5}  # what one photo needs, weights and working memory
+                                                            # together (scripts/profile_run.py, 2026-08-23)
+
+
+def fidelity() -> str:
+    """Which of the two sets of settings a run uses: the published pipeline, or the fast one.
+
+    The published pipeline is the default and stays the default — the app exists to put the paper's
+    numbers in front of a technician, and a number that is nearly the paper's is worth less than a slow
+    one that is. `fidelity` is an expert escape hatch for a computer too small for the published
+    settings: `CAMTRAP_FIDELITY=fast`, or "fidelity": "fast" in config.json. What it costs is in
+    CONTEXT.md, and every measured photo records which one produced it.
+    """
+    from . import store
+
+    want = os.environ.get("CAMTRAP_FIDELITY") or store.config().get("fidelity") or distance.RESEARCH
+    return want if want in distance.FIDELITIES else distance.RESEARCH
 FEET_BAND = 0.05  # the lowest 5% of a mask's rows are its feet (research 04_lindenthal_zeroshot/prep.py, 01_socrates)
 MIN_MASK_IOU = 0.5  # a SAM3 mask is the box's animal when box and mask box overlap this much (research detect/label_deer.py)
 SAM3_SCORE = 0.1  # keep weak SAM3 instances: the box match decides which mask is the animal's, not the score
@@ -137,7 +153,7 @@ class Real:
     box's ground contact. Loaded once, kept resident. FP16 via autocast on CUDA; SpeciesNet batch size
     probed against the VRAM actually free, then halved on any out-of-memory during a run."""
 
-    def __init__(self, weights_dir: Path):
+    def __init__(self, weights_dir: Path, fidelity_: str | None = None):
         import numpy as np
         import torch
         from megadetector.detection.run_detector import load_detector
@@ -145,6 +161,7 @@ class Real:
         from speciesnet.utils import BBox
 
         self.np, self.torch, self.BBox = np, torch, BBox
+        self.fidelity = fidelity_ or fidelity()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.gpu = self._gpu_name()
         self.warning = None
@@ -152,20 +169,20 @@ class Real:
         self.manifest = json.loads((weights_dir / "manifest.json").read_text())
         self.md = load_detector(str(weights_dir / self.manifest["megadetector"]), force_cpu=self.device == "cpu")
         self.sn = SpeciesNetClassifier(str(weights_dir / self.manifest["speciesnet"]), device=self.device)
-        self.dist = distance.Distance(weights_dir, self.device)
+        self.dist = distance.Distance(weights_dir, self.device, self.fidelity)
         self.sam3 = None  # (model, processor) once the precise method has been asked for
         if self.device == "cuda":
             free, total = torch.cuda.mem_get_info()
             gb, free_gb = total / 2**30, free / 2**30
             if round(gb) < VRAM_FLOOR_GB:  # an "8 GB" card reports ~7.99 GiB usable (seen on the dept RTX 2060 SUPER)
                 self.warning = f"This GPU has {gb:.1f} GB of memory, below the {VRAM_FLOOR_GB} GB the app is designed for — runs will be slow."
-            elif free_gb < RUN_VRAM_GB:
+            elif free_gb < RUN_VRAM_GB[self.fidelity]:
                 # The dept machine shares its card with the desktop, Chrome and Teams. Short of memory the
                 # run does not usually fail — Windows quietly serves the overflow from system memory over
                 # PCIe, and the same photo takes ten times as long (33 s against 3 s, measured 2026-08-23).
                 self.warning = (f"Only {free_gb:.1f} GB of the GPU's {gb:.1f} GB is free, and a run needs about "
-                                f"{RUN_VRAM_GB:.1f} GB — other programs are using the card. Measuring will be "
-                                "several times slower until Chrome, Teams or other heavy windows are closed.")
+                                f"{RUN_VRAM_GB[self.fidelity]:.1f} GB — other programs are using the card. Measuring "
+                                "will be several times slower until Chrome, Teams or other heavy windows are closed.")
             self.batch = self._probe_batch()
             # The probe's largest successful trial stays in the allocator's cache — 2.9 GB of this card,
             # held but unused (measured 2026-08-23). Nothing else can have it, and on a card this size the
@@ -288,7 +305,7 @@ class Real:
 backend = fake
 # status: loading | ready | error. Starts ready-on-fake so the API works before/without warmup (tests, dev).
 state: dict = {"status": "ready", "backend": "fake", "device": None, "gpu": None, "precision": None,
-               "batch": None, "weights": None, "warning": None, "error": None, "download": None}  # download: {done_gb, total_gb} while weights are fetched
+               "fidelity": None, "batch": None, "weights": None, "warning": None, "error": None, "download": None}  # download: {done_gb, total_gb} while weights are fetched
 
 
 def models_installed() -> bool:
@@ -333,5 +350,5 @@ def warmup() -> None:
     if real.warning:
         warnings.append(real.warning)
     state.update(status="ready", backend="real", device=real.device, gpu=real.gpu, batch=real.batch,
-                 precision=str(real.dist.dtype).replace("torch.", ""),
+                 precision=str(real.dist.dtype).replace("torch.", ""), fidelity=real.fidelity,
                  warning=" · ".join(warnings) or None)

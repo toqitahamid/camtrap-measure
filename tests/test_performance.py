@@ -41,13 +41,14 @@ def test_emulated_bfloat16_does_not_count_as_supported():
     slower than fp32: 122 ms against 25 ms for fp16 on the dept card. The app was choosing it."""
     src = (ROOT / "src" / "camtrap_measure" / "distance.py").read_text(encoding="utf-8")
     assert "including_emulation=False" in src
-    # the bare call is the bug, so the precision must be chosen through the helper, never from it directly
-    assert 'self.dtype = torch.bfloat16 if device == "cuda" and native_bf16(torch)' in src
+    # the bare call is the bug: fast fidelity must reach the precision through the helper, never from it
+    assert "fidelity == RESEARCH or native_bf16(torch)" in src
 
 
 def test_a_small_card_gets_the_smaller_warp_and_a_big_one_keeps_the_research_default():
-    """At 864 one photo needs 6.3 GB — more than Windows leaves free on an 8 GB card, and the driver
-    serves the rest from system memory, where the same photo takes ten times as long."""
+    """Only under fast fidelity. At 864 one photo needs 6.3 GB — more than Windows leaves free on an 8 GB
+    card, and the driver serves the rest from system memory, where the same photo takes ten times as
+    long. The published pipeline keeps 864 whatever the card, and pays for it."""
     class Card:
         def __init__(self, gb):
             self.total_memory = int(gb * 2**30)
@@ -57,12 +58,15 @@ def test_a_small_card_gets_the_smaller_warp_and_a_big_one_keeps_the_research_def
             self.cuda = type("cuda", (), {"get_device_properties": staticmethod(lambda i: Card(gb))})
 
     d = object.__new__(distance.Distance)
+    d.fidelity = distance.FAST
     for gb, expected in ((8, distance.UPSAMPLE_RES_TIGHT), (12, distance.UPSAMPLE_RES),
                          (24, distance.UPSAMPLE_RES)):
         d.device, d.torch = "cuda", FakeTorch(gb)
         assert d._upsample_res() == expected, gb
     d.device = "cpu"
     assert d._upsample_res() == distance.UPSAMPLE_RES  # nothing to fit into; keep what the research ran
+    d.device, d.fidelity = "cuda", distance.RESEARCH
+    assert d._upsample_res() == distance.UPSAMPLE_RES  # a small card does not get to change the published setting
 
 
 def test_the_batch_probe_gives_its_memory_back():
@@ -78,3 +82,43 @@ def test_the_status_line_can_name_the_card():
     assert "gpu" in inference.state and "precision" in inference.state
     src = (ROOT / "src" / "camtrap_measure" / "inference.py").read_text(encoding="utf-8")
     assert "get_device_properties(0)" in src and "CPU only" in src
+
+
+# --- which settings a run used, and that it is never a silent choice ------------------------------
+
+def test_the_published_pipeline_is_what_runs_unless_someone_asks_otherwise(monkeypatch, tmp_path):
+    """The app exists to put the paper's numbers in front of a technician. A number that is nearly the
+    paper's is worth less than a slow one that is, so speed is opt-in and never the default."""
+    from camtrap_measure import store
+
+    monkeypatch.setattr(store, "DATA_DIR", tmp_path)
+    monkeypatch.delenv("CAMTRAP_FIDELITY", raising=False)
+    assert inference.fidelity() == distance.RESEARCH
+
+    store.save_config({"fidelity": distance.FAST})
+    assert inference.fidelity() == distance.FAST          # config.json: the installed machine's setting
+    monkeypatch.setenv("CAMTRAP_FIDELITY", distance.RESEARCH)
+    assert inference.fidelity() == distance.RESEARCH      # the environment wins, for one run
+
+    monkeypatch.setenv("CAMTRAP_FIDELITY", "quick")
+    assert inference.fidelity() == distance.RESEARCH      # a typo must not quietly change the numbers
+
+
+def test_changing_the_settings_re_measures_instead_of_mixing_two_kinds_of_metres():
+    """Fidelity counts the way a relabel counts: different settings, different number. Two of them in one
+    folder with nothing on screen to tell them apart is the failure being prevented."""
+    from camtrap_measure import measure
+
+    cal = {"image_name": "IMG_0004.JPG", "updated_at": "2026-08-01T00:00:00"}
+    done = {"method": "md", "fidelity": distance.RESEARCH, "calibration_image": "IMG_0004.JPG",
+            "calibration_version": "2026-08-01T00:00:00"}
+    assert measure.current_answer(done, cal, "md", distance.RESEARCH)
+    assert not measure.current_answer(done, cal, "md", distance.FAST)
+    assert not measure.current_answer({**done, "fidelity": None}, cal, "md", distance.RESEARCH)  # measured before 19
+
+
+def test_the_export_says_which_settings_made_each_number():
+    from camtrap_measure import report
+
+    assert "fidelity" in report.COLUMNS
+    assert "research = the published pipeline" in report.DOC

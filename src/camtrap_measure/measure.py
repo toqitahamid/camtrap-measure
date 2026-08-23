@@ -75,7 +75,8 @@ def start(folder: str, site: str, flag: str, method: str, rerun: bool = False, p
         if current and current["status"] == "running":
             raise RuntimeError("A run is already in progress.")
         d, chosen, cal = prepare(folder, site, flag, method, photos)
-        current = {"folder": str(d), "site": site, "flag": flag, "method": method, "status": "running",
+        current = {"folder": str(d), "site": site, "flag": flag, "method": method,
+                   "fidelity": inference.state["fidelity"] or inference.fidelity(), "status": "running",
                    "total": len(chosen), "done": 0, "skipped": 0, "unreadable": 0, "detections": 0, "error": None, "cancel": False,
                    "started": time.monotonic(), "elapsed_s": 0.0, "eta_s": None}
         # picking photos by hand IS the intent to measure them: only a whole-folder run skips what already has an answer
@@ -112,11 +113,15 @@ def status() -> dict | None:
     return r
 
 
-def current_answer(known: dict | None, cal: dict, method: str) -> bool:
-    """Does the store already hold this photo's answer under this method and this very calibration? The
-    calibration's annotation `updated_at` is its version: a relabel changes it → measure again. Versions are
-    compared, never clocks (the dept machine's and the cloud's need not agree)."""
-    return bool(known and known["method"] == method
+def current_answer(known: dict | None, cal: dict, method: str, fidelity: str) -> bool:
+    """Does the store already hold this photo's answer under this method, this fidelity and this very
+    calibration? The calibration's annotation `updated_at` is its version: a relabel changes it → measure
+    again. Versions are compared, never clocks (the dept machine's and the cloud's need not agree).
+
+    Fidelity counts for the same reason a relabel does: it is a different set of settings and so a
+    different number. Switching it re-measures the folder rather than leaving two kinds of metres side by
+    side with nothing on screen to tell them apart."""
+    return bool(known and known["method"] == method and known.get("fidelity") == fidelity
                 and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at"))
 
 
@@ -132,11 +137,11 @@ def readable(p: Path) -> bool:
 
 def _work(run: dict, photos: list[Path], cal: dict, rerun: bool) -> None:
     known = {p["path"]: p for p in store.photos()}
-    method = run["method"]
+    method, fidelity = run["method"], run["fidelity"]
     try:
         batch = []
         for p in photos:
-            if not rerun and current_answer(known.get(str(p)), cal, method):
+            if not rerun and current_answer(known.get(str(p)), cal, method, fidelity):
                 run["skipped"] += 1
                 run["done"] += 1
                 continue
@@ -145,7 +150,8 @@ def _work(run: dict, photos: list[Path], cal: dict, rerun: bool) -> None:
                 run["done"] += 1
                 continue
             batch.append((p, {"path": str(p), "site": run["site"], **calibration.read_exif(p), "held_reason": None,
-                              "calibration_image": cal["image_name"], "calibration_version": cal.get("updated_at")}))
+                              "calibration_image": cal["image_name"], "calibration_version": cal.get("updated_at"),
+                              "fidelity": fidelity}))
         if batch and not run["cancel"]:
             ref = {**cal, "ref_path": str(store.ref_path(cal["site"], cal["image_name"]))}
             results = inference.backend([p for p, _ in batch], ref, method)  # one call: real models batch

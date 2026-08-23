@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from huggingface_hub.errors import RepositoryNotFoundError
 
-from camtrap_measure import api, inference, weights
+from camtrap_measure import api, distance, inference, weights
 
 from tests.test_measure import folder, run
 
@@ -24,6 +24,7 @@ class StubDist:
 class StubReal:
     def __init__(self, weights_dir, device="cuda"):
         self.dir, self.device, self.batch, self.warning = weights_dir, device, 16, None
+        self.fidelity = distance.RESEARCH
         self.gpu = "NVIDIA GeForce RTX 4070 (12.0 GB)" if device == "cuda" else "CPU only - no GPU in use"
         self.dist = StubDist()
 
@@ -34,8 +35,8 @@ class StubReal:
 @pytest.fixture(autouse=True)
 def fresh_state(monkeypatch):
     monkeypatch.setattr(inference, "state", {"status": "ready", "backend": "fake", "device": None, "gpu": None,
-                                             "precision": None, "batch": None, "weights": None, "warning": None,
-                                             "error": None, "download": None})
+                                             "precision": None, "fidelity": None, "batch": None, "weights": None,
+                                             "warning": None, "error": None, "download": None})
     monkeypatch.setattr(inference, "backend", inference.fake)
     monkeypatch.delenv("CAMTRAP_WEIGHTS_DIR", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
@@ -104,7 +105,7 @@ def test_first_start_downloads_weights_and_loads_real_models(cloud, hub, models_
     c, s = start()
     assert hub["n"] == 1 and (tmp_path / "weights" / "manifest.json").exists()
     assert s == {"status": "ready", "backend": "real", "device": "cuda", "batch": 16, "weights": "2026.08.20",
-                 "gpu": "NVIDIA GeForce RTX 4070 (12.0 GB)", "precision": "float16",
+                 "gpu": "NVIDIA GeForce RTX 4070 (12.0 GB)", "precision": "float16", "fidelity": "research",
                  "warning": None, "error": None, "download": None}
 
 

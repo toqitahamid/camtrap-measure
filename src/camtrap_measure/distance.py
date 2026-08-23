@@ -30,9 +30,16 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], np.float32).reshape(3, 1, 1)
 BANNER_Y = 995  # of 1080: the camera's info strip below this row is identical across photos — cropped before matching
 STRIDE = 4
 D_MIN, D_MAX = 2.0, 18.0  # reference distance map is trusted only here (training range)
-UPSAMPLE_RES = 864       # RoMa's own default, and what the research ran
+UPSAMPLE_RES = 864       # RoMa's own default, and what the research ran (transport/matchers.py)
 UPSAMPLE_RES_TIGHT = 672  # the warp the dept's 8 GB card can hold while the desktop is also using it
 TIGHT_CARD_GB = 10        # below this much VRAM in total, the 864 warp does not fit and the run crawls
+
+# Two ways to run the same models. RESEARCH reproduces the published pipeline exactly — bfloat16 autocast
+# over fp32 weights and RoMa at its own defaults — and is what the app uses unless told otherwise, because
+# the numbers this app prints are the paper's numbers. FAST trades a few centimetres for roughly ten times
+# the speed on a card too small for the published settings; every difference is listed in CONTEXT.md.
+RESEARCH, FAST = "research", "fast"
+FIDELITIES = (RESEARCH, FAST)
 MIN_INLIERS = 15  # published gate (reports/gate_57cam.md): fewer homography inliers = misfiled or moved camera
 HALF = 2  # 5×5 readout window
 
@@ -173,13 +180,17 @@ def load_unified(ckdir: Path, device: str):
 class Distance:
     """RoMa + unified net, loaded once. `read()` gives [q05, q50, q95] per ground-contact point."""
 
-    def __init__(self, weights_dir: Path, device: str):
+    def __init__(self, weights_dir: Path, device: str, fidelity: str = RESEARCH):
         import torch
         from romatch import roma_outdoor
 
-        self.torch, self.device = torch, device
+        self.torch, self.device, self.fidelity = torch, device, fidelity
         use_chunked_kde()
-        self.dtype = torch.bfloat16 if device == "cuda" and native_bf16(torch) else torch.float16
+        # The research ran bfloat16 (29_testsplit_revision/eval_intervals_rollfix.py), so research fidelity
+        # asks for bfloat16 and takes the emulation on a card that has no hardware for it. Only fast
+        # fidelity is allowed to swap in the fp16 the card actually implements.
+        self.dtype = (torch.bfloat16 if device == "cuda" and (fidelity == RESEARCH or native_bf16(torch))
+                      else torch.float16)
         manifest = json.loads((weights_dir / "manifest.json").read_text())
         self.upsample_res = self._upsample_res()
         # custom local_corr CUDA kernel is not built anywhere we run; pure-torch fallback as in the research runs
@@ -188,15 +199,17 @@ class Distance:
                                  dinov2_weights=torch.load(weights_dir / manifest["dinov2"], map_location=device))
         self.net = load_unified(weights_dir / manifest["unified"], device)
         self.refs: dict[tuple, tuple] = {}  # per calibration: (banner-cropped flag photo, its normalized tensor, ModelB)
-        if device == "cuda":
-            # Half weights, not just half arithmetic: under autocast the fp32 net is cast on every
-            # forward and the cast copies are kept for the region, ~0.6 GB that buys nothing here. Measured
-            # 2026-08-23: the metres move by 2-5 cm, inside RoMa's own 3-17 cm spread between repeat runs.
+        if device == "cuda" and fidelity == FAST:
+            # Half weights, not just half arithmetic: under autocast the fp32 net is cast on every forward
+            # and the cast copies are kept for the region, ~0.6 GB that buys nothing. It is not free
+            # numerically, though — the ops autocast keeps in fp32 (the head's log, exp and softplus) then
+            # get half inputs — so the research pipeline keeps its fp32 weights.
             self.net = self.net.to(self.dtype)
 
     def _upsample_res(self) -> int:
-        """RoMa's refinement resolution, chosen by the size of the card and never by what is free at this
-        moment, so the same computer always produces the same numbers.
+        """RoMa's refinement resolution. The research default at research fidelity, always; under fast
+        fidelity, chosen by the size of the card and never by what is free at this moment, so that a given
+        computer still produces the same numbers every run.
 
         Measured on the dept's 8 GB RTX 2060 SUPER (2026-08-23, scripts/profile_run.py): at 864 one photo
         needs 6.3 GB, more than Windows leaves free with a browser open, so the driver quietly serves the
@@ -205,7 +218,7 @@ class Distance:
         which is inside the 3-17 cm the method already moves between repeat runs of identical settings
         (RoMa samples its matches at random). A card big enough for 864 keeps the research default.
         """
-        if self.device != "cuda":
+        if self.device != "cuda" or self.fidelity == RESEARCH:
             return UPSAMPLE_RES
         total_gb = self.torch.cuda.get_device_properties(0).total_memory / 2**30
         return UPSAMPLE_RES_TIGHT if total_gb < TIGHT_CARD_GB else UPSAMPLE_RES

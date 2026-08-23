@@ -738,3 +738,35 @@ It has to be answerable from the app's own window, not from a terminal. The stat
 from `torch.cuda.get_device_properties`, and says `CPU only — no GPU in use` when there is no card. The
 shared-card warning is calibrated to what a run now needs (`RUN_VRAM_GB = 4.5`) instead of a guess, and
 says what actually happens - several times slower, not "may fail".
+
+### Correction: the published pipeline is the default (2026-08-23, ticket 19)
+
+The section above made three number-changing settings the default. That was the wrong call and is
+reversed. The researcher's instruction on being shown the drift: *"i want the exact papers result to be
+pass to the app"* — and it beats the reason recorded above, which was speed. A distance tool whose
+numbers are *nearly* the published pipeline's is worth less than a slow one whose numbers are exactly
+them; the app's whole claim is that it runs the paper's method.
+
+**Research fidelity is now the default and reproduces the published pipeline exactly**: bfloat16
+autocast over fp32 weights (`29_testsplit_revision/eval_intervals_rollfix.py`), RoMa at
+`roma_outdoor`'s own defaults, 864 and symmetric (`transport/matchers.py`). On a card whose bfloat16 is
+emulated it takes the emulation and the cost. Verified on the workstation: same settings, and distances
+within **2.3 cm** of what the app produced before any of this work — RoMa's own spread between repeats
+of one setting is 2.7 cm.
+
+**The two fixes that cannot change a number stay, and they are most of the win**: `kde_chunked` (bit-
+identical, and without it the published settings do not run at all on 8 GB — they die with
+`CUDA error: out of memory` before the first photo) and `empty_cache()` after the batch probe. The
+published settings went from **33 s a photo to about 9**, with the numbers untouched. The rest of the
+speedup, down to ~2 s, is what fast fidelity buys, and it is now opt-in:
+`CAMTRAP_FIDELITY=fast` or `"fidelity": "fast"` in `config.json`.
+
+Fast fidelity is never silent. `photos.fidelity` records which settings produced every measured photo,
+switching fidelity re-measures a folder rather than mixing two kinds of metres, the CSV carries a
+`fidelity` column with a header line saying not to mix them, and the window shows
+"⚠ fast settings — not the published pipeline" for as long as it is on.
+
+What is still **not** established: the drift between fidelities is not the same as error against ground
+truth, and it was measured on 11 photos of one deer at ~8 m from one camera. Both fidelities should be
+scored against the research repo's labelled test split before fast is recommended for real work — the
+same run that settles the MD vs MD+SAM3 open item.

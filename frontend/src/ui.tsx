@@ -7,6 +7,7 @@ export type Inference = {
   device: string | null
   gpu: string | null        // the card's own name, so "is it really using the GPU" is answered on screen
   precision: string | null  // float16 / bfloat16: what the distance net actually runs in
+  fidelity: 'research' | 'fast' | null  // which settings made the numbers; research = the published pipeline
   batch: number | null
   weights: string | null
   warning: string | null

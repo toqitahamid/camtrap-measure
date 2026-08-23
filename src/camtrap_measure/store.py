@@ -23,7 +23,7 @@ create table if not exists calibrations (
 create table if not exists photos (
     path text primary key, site text not null, captured_at text, make text, model text,
     calibration_image text, held_reason text, measured_at text not null, match_score integer, method text,
-    calibration_version text);
+    calibration_version text, fidelity text);
 create table if not exists detections (
     path text not null, idx integer not null, method text not null,
     x1 real, y1 real, x2 real, y2 real, species text, confidence real,
@@ -38,7 +38,8 @@ def _db() -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.executescript(_SCHEMA)
     for table, col, typ in (("photos", "match_score", "integer"), ("detections", "match_score", "integer"),
-                            ("photos", "method", "text"), ("photos", "calibration_version", "text")):  # pre-07/08/10 dev databases
+                            ("photos", "method", "text"), ("photos", "calibration_version", "text"),
+                            ("photos", "fidelity", "text")):  # pre-07/08/10/19 databases
         if col not in {r["name"] for r in con.execute(f"pragma table_info({table})")}:
             try:
                 con.execute(f"alter table {table} add column {col} {typ}")
@@ -179,9 +180,10 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
     photo = {**photo, "measured_at": datetime.now().astimezone().isoformat(timespec="seconds")}
     with closing(_db()) as con, con:
         con.execute("insert or replace into photos (path, site, captured_at, make, model, calibration_image, held_reason, "
-                    "measured_at, match_score, method, calibration_version) values (:path, :site, :captured_at, :make, :model, "
-                    ":calibration_image, :held_reason, :measured_at, :match_score, :method, :calibration_version)",
-                    {"match_score": None, "calibration_version": None, **photo, "method": method})
+                    "measured_at, match_score, method, calibration_version, fidelity) values (:path, :site, :captured_at, "
+                    ":make, :model, :calibration_image, :held_reason, :measured_at, :match_score, :method, "
+                    ":calibration_version, :fidelity)",
+                    {"match_score": None, "calibration_version": None, "fidelity": None, **photo, "method": method})
         if photo["held_reason"]:
             con.execute("delete from detections where path=?", (photo["path"],))
         else:
@@ -210,6 +212,6 @@ def detections() -> list[dict]:
     """Every detection row joined with its photo (camera, timestamp, EXIF make/model, calibration used)."""
     with closing(_db()) as con:
         rows = con.execute(
-            "select p.site, p.captured_at, p.make, p.model, p.calibration_image, d.* from detections d "
+            "select p.site, p.captured_at, p.make, p.model, p.calibration_image, p.fidelity, d.* from detections d "
             "join photos p on p.path = d.path order by p.site, p.captured_at, d.path, d.method, d.idx").fetchall()
     return [dict(r) for r in rows]

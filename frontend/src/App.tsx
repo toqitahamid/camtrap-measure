@@ -452,6 +452,9 @@ export default function App() {
                   ? `MegaDetector + SpeciesNet · ${inf.gpu ?? inf.device} · ${inf.precision} · batch ${inf.batch}`
                   : 'made-up numbers (no models installed)'}
               </span>
+              {inf.fidelity === 'fast' && (
+                <span className="warn tiny">⚠ fast settings — not the published pipeline</span>
+              )}
             </div>
           </div>
         ) : (
@@ -482,6 +485,10 @@ export default function App() {
                     ? `MegaDetector + SpeciesNet ${inf.weights} · ${inf.gpu ?? inf.device} · ${inf.precision} · batch ${inf.batch}`
                     : 'made-up numbers (no models installed)'}
                 </span>
+                {/* the published settings are the default; when they are not in use it must be on screen */}
+                {inf.fidelity === 'fast' && (
+                  <span className="warn">⚠ fast settings — not the published pipeline</span>
+                )}
                 {inf.warning && <span className="warn">⚠ {inf.warning}</span>}
               </>
             )}
