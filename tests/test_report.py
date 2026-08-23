@@ -1,14 +1,15 @@
-"""Post-run summary, photo-by-photo review and the gated CSV export — the rules a technician relies on,
+"""Post-run summary, the folder listing and the gated CSV export — the rules a technician relies on,
 asserted through the API over a scripted inference backend."""
 
 import csv
+from pathlib import Path
 
 import pytest
 
 from camtrap_measure import api, distance, inference, report
 
-from tests.conftest import jpeg
-from tests.test_measure import FLAG, folder, run
+from tests.conftest import ANN, flag_photo_data, jpeg
+from tests.test_measure import FLAG, SITE, folder, run
 
 D = inference.Detection
 
@@ -44,11 +45,6 @@ def measured(synced, tmp_path, monkeypatch):
     st = run(synced, folder(tmp_path, photos=photos))
     assert st["status"] == "done" and st["unreadable"] == 0
     return synced
-
-
-def measured_order(by, name):
-    """The review's order: camera, then capture time, undated last (they sort as '')."""
-    return (by[name]["site"], by[name]["captured_at"] or "", by[name]["path"])
 
 
 def export(c, **params):
@@ -87,24 +83,32 @@ def test_summary_suspicious_count_matches_what_the_export_leaves_out(measured):
     assert measured.get("/api/summary", params={"all_species": True}).json()["suspicious"] == 4  # + the weak raccoon
 
 
-# --- photo-by-photo review ---------------------------------------------------------------
+# --- the folder listing ------------------------------------------------------------------
 
-def test_review_lists_every_measured_photo_with_its_boxes_and_numbers(measured):
-    g = measured.get("/api/photos").json()
-    by = {x["photo"]: x for x in g}
+def listing(c, d, method="md", site=SITE, flag=FLAG) -> dict:
+    r = c.get("/api/folder", params={"path": str(d), "site": site, "flag": flag, "method": method})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_folder_lists_every_photo_with_its_boxes_and_numbers(measured, tmp_path):
+    g = listing(measured, tmp_path / "photos" / "TON_CAM02")
+    by = {x["name"]: x for x in g["rows"]}
     assert set(by) == set(SCRIPT)  # every photo, not only the suspicious ones: the researcher checks the answers
-    assert [x["photo"] for x in g] == sorted(SCRIPT, key=lambda n: measured_order(by, n))  # camera, then capture time
+    assert [x["name"] for x in g["rows"]] == sorted(SCRIPT)  # name order, as the folder itself shows them
+    assert g["total"] == 8 and g["unreadable"] == 0
     one = by["IMG_0001.JPG"]
-    assert one["site"] == "TON_CAM02" and one["flag_image"] and one["match_score"] == 300 and one["method"] == "md"
+    assert one["measured"] and not one["stale"] and one["flag_image"] == FLAG and one["match_score"] == 300
+    assert one["method"] == "md" and one["captured_at"] == "2026-05-01T08:00:00"
     [d] = one["detections"]
     assert d["species"] == "white-tailed deer" and d["distance_m"] == 5.0
     assert (d["q05_m"], d["q95_m"]) == (pytest.approx(4.25), pytest.approx(6.0)) and d["reasons"] == []
     assert (d["x1"], d["y1"], d["x2"], d["y2"]) == (0.2, 0.3, 0.4, 0.7)  # the overlay's box
-    assert by["IMG_0006.JPG"]["detections"] == [] and by["IMG_0006.JPG"]["reasons"] == []  # an empty frame is still reviewable
+    assert by["IMG_0006.JPG"]["detections"] == [] and by["IMG_0006.JPG"]["reasons"] == []  # an empty frame is still a row
 
 
-def test_review_marks_the_suspicious_photos_and_their_boxes(measured):
-    by = {x["photo"]: x for x in measured.get("/api/photos").json()}
+def test_folder_marks_the_suspicious_photos_and_their_boxes(measured, tmp_path):
+    by = {x["name"]: x for x in listing(measured, tmp_path / "photos" / "TON_CAM02")["rows"]}
     assert {n for n, x in by.items() if x["reasons"]} == {"IMG_0002.JPG", "IMG_0003.JPG", "IMG_0005.JPG", "IMG_0008.JPG"}
     assert "confidence" in by["IMG_0002.JPG"]["reasons"][0] and "0.30" in by["IMG_0002.JPG"]["reasons"][0]
     assert any("unsure" in r for r in by["IMG_0003.JPG"]["reasons"])
@@ -113,18 +117,99 @@ def test_review_marks_the_suspicious_photos_and_their_boxes(measured):
     assert unsure["species"] == "unsure" and any("unsure" in r for r in unsure["reasons"]) and sure["reasons"] == []
 
 
-def test_review_filters_by_site_and_date(measured):
-    assert measured.get("/api/photos", params={"site": "TON_CAM99"}).json() == []
-    g = measured.get("/api/photos", params={"date_from": "2026-05-04"}).json()
-    assert {x["photo"] for x in g} == {"IMG_0004.JPG", "IMG_0005.JPG", "IMG_0006.JPG", "IMG_0007.JPG", "IMG_0008.JPG"}
+def test_folder_lists_the_photos_before_anything_has_been_measured(synced, tmp_path):
+    d = folder(tmp_path, photos={"IMG_0002.JPG": jpeg("2026:05:02 08:00:00"), "IMG_0001.JPG": jpeg(None)})
+    g = listing(synced, d)
+    assert g["folder"] == str(d) and g["total"] == 2 and g["unreadable"] == 0
+    first, second = g["rows"]
+    assert [first["name"], second["name"]] == ["IMG_0001.JPG", "IMG_0002.JPG"]
+    assert first["path"] == str(d / "IMG_0001.JPG") and first["captured_at"] is None  # EXIF, read without measuring
+    assert second["captured_at"] == "2026-05-02T08:00:00"
+    for x in (first, second):
+        assert x["measured"] is False and x["stale"] is False and x["detections"] == [] and x["reasons"] == []
+        assert x["match_score"] is None and x["method"] is None and x["flag_image"] is None
 
 
-def test_photo_endpoint_serves_measured_photos_only(measured, tmp_path):
-    path = measured.get("/api/photos").json()[0]["path"]
+def test_folder_reads_a_photo_measured_with_the_other_method_as_unmeasured(measured, tmp_path):
+    """The window must never say 'no animal' about a photo it has not looked at under the method on screen."""
+    by = {x["name"]: x for x in listing(measured, tmp_path / "photos" / "TON_CAM02", method="sam3")["rows"]}
+    one = by["IMG_0001.JPG"]  # measured, but with md
+    assert one["measured"] is False and one["stale"] is False and one["detections"] == [] and one["reasons"] == []
+    assert one["method"] is None and one["match_score"] is None and one["flag_image"] is None
+    assert one["captured_at"] == "2026-05-01T08:00:00"  # still a photo in the folder, listed like any other
+
+
+def test_folder_counts_the_files_it_cannot_read_and_still_lists_them(synced, tmp_path):
+    d = folder(tmp_path, photos={"IMG_0001.JPG": jpeg()[:40], "IMG_0002.JPG": jpeg()})
+    g = listing(synced, d)
+    assert g["total"] == 2 and g["unreadable"] == 1  # a truncated file must not hide the rest of the folder
+    broken, fine = g["rows"]
+    assert broken["name"] == "IMG_0001.JPG" and "could not be read" in broken["reasons"][0]
+    assert fine["reasons"] == []
+
+
+def test_folder_calls_an_answer_read_against_another_flag_photo_stale(cloud, synced, tmp_path):
+    cloud["annotations"].append({**ANN, "image_name": "IMG_7000.JPG", "storage_path": "TON_CAM02/IMG_7000.JPG",
+                                 "data": flag_photo_data(image="IMG_7000.JPG")})
+    cloud["photos"]["TON_CAM02/IMG_7000.JPG"] = jpeg()
+    synced.post("/api/sync")
+    d = folder(tmp_path)
+    run(synced, d, flag=FLAG)
+    assert [x["stale"] for x in listing(synced, d, flag=FLAG)["rows"]] == [False]
+    [other] = listing(synced, d, flag="IMG_7000.JPG")["rows"]  # the other flag photo is another answer
+    assert other["measured"] is True and other["stale"] is True and other["flag_image"] == FLAG
+
+
+def test_folder_calls_an_answer_from_before_a_relabel_stale(cloud, synced, tmp_path):
+    d = folder(tmp_path)
+    run(synced, d)
+    cloud["annotations"] = [{**ANN, "updated_at": "2026-08-01T00:00:00+00:00"}]  # relabeled in FlagLabel: new geometry
+    synced.post("/api/sync")
+    assert [x["stale"] for x in listing(synced, d)["rows"]] == [True]
+    run(synced, d)  # measuring the folder again is exactly what clears it
+    assert [x["stale"] for x in listing(synced, d)["rows"]] == [False]
+
+
+def test_folder_that_is_not_there_is_refused_in_plain_words(synced, tmp_path):
+    r = synced.get("/api/folder", params={"path": str(tmp_path / "nope"), "site": SITE, "flag": FLAG})
+    assert r.status_code == 400 and "not found" in r.json()["detail"]
+
+
+def test_folder_that_cannot_be_read_is_refused_in_plain_words(synced, tmp_path, monkeypatch):
+    d = folder(tmp_path)
+
+    def denied(self):  # the share dropped, or this Windows account may not read the folder
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(Path, "iterdir", denied)
+    r = synced.get("/api/folder", params={"path": str(d), "site": SITE, "flag": FLAG})
+    assert r.status_code == 400 and "Could not read" in r.json()["detail"] and "Access is denied" in r.json()["detail"]
+
+
+def test_photo_endpoint_serves_measured_photos(measured, tmp_path):
+    path = listing(measured, tmp_path / "photos" / "TON_CAM02")["rows"][0]["path"]
     for size in ("thumb", "full"):
         r = measured.get("/api/photo", params={"path": path, "size": size})
         assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
     assert measured.get("/api/photo", params={"path": str(tmp_path / "elsewhere.JPG")}).status_code == 404
+
+
+def test_photo_endpoint_serves_a_photo_of_a_listed_folder_before_it_is_measured(synced, tmp_path):
+    d = folder(tmp_path, photos={"IMG_0001.JPG": jpeg()})
+    p = str(d / "IMG_0001.JPG")
+    assert synced.get("/api/photo", params={"path": p}).status_code == 404  # no folder listed yet
+    listing(synced, d)
+    r = synced.get("/api/photo", params={"path": p, "size": "thumb"})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+
+
+def test_photo_endpoint_refuses_a_file_that_is_merely_near_a_listed_folder(synced, tmp_path):
+    d = folder(tmp_path, photos={"IMG_0001.JPG": jpeg(), "notes.txt": b"x"})
+    (d / "sub").mkdir()
+    (d / "sub" / "IMG_0001.JPG").write_bytes(jpeg())
+    listing(synced, d)
+    for path in (d / "sub" / "IMG_0001.JPG", d / "notes.txt", d.parent / "IMG_0001.JPG"):
+        assert synced.get("/api/photo", params={"path": str(path)}).status_code == 404, path
 
 
 def test_flag_endpoint_serves_synced_flag_photos_only(measured):

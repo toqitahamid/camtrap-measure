@@ -1,0 +1,150 @@
+{
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "The app"
+    },
+    {
+      "id": "page-2",
+      "name": "Directions"
+    }
+  ],
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Measure — a photo checked",
+      "page": "page-1"
+    },
+    {
+      "file": "MeasureOne.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Measure — one photo on its own",
+      "page": "page-1"
+    },
+    {
+      "file": "Running.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Measure — whole folder running",
+      "page": "page-1"
+    },
+    {
+      "file": "Table.dc.html",
+      "x": 0,
+      "y": 1080,
+      "w": 1440,
+      "h": 900,
+      "title": "Table — every photo as a row",
+      "page": "page-1"
+    },
+    {
+      "file": "Results.dc.html",
+      "x": 1560,
+      "y": 1080,
+      "w": 1440,
+      "h": 900,
+      "title": "Results and export",
+      "page": "page-1"
+    },
+    {
+      "file": "SignIn.dc.html",
+      "x": 3120,
+      "y": 1080,
+      "w": 1440,
+      "h": 900,
+      "title": "Sign in",
+      "page": "page-1"
+    },
+    {
+      "file": "FirstRun.dc.html",
+      "x": 0,
+      "y": 2160,
+      "w": 1440,
+      "h": 900,
+      "title": "First run — nothing set up yet",
+      "page": "page-1"
+    },
+    {
+      "file": "DirectionA.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "A — Field instrument (chosen)",
+      "page": "page-2"
+    },
+    {
+      "file": "DirectionB.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "B — Field journal",
+      "page": "page-2"
+    },
+    {
+      "file": "DirectionC.dc.html",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "C — Data console (its table adopted)",
+      "page": "page-2"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "shell",
+      "x": 0,
+      "y": -190,
+      "w": 460,
+      "page": "page-1",
+      "text": "THE SHELL — DIRECTION A + C'S RAIL\n\nOne window, six regions, nothing scrolls but the photo list and the table:\n\n· section rail — MEASURE / TABLE / RESULTS, with the account at its foot\n· title bar — wordmark, sync status, Sync\n· context bar — camera, flag photo, FOLDER PICKER, method, Measure all\n· photo list · frame · measurement\n· status bar — models, device, or the run's progress\n\nThe rail replaced the top tabs: two navigations for the same three sections is one too many. Drawn at 1440 x 900; every pane is fluid, so a maximised window gives the frame the extra width."
+    },
+    {
+      "id": "picker",
+      "x": 1560,
+      "y": -190,
+      "w": 440,
+      "page": "page-1",
+      "text": "PER-PHOTO MEASURE\n\nTwo ways in, both on this artboard: the Measure button on the list row itself, and the big one in the panel when an unmeasured photo is selected. The panel spells out what it will use — this camera, this flag photo, this method — so a single photo is never measured against something you did not expect."
+    },
+    {
+      "id": "batch",
+      "x": 3120,
+      "y": -190,
+      "w": 440,
+      "page": "page-1",
+      "text": "WHOLE FOLDER RUNNING\n\nThe status bar becomes the run: a hairline progress line, the photo in flight, counts and time left, and Measure all turns into Stop. Rows tick over to a number as each finishes, so you can start reviewing the early ones while the rest run."
+    },
+    {
+      "id": "table",
+      "x": 0,
+      "y": 890,
+      "w": 460,
+      "page": "page-1",
+      "text": "TABLE — DIRECTION C'S GRID, IN A'S SHELL\n\nThe third section. Every photo is a row: file, time, species, distance, 90% interval, confidence, alignment, status. Headings sort; the chips and the search box filter.\n\nTwo things the Measure tab cannot do:\n· tick many rows and measure just those (the amber bar at the top)\n· compare numbers down a column — an alignment score or a confidence that is out of line with its neighbours shows up instantly\n\nThe preview stays on the right so a row is still one click from the photo it came from, and 'Open in Measure' hands it to the big viewer."
+    },
+    {
+      "id": "pick-one",
+      "x": 0,
+      "y": -190,
+      "w": 440,
+      "page": "page-2",
+      "text": "DECIDED\n\nA is the shell. From C: the data grid became the TABLE section, and the left icon rail became the app's navigation — both in A's graphite and amber rather than C's lime. B is kept here as the record of what was not taken."
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "page-1"
+  }
+}

@@ -1,6 +1,7 @@
 """Launcher: start the HTTP engine in a thread, then open the desktop window."""
 
 import argparse
+import os
 import socket
 import threading
 import time
@@ -31,6 +32,26 @@ def start_engine(port: int | None = None) -> str:
     return f"http://127.0.0.1:{port}"
 
 
+def shutdown(exit_process=os._exit) -> None:
+    """End the process when the window closes, so the GPU is handed back.
+
+    The models hold a CUDA context worth gigabytes, and the driver only reclaims it when the process
+    really dies — on a shared 8 GB card that is the difference between the next program running and
+    not. Tearing a CUDA context down can hang on Windows, and the engine, the model loader and any
+    run are all daemon threads that a clean interpreter exit would have to wait on, so this stops the
+    run and then leaves hard. Nothing is buffered: the store commits and closes per photo, so at worst
+    the photo in flight is unmeasured, which is what a cancel already means.
+    """
+    from . import measure
+
+    measure.cancel()
+    for _ in range(20):  # let the photo in flight finish writing its row; 2 s is one photo's worth
+        if not (measure.current and measure.current["status"] == "running"):
+            break
+        time.sleep(0.1)
+    exit_process(0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="camtrap-measure")
     parser.add_argument(
@@ -55,6 +76,9 @@ def main() -> None:
         return
     import webview  # imported late: needs a GUI toolkit (WebView2 on Windows)
 
+    from . import dialogs
+
     webview.settings["ALLOW_DOWNLOADS"] = True  # the CSV export is a plain download link
-    webview.create_window("CamTrap Measure", url, width=1200, height=800)
+    dialogs.window = webview.create_window("CamTrap Measure", url, width=1200, height=800)  # Browse… opens its dialog
     webview.start()
+    shutdown()  # webview.start() returns once the window is closed

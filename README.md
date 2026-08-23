@@ -42,23 +42,27 @@ the download if it is missing). A Git or uv already on the PATH is used as is.
 
 ## Run (department machine, Windows)
 
-Double-click the desktop shortcut (= `run.bat` in the app folder). Sign in with your FlagLabel
-email and the code it emails you, then:
+Double-click the desktop shortcut (= `run.bat` in the app folder). Sign in with your FlagLabel email and
+the code it emails you. The window is one screen with a rail down the left — **Measure**, **Table**,
+**Results** — and a bar across the top holding the four things every section works on: the camera, which
+of its flag photos to measure against, the photo folder, and where the distance is read.
 
 1. **Sync** — pulls the flag-photo labels from FlagLabel (first time: a few minutes; later: seconds).
-2. **Measure** — pick the camera, pick one of its labeled flag photos, type the folder that holds
-   that camera's photos, press Measure. Every JPEG in the folder is measured against that flag
-   photo; the folder's name does not matter. Photos already measured are skipped unless you tick
-   *Re-measure*.
-3. **Review** — every measured photo, one at a time: the boxes that were found, the distance and its
-   90% interval at each, the detector's confidence, and the flag photo the numbers were read against
-   (one click). Arrow keys walk the list; the *Needs a look* view narrows it to the photos whose
-   numbers should not be used unread. Nothing has to be ticked — it is a look, not a gate.
+2. **Pick the camera and its flag photo**, then **Browse…** to the folder holding that camera's photos.
+   The folder's name does not matter; you choose which flag photo it belongs to. (Typing or pasting the
+   path still works, and is the only way when the page is opened in a browser instead of the app window.)
+3. **Measure** — the whole folder with *Measure all*, one photo with the **Measure** button on its row or
+   in the panel beside it, or a few by ticking them in the Table and pressing *Measure these N*. A photo
+   you pick explicitly is measured whatever it already holds; *Measure all* skips the ones already
+   answered unless you tick *Re-measure*.
+4. **Check the numbers** — Measure shows one photo at a time with its boxes labelled `species · distance`,
+   the 90% interval on a scale, the alignment score and the flag photo it was read against (one click).
+   Arrow keys walk the folder. Table shows the same photos as sortable rows, which is where a confidence
+   or an alignment score out of line with its neighbours shows up.
+5. **Results** — counts, the distance histogram, per-camera figures, and the CSV export.
 
-Summary counts and the CSV export are below the review.
-
-A flag photo is offered once it is labeled in FlagLabel; there is no other check — you choose
-which flag photo a folder belongs to.
+The bar at the bottom says what the models are doing; during a run it becomes the progress line, with the
+photo in flight, how many are left and a Stop button.
 
 ### Updates and rollback
 

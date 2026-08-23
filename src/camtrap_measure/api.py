@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calibration, inference, measure, report, store
+from . import calibration, dialogs, inference, measure, report, store
 from . import supabase_ro as sb
 
 __version__ = version("camtrap-measure")
@@ -145,21 +145,40 @@ def cameras():
     return calibration.cameras(store.sites(), store.calibrations())
 
 
+@app.post("/api/folder/pick")
+def pick_folder():
+    """Browse…: the desktop window's own folder chooser. folder=null with a reason (no native window, or the
+    user cancelled) — the page then keeps the typed path."""
+    folder, reason = dialogs.pick_folder()
+    return {"folder": folder, "reason": reason}
+
+
+@app.get("/api/folder")
+def folder_listing(path: str, site: str = "", flag: str = "", method: str = inference.DEFAULT_METHOD):
+    """Every JPEG in the folder with the answer stored for this flag photo and method — what the photo list
+    and the table render, before and after a run."""
+    try:
+        return report.folder(path, site, flag, method)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 class RunRequest(BaseModel):
     folder: str
     site: str
     flag: str  # image_name of the flag photo to measure against
     method: str = inference.DEFAULT_METHOD
     rerun: bool = False  # replace current answers too; default measures only what has none yet
+    photos: list[str] | None = None  # the picked subset of the folder; None measures the whole folder
 
 
 @app.post("/api/run")
 def start_run(body: RunRequest):
-    """Measure every JPEG in a folder against one camera's flag photo. Progress via GET /api/run."""
+    """Measure a folder — or the photos picked out of it — against one camera's flag photo. Progress via GET /api/run."""
     if inference.state["status"] != "ready":
         raise HTTPException(503, inference.state["error"] or "Models are still loading — try again in a moment.")
     try:
-        return measure.start(body.folder, body.site, body.flag, body.method, body.rerun)
+        return measure.start(body.folder, body.site, body.flag, body.method, body.rerun, body.photos)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
@@ -198,12 +217,6 @@ def summary(site: str | None = None, date_from: date | None = None, date_to: dat
     return report.summary(site, _iso(date_from), _iso(date_to), all_species)
 
 
-@app.get("/api/photos")
-def review(site: str | None = None, date_from: date | None = None, date_to: date | None = None):
-    """Every measured photo in scope with its boxes and numbers — what the photo-by-photo review shows."""
-    return report.review(site, _iso(date_from), _iso(date_to))
-
-
 SIZES = {"thumb": 320, "full": 1600}  # list icon / the viewer; the originals are 20-MP and never reach the page whole
 
 
@@ -224,9 +237,9 @@ def _shrunk(path: Path, px: int) -> Response:
 
 @app.get("/api/photo")
 def photo(path: str, size: str = "full"):
-    """A measured photo, shrunk. Only paths a run has recorded are served."""
-    if not store.photo_known(path):
-        raise HTTPException(404, "Not a measured photo")
+    """A photo, shrunk: one a run has recorded, or a JPEG in a folder this engine has listed. Nothing else."""
+    if not (store.photo_known(path) or report.listed(path)):
+        raise HTTPException(404, "Not a measured photo, and not in a folder this window has opened")
     return _shrunk(Path(path), SIZES.get(size, SIZES["full"]))
 
 

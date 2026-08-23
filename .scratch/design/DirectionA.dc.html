@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0E1013; color: #E8EAED; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A13C; } a:hover { color: #F2B75F; }
+    .grot { font-family: 'Space Grotesk', sans-serif; }
+    .mono { font-family: 'IBM Plex Mono', monospace; }
+    .cap { font-family: 'Space Grotesk', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #5C646E; }
+    .blk { background: #1C2026; border-radius: 3px; }
+    .lbl { font-family: 'Space Grotesk', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #6E7681; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; background: #0E1013; overflow: hidden;">
+
+  <!-- option header -->
+  <div style="flex: none; padding: 26px 30px 20px; border-bottom: 1px solid #262B32;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span class="cap" style="color: #E8A13C;">Direction A</span>
+      <h1 class="grot" style="margin: 0; font-size: 27px; font-weight: 600; letter-spacing: -0.02em;">Field instrument</h1>
+      <span class="grot" style="font-size: 11px; font-weight: 700; letter-spacing: .08em; padding: 3px 9px; border-radius: 3px; background: #E8A13C; color: #17120A;">LEADING</span>
+    </div>
+    <div style="display: flex; gap: 44px; margin-top: 14px; max-width: 1180px;">
+      <div style="flex: 1;">
+        <div class="cap" style="margin-bottom: 5px;">Why</div>
+        <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #C7CCD2;">
+          A three-pane workbench, like a measuring device rather than a web page: graphite chrome, one amber accent
+          for anything you can act on, tabular numerals everywhere. List on the left, frame in the middle, numbers on
+          the right — nothing scrolls but the list, and the photo is always the largest thing on screen.
+        </p>
+      </div>
+      <div style="flex: 1;">
+        <div class="cap" style="margin-bottom: 5px;">Trade-off</div>
+        <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #8A929C;">
+          Three panes means the frame is ~730 px wide on a 1440 window — plenty to judge a box, not enough to study
+          fine texture. Dense and technical: it looks like a tool for a specialist, not something a visitor picks up.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- wireframe -->
+  <div style="flex: 1; min-height: 0; padding: 26px 30px 30px; display: flex;">
+    <div style="flex: 1; border: 1px solid #262B32; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; background: #0E1013;">
+
+      <div style="height: 42px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #262B32;">
+        <span style="width: 14px; height: 14px; border-radius: 3px; background: #E8A13C;"></span>
+        <span class="lbl">Title bar · tabs · sync · account</span>
+        <div style="flex: 1;"></div>
+        <span class="blk" style="width: 78px; height: 20px;"></span>
+        <span class="blk" style="width: 54px; height: 20px;"></span>
+      </div>
+
+      <div style="height: 54px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: #14171B; border-bottom: 1px solid #262B32;">
+        <span class="lbl" style="color: #E8A13C;">Context bar</span>
+        <span class="blk" style="width: 120px; height: 26px;"></span>
+        <span class="blk" style="width: 160px; height: 26px;"></span>
+        <span class="blk" style="width: 250px; height: 26px; border: 1px dashed #4A5058;"></span>
+        <span class="lbl" style="font-size: 10px; letter-spacing: .04em;">← folder picker</span>
+        <div style="flex: 1;"></div>
+        <span style="width: 116px; height: 26px; border-radius: 3px; background: #E8A13C;"></span>
+      </div>
+
+      <div style="flex: 1; min-height: 0; display: flex;">
+        <div style="width: 250px; flex: none; border-right: 1px solid #262B32; background: #14171B; padding: 12px;">
+          <div class="lbl" style="margin-bottom: 12px;">Photo list</div>
+          <div class="blk" style="height: 46px; margin-bottom: 6px; border-left: 3px solid #E8A13C;"></div>
+          <div class="blk" style="height: 46px; margin-bottom: 6px;"></div>
+          <div class="blk" style="height: 46px; margin-bottom: 6px;"></div>
+          <div class="blk" style="height: 46px; margin-bottom: 6px;"></div>
+          <div class="blk" style="height: 46px; margin-bottom: 6px;"></div>
+          <div class="blk" style="height: 46px; margin-bottom: 6px; opacity: .55;"></div>
+          <div class="blk" style="height: 46px; opacity: .3;"></div>
+        </div>
+
+        <div style="flex: 1; min-width: 0; background: #08090B; display: flex; flex-direction: column;">
+          <div style="height: 34px; flex: none; border-bottom: 1px solid #262B32; background: #14171B; display: flex; align-items: center; padding: 0 12px;">
+            <span class="lbl" style="font-size: 10px;">File · time · prev / next</span>
+          </div>
+          <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 18px;">
+            <div style="position: relative; width: 100%; max-width: 560px; aspect-ratio: 16/10; border-radius: 4px; background: linear-gradient(#333B44, #7C8288);">
+              <div style="position: absolute; left: 32%; top: 34%; width: 22%; height: 30%; border: 2px solid #E8A13C;"></div>
+              <span class="lbl" style="position: absolute; left: 12px; bottom: 10px; font-size: 10px; color: #262B32;">Frame + boxes</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="width: 290px; flex: none; border-left: 1px solid #262B32; background: #14171B; padding: 14px;">
+          <div class="lbl" style="margin-bottom: 14px;">Measurement</div>
+          <div style="height: 42px; width: 130px; border-radius: 3px; background: #2A2213;"></div>
+          <div class="blk" style="height: 8px; margin-top: 14px;"></div>
+          <div class="blk" style="height: 54px; margin-top: 18px;"></div>
+          <div class="blk" style="height: 96px; margin-top: 14px; opacity: .6;"></div>
+          <div style="height: 30px; margin-top: 18px; border-radius: 3px; border: 1px solid #2E343C;"></div>
+          <div class="lbl" style="font-size: 10px; letter-spacing: .04em; margin-top: 8px; text-align: center;">↑ measure this one photo</div>
+        </div>
+      </div>
+
+      <div style="height: 28px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #14171B; border-top: 1px solid #262B32;">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: #7FB069;"></span>
+        <span class="lbl" style="font-size: 10px; letter-spacing: .04em;">Status bar — models, device, run progress</span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

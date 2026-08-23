@@ -126,7 +126,8 @@ def contacts(boxes: list[list[float]], masks: list[tuple[np.ndarray, list[float]
     return out
 
 
-def _is_oom(e: Exception) -> bool:
+def is_oom(e: Exception) -> bool:
+    """True for the several ways CUDA says it is out of memory; `measure` turns this into plain words."""
     return any(s in str(e) for s in ("out of memory", "CUBLAS_STATUS_ALLOC_FAILED", "CUDNN_STATUS_NOT_INITIALIZED"))
 
 
@@ -152,9 +153,15 @@ class Real:
         self.dist = distance.Distance(weights_dir, self.device)
         self.sam3 = None  # (model, processor) once the precise method has been asked for
         if self.device == "cuda":
-            gb = torch.cuda.get_device_properties(0).total_memory / 2**30
+            free, total = torch.cuda.mem_get_info()
+            gb, free_gb = total / 2**30, free / 2**30
             if round(gb) < VRAM_FLOOR_GB:  # an "8 GB" card reports ~7.99 GiB usable (seen on the dept RTX 2060 SUPER)
                 self.warning = f"This GPU has {gb:.1f} GB of memory, below the {VRAM_FLOOR_GB} GB the app is designed for — runs will be slow."
+            elif free_gb < VRAM_FLOOR_GB * 0.75:
+                # the dept machine shares its card with the desktop, Chrome and Teams; a run that starts
+                # with little left over dies on an out-of-memory error halfway through (seen 2026-08-23)
+                self.warning = (f"Only {free_gb:.1f} GB of the GPU's {gb:.1f} GB is free — other programs are using it. "
+                                "Close Chrome, Teams or other heavy windows if a run fails.")
             self.batch = self._probe_batch()
         else:
             self.batch = 4
@@ -173,7 +180,7 @@ class Real:
                     self.sn.model(self.torch.zeros(b, size, size, 3, device=self.device))
                 return max(1, b // 2)
             except (self.torch.cuda.OutOfMemoryError, RuntimeError) as e:
-                if not _is_oom(e):
+                if not is_oom(e):
                     raise
                 self.torch.cuda.empty_cache()
         return 1
@@ -249,7 +256,7 @@ class Real:
                 with self.torch.no_grad(), self._autocast():
                     preds = self.sn.batch_predict([str(j) for j in range(len(chunk))], chunk)
             except (self.torch.cuda.OutOfMemoryError, RuntimeError) as e:
-                if not _is_oom(e) or self.batch == 1:
+                if not is_oom(e) or self.batch == 1:
                     raise
                 self.torch.cuda.empty_cache()
                 self.batch = max(1, self.batch // 2)  # a busy photo mid-run: back off and keep going

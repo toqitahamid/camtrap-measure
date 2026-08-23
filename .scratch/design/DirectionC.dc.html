@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Archivo:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; background: #08090A; color: #E4E7E9; font-family: 'Archivo', system-ui, sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+    a { color: #B8E62E; } a:hover { color: #C9F04D; }
+    .mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+    .cap { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: #626A6E; }
+    .blk { background: #14171A; border-radius: 2px; }
+    .lbl { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: #626A6E; }
+    .rail { width: 40px; height: 40px; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; background: #08090A; overflow: hidden;">
+
+  <div style="flex: none; padding: 26px 30px 20px; border-bottom: 1px solid #1B1F22;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span class="cap" style="color: #B8E62E;">Direction C</span>
+      <h1 style="margin: 0; font-size: 27px; font-weight: 700; letter-spacing: -0.02em;">Data console</h1>
+    </div>
+    <div style="display: flex; gap: 44px; margin-top: 14px; max-width: 1180px;">
+      <div style="flex: 1;">
+        <div class="cap" style="margin-bottom: 5px;">Why</div>
+        <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #B6BCC0;">
+          Near-black with an electric lime accent, monospace throughout, an icon rail instead of tabs. The table is the
+          main object: every photo is a row with its distance, interval, confidence and alignment, sortable and
+          filterable, with the frame in a preview pane. Built for someone working through 400 photos, not 11.
+        </p>
+      </div>
+      <div style="flex: 1;">
+        <div class="cap" style="margin-bottom: 5px;">Trade-off</div>
+        <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #7F878C;">
+          The photo stops being the hero — the preview pane is small, so verifying a box means expanding, which is the
+          opposite of what you asked for. Monospace everywhere is loud, and the lime is unforgiving over a bright frame.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex: 1; min-height: 0; padding: 26px 30px 30px; display: flex;">
+    <div style="flex: 1; border: 1px solid #1B1F22; border-radius: 6px; overflow: hidden; display: flex; background: #08090A;">
+
+      <div style="width: 56px; flex: none; border-right: 1px solid #1B1F22; background: #0C0E10; padding: 12px 8px; display: flex; flex-direction: column; gap: 8px; align-items: center;">
+        <div class="rail" style="background: #B8E62E;"></div>
+        <div class="rail blk"></div>
+        <div class="rail blk"></div>
+        <div style="flex: 1;"></div>
+        <div class="rail blk"></div>
+      </div>
+
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+        <div style="height: 44px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #1B1F22;">
+          <span class="mono" style="font-size: 12px; font-weight: 700; letter-spacing: .1em;">MEASURE</span>
+          <span class="blk" style="width: 112px; height: 24px;"></span>
+          <span class="blk" style="width: 148px; height: 24px;"></span>
+          <span style="width: 236px; height: 24px; border-radius: 2px; border: 1px dashed #333A3E;"></span>
+          <span class="lbl" style="letter-spacing: .04em;">← folder picker</span>
+          <div style="flex: 1;"></div>
+          <span style="width: 110px; height: 26px; border-radius: 2px; background: #B8E62E;"></span>
+        </div>
+
+        <div style="flex: 1; min-height: 0; display: flex;">
+          <div style="flex: 1; min-width: 0; padding: 12px 14px;">
+            <div class="lbl" style="margin-bottom: 10px;">Every photo as a row — sort, filter, select many</div>
+            <div style="display: grid; grid-template-columns: 24px 1.5fr .7fr .9fr .6fr .6fr 70px; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid #1B1F22;">
+              <span class="lbl"></span><span class="lbl">File</span><span class="lbl">Dist</span><span class="lbl">90%</span><span class="lbl">Conf</span><span class="lbl">Align</span><span class="lbl"></span>
+            </div>
+            <div style="display: grid; grid-template-columns: 24px 1.5fr .7fr .9fr .6fr .6fr 70px; gap: 10px; padding: 9px 0; border-bottom: 1px solid #14171A; background: #101315;">
+              <span style="width: 12px; height: 12px; border-radius: 2px; background: #B8E62E;"></span>
+              <span class="mono" style="font-size: 12px;">IMG_1032.JPG</span>
+              <span class="mono" style="font-size: 12px; color: #B8E62E;">8.2</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">5.8–11.5</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">0.97</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">8754</span>
+              <span class="blk" style="height: 18px;"></span>
+            </div>
+            <div style="display: grid; grid-template-columns: 24px 1.5fr .7fr .9fr .6fr .6fr 70px; gap: 10px; padding: 9px 0; border-bottom: 1px solid #14171A;">
+              <span style="width: 12px; height: 12px; border-radius: 2px; border: 1px solid #333A3E;"></span>
+              <span class="mono" style="font-size: 12px;">IMG_1033.JPG</span>
+              <span class="mono" style="font-size: 12px;">8.4</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">6.0–11.8</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">0.95</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">9069</span>
+              <span class="blk" style="height: 18px;"></span>
+            </div>
+            <div style="display: grid; grid-template-columns: 24px 1.5fr .7fr .9fr .6fr .6fr 70px; gap: 10px; padding: 9px 0; border-bottom: 1px solid #14171A;">
+              <span style="width: 12px; height: 12px; border-radius: 2px; border: 1px solid #333A3E;"></span>
+              <span class="mono" style="font-size: 12px;">IMG_1035.JPG</span>
+              <span class="mono" style="font-size: 12px; color: #FF6B5B;">6.1</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">4.2–8.9</span>
+              <span class="mono" style="font-size: 12px; color: #FF6B5B;">0.31</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">7902</span>
+              <span class="blk" style="height: 18px;"></span>
+            </div>
+            <div style="display: grid; grid-template-columns: 24px 1.5fr .7fr .9fr .6fr .6fr 70px; gap: 10px; padding: 9px 0; border-bottom: 1px solid #14171A;">
+              <span style="width: 12px; height: 12px; border-radius: 2px; border: 1px solid #333A3E;"></span>
+              <span class="mono" style="font-size: 12px;">IMG_1036.JPG</span>
+              <span class="mono" style="font-size: 12px;">9.1</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">6.4–12.7</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">0.93</span>
+              <span class="mono" style="font-size: 12px; color: #7F878C;">8541</span>
+              <span class="blk" style="height: 18px;"></span>
+            </div>
+            <div style="display: grid; grid-template-columns: 24px 1.5fr .7fr .9fr .6fr .6fr 70px; gap: 10px; padding: 9px 0; border-bottom: 1px solid #14171A; opacity: .55;">
+              <span style="width: 12px; height: 12px; border-radius: 2px; border: 1px solid #333A3E;"></span>
+              <span class="mono" style="font-size: 12px;">IMG_1041.JPG</span>
+              <span class="mono" style="font-size: 12px; color: #626A6E;">—</span>
+              <span class="mono" style="font-size: 12px; color: #626A6E;">—</span>
+              <span class="mono" style="font-size: 12px; color: #626A6E;">—</span>
+              <span class="mono" style="font-size: 12px; color: #626A6E;">—</span>
+              <span style="height: 18px; border-radius: 2px; border: 1px solid #B8E62E;"></span>
+            </div>
+            <div class="lbl" style="letter-spacing: .04em; margin-top: 10px;">↑ per-row Measure button · tick many rows and measure the selection</div>
+          </div>
+
+          <div style="width: 366px; flex: none; border-left: 1px solid #1B1F22; background: #0C0E10; padding: 12px;">
+            <div class="lbl" style="margin-bottom: 10px;">Preview</div>
+            <div style="position: relative; aspect-ratio: 16/10; border-radius: 3px; background: linear-gradient(#2E353B, #A8AEB2);">
+              <div style="position: absolute; left: 32%; top: 34%; width: 22%; height: 30%; border: 2px solid #B8E62E;"></div>
+            </div>
+            <div class="mono" style="font-size: 30px; font-weight: 700; margin-top: 16px;">8.2<span style="font-size: 14px; color: #626A6E;"> m</span></div>
+            <div class="blk" style="height: 7px; margin-top: 12px;"></div>
+            <div class="blk" style="height: 84px; margin-top: 16px; opacity: .8;"></div>
+            <div style="height: 30px; margin-top: 14px; border-radius: 2px; border: 1px solid #333A3E; display: flex; align-items: center; justify-content: center;" class="mono">
+              <span style="font-size: 11px; letter-spacing: .06em;">RE-MEASURE</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="height: 28px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-top: 1px solid #1B1F22;">
+          <span style="width: 6px; height: 6px; border-radius: 50%; background: #B8E62E;"></span>
+          <span class="lbl" style="letter-spacing: .04em;">Status bar — models, device, run progress</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

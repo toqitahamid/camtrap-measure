@@ -26,9 +26,12 @@ def folder(tmp_path: Path, site="TON_CAM02", photos: dict[str, bytes] | None = N
 SITE, FLAG = "TON_CAM02", "IMG_5304.JPG"
 
 
-def run(c: TestClient, d: Path, method: str | None = "md", timeout=4.0, rerun=False, site=SITE, flag=FLAG) -> dict:
-    """Start a run against one flag photo (method=None: let the API pick its default) and poll until it ends."""
-    r = c.post("/api/run", json={"folder": str(d), "site": site, "flag": flag, "rerun": rerun, **({"method": method} if method else {})})
+def run(c: TestClient, d: Path, method: str | None = "md", timeout=4.0, rerun=False, site=SITE, flag=FLAG,
+        photos: list[str] | None = None) -> dict:
+    """Start a run against one flag photo (method=None: let the API pick its default, photos=None: the whole
+    folder) and poll until it ends."""
+    r = c.post("/api/run", json={"folder": str(d), "site": site, "flag": flag, "rerun": rerun,
+                                 **({"method": method} if method else {}), **({"photos": photos} if photos is not None else {})})
     assert r.status_code == 200, r.text
     return wait(c, timeout)
 
@@ -93,6 +96,16 @@ def test_flag_photo_missing_from_disk_asks_for_sync(synced, tmp_path):
 def test_folder_name_does_not_matter(synced, tmp_path):
     st = run(synced, folder(tmp_path, site="anything"))
     assert st["status"] == "done" and st["site"] == SITE and st["flag"] == FLAG and results(synced)[0]["site"] == SITE
+
+
+def test_a_failure_that_is_not_out_of_memory_keeps_its_own_words(synced, tmp_path, monkeypatch):
+    def boom(paths, calibration, method):
+        raise ValueError("the flag photo has no ground plane")
+        yield
+
+    monkeypatch.setattr(api.inference, "backend", boom)
+    st = run(synced, folder(tmp_path), rerun=True)
+    assert st["status"] == "error" and st["error"] == "ValueError: the flag photo has no ground plane"
 
 
 def test_missing_folder_is_refused(synced, tmp_path):
@@ -179,7 +192,8 @@ def test_inference_crash_is_an_error_and_keeps_earlier_answers(synced, tmp_path,
 
     monkeypatch.setattr(api.inference, "backend", boom)
     st = run(synced, d, rerun=True)
-    assert st["status"] == "error" and "CUDA out of memory" in st["error"]
+    # the one failure a technician can act on gets plain words, not the driver's
+    assert st["status"] == "error" and "close Chrome" in st["error"] and "keep their numbers" in st["error"]
     assert [r["distance_m"] for r in results(synced)] == [r["distance_m"] for r in before]  # rows replaced only once new ones exist
 
 
@@ -333,3 +347,45 @@ def test_relabeled_flag_photo_remeasures_its_photos_on_the_next_run(cloud, synce
     seen.clear()
     st = run(synced, d)
     assert st["skipped"] == 0 and [p.name for p in seen] == ["IMG_0005.JPG"]
+
+
+# --- measuring only the photos you picked (ticket 17) ----------------------------------
+
+def picked(c: TestClient, d: Path, photos: list[str]):
+    return c.post("/api/run", json={"folder": str(d), "site": SITE, "flag": FLAG, "method": "md", "photos": photos})
+
+
+def test_only_the_picked_photos_are_measured_in_the_order_given(synced, tmp_path, monkeypatch):
+    spy, seen = spying()
+    monkeypatch.setattr(api.inference, "backend", spy)
+    d = folder(tmp_path, photos={f"IMG_000{i}.JPG": jpeg(IN_WINDOW) for i in (1, 2, 3)})
+    st = run(synced, d, photos=[str(d / "IMG_0003.JPG"), str(d / "IMG_0001.JPG")])
+    assert st["status"] == "done" and st["total"] == 2 and st["done"] == 2
+    assert [p.name for p in seen] == ["IMG_0003.JPG", "IMG_0001.JPG"]  # the order the window listed them in
+
+
+def test_a_picked_photo_is_measured_again_even_though_it_has_an_answer(synced, tmp_path, monkeypatch):
+    spy, seen = spying()
+    monkeypatch.setattr(api.inference, "backend", spy)
+    d = folder(tmp_path)
+    run(synced, d)
+    seen.clear()
+    st = run(synced, d, photos=[str(d / "IMG_0005.JPG")])  # ticking a photo IS the intent to measure it
+    assert st["skipped"] == 0 and [p.name for p in seen] == ["IMG_0005.JPG"]
+    assert len(results(synced)) == expected_detections(["IMG_0005.JPG"])  # its old rows replaced, not doubled
+
+
+def test_a_pick_that_is_not_a_photo_in_the_folder_is_refused(synced, tmp_path):
+    d = folder(tmp_path)
+    (d / "notes.txt").write_bytes(b"x")
+    (tmp_path / "IMG_9999.JPG").write_bytes(jpeg(IN_WINDOW))
+    (d / "sub").mkdir()
+    (d / "sub" / "IMG_0005.JPG").write_bytes(jpeg(IN_WINDOW))
+    for pick in (d / "notes.txt", tmp_path / "IMG_9999.JPG", d / "sub" / "IMG_0005.JPG", d / "IMG_GONE.JPG"):
+        r = picked(synced, d, [str(pick)])
+        assert r.status_code == 400 and "is not a photo in" in r.json()["detail"], pick
+
+
+def test_a_run_with_nothing_picked_is_refused(synced, tmp_path):
+    r = picked(synced, folder(tmp_path), [])
+    assert r.status_code == 400 and "No photos picked" in r.json()["detail"]

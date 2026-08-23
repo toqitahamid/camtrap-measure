@@ -223,9 +223,9 @@ def test_species_label(cls, score, label):
 
 
 def test_oom_detection_covers_cudnn_and_cublas_failures():
-    assert inference._is_oom(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
-    assert inference._is_oom(RuntimeError("cuDNN error: CUDNN_STATUS_NOT_INITIALIZED"))
-    assert not inference._is_oom(RuntimeError("shape mismatch"))
+    assert inference.is_oom(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
+    assert inference.is_oom(RuntimeError("cuDNN error: CUDNN_STATUS_NOT_INITIALIZED"))
+    assert not inference.is_oom(RuntimeError("shape mismatch"))
 
 
 # --- precise method: ground contact from the SAM3 mask (pure numpy, no model needed) -----------

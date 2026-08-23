@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0E1013; color: #E8EAED;
+      font-family: 'IBM Plex Sans', system-ui, 'Segoe UI', sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A13C; } a:hover { color: #F2B75F; }
+    .grot { font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif; }
+    .mono { font-family: 'IBM Plex Mono', ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .cap { font-family: 'Space Grotesk', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #5C646E; }
+    .btn { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid #2E343C; border-radius: 4px; background: #1C2026; color: #E8EAED; font-size: 12px; font-weight: 500; }
+    .btn-amber { background: #E8A13C; border-color: #E8A13C; color: #17120A; font-weight: 600; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+    .input { height: 40px; display: flex; align-items: center; padding: 0 13px; border: 1px solid #2E343C; border-radius: 4px; background: #14171B; font-size: 14px; }
+  </style>
+</helmet>
+
+<div style="position: relative; width: 1440px; height: 900px; display: flex; background: #0E1013; overflow: hidden;">
+
+  <!-- Brand half -->
+  <div style="width: 46%; flex: none; position: relative; background: #0B0D0F; border-right: 1px solid #262B32; display: flex; flex-direction: column; justify-content: space-between; padding: 44px 52px; overflow: hidden;">
+
+    <!-- ranging graphic: contour rings + scale, drawn -->
+    <svg viewBox="0 0 600 600" style="position: absolute; right: -140px; top: 110px; width: 620px; height: 620px; opacity: .5;" fill="none" stroke="#1C2026" stroke-width="1">
+      <circle cx="300" cy="300" r="70"></circle>
+      <circle cx="300" cy="300" r="130"></circle>
+      <circle cx="300" cy="300" r="190"></circle>
+      <circle cx="300" cy="300" r="250"></circle>
+      <path d="M300 20v560M20 300h560"></path>
+    </svg>
+    <svg viewBox="0 0 600 600" style="position: absolute; right: -140px; top: 110px; width: 620px; height: 620px;" fill="none" stroke="#E8A13C" stroke-width="1.4" opacity="0.5">
+      <path d="M300 300 L455 214"></path>
+      <circle cx="455" cy="214" r="5"></circle>
+      <path d="M300 300m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"></path>
+    </svg>
+
+    <div style="position: relative; display: flex; align-items: center; gap: 11px;">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="1.6" stroke-linecap="round">
+        <path d="M3 8V4h4"></path><path d="M21 8V4h-4"></path><path d="M3 16v4h4"></path><path d="M21 16v4h-4"></path>
+        <circle cx="12" cy="12" r="3.2"></circle><path d="M12 5.5v2"></path><path d="M12 16.5v2"></path><path d="M5.5 12h2"></path><path d="M16.5 12h2"></path>
+      </svg>
+      <span class="grot" style="font-size: 15px; font-weight: 700; letter-spacing: 0.11em;">CAMTRAP MEASURE</span>
+    </div>
+
+    <div style="position: relative; max-width: 430px;">
+      <h1 class="grot" style="margin: 0; font-size: 42px; font-weight: 600; line-height: 1.1; letter-spacing: -0.025em;">
+        How far away<br>was that deer?
+      </h1>
+      <p style="margin: 20px 0 0; font-size: 15px; line-height: 1.65; color: #8A929C;">
+        Point it at a folder of camera-trap photos. It finds each animal, reads the ground distance
+        against the flagged reference frame from FlagLabel, and hands you a distance and its 90% interval —
+        photo by photo, with the numbers on the picture where you can check them.
+      </p>
+
+      <div style="display: flex; gap: 30px; margin-top: 34px;">
+        <div>
+          <div class="grot" style="font-size: 22px; font-weight: 600;">167</div>
+          <div class="cap" style="margin-top: 2px;">Cameras</div>
+        </div>
+        <div>
+          <div class="grot" style="font-size: 22px; font-weight: 600;">314</div>
+          <div class="cap" style="margin-top: 2px;">Flag photos</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mono" style="position: relative; font-size: 11px; color: #3A4048;">
+      Southern Illinois University · white-tailed deer distance survey
+    </div>
+  </div>
+
+  <!-- Form half -->
+  <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px;">
+    <div style="width: 100%; max-width: 372px;">
+      <div class="cap">Step 1 of 2</div>
+      <h2 class="grot" style="margin: 9px 0 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em;">Sign in</h2>
+      <p style="margin: 10px 0 0; font-size: 13px; line-height: 1.6; color: #8A929C;">
+        Use the FlagLabel account you label with. There is no password — a one-time code is emailed to you.
+      </p>
+
+      <div style="margin-top: 26px;">
+        <label class="cap" style="display: block; margin-bottom: 7px;">Email</label>
+        <div class="input" style="border-color: #E8A13C;">
+          <span class="mono" style="flex: 1; color: #E8EAED;">toqitahamid.sarker@siu.edu</span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5C646E" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M4 7l8 6 8-6"></path></svg>
+        </div>
+      </div>
+
+      <div class="btn btn-amber" style="width: 100%; height: 40px; justify-content: center; margin-top: 14px; font-size: 14px;">
+        Email me a code
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 12px; margin: 26px 0;">
+        <div style="flex: 1; height: 1px; background: #1B1F24;"></div>
+        <span class="cap">Then</span>
+        <div style="flex: 1; height: 1px; background: #1B1F24;"></div>
+      </div>
+
+      <!-- step two, shown small so the whole flow is visible at once -->
+      <div style="border: 1px dashed #262B32; border-radius: 6px; padding: 15px 16px; opacity: .72;">
+        <div class="cap">Step 2 of 2</div>
+        <div class="grot" style="font-size: 14px; font-weight: 600; margin-top: 6px;">Enter the code</div>
+        <p style="margin: 6px 0 12px; font-size: 12px; color: #8A929C;">Sent to that address — check spam if it takes a minute.</p>
+        <div style="display: flex; gap: 7px;">
+          <div class="mono" style="flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid #2E343C; border-radius: 4px; background: #14171B; font-size: 17px;">2</div>
+          <div class="mono" style="flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid #2E343C; border-radius: 4px; background: #14171B; font-size: 17px;">1</div>
+          <div class="mono" style="flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid #2E343C; border-radius: 4px; background: #14171B; font-size: 17px;">8</div>
+          <div class="mono" style="flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid #2E343C; border-radius: 4px; background: #14171B; font-size: 17px;">4</div>
+          <div class="mono" style="flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid #2E343C; border-radius: 4px; background: #14171B; font-size: 17px;">7</div>
+          <div class="mono" style="flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid #E8A13C; border-radius: 4px; background: #14171B; font-size: 17px; color: #5C646E;">3</div>
+        </div>
+      </div>
+
+      <p style="margin: 22px 0 0; font-size: 12px; color: #5C646E; line-height: 1.6;">
+        No FlagLabel account with that address? Ask the survey lead to add you — this app only reads.
+      </p>
+    </div>
+  </div>
+
+  <!-- Status bar spanning the window -->
+  <div class="row" style="position: absolute; left: 0; right: 0; bottom: 0; height: 28px; gap: 10px; padding: 0 14px; background: #14171B; border-top: 1px solid #262B32; font-size: 11px; color: #5C646E;">
+    <span class="dot" style="background: #7FB069;"></span>
+    <span>Models ready</span>
+    <span style="color: #262B32;">·</span>
+    <span class="mono">cuda · RTX 2060 SUPER 8 GB</span>
+    <div style="flex: 1;"></div>
+    <span class="mono">v0.1.0 (17381a9)</span>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

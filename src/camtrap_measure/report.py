@@ -1,10 +1,11 @@
-"""Views over the results store: the post-run summary, the photo-by-photo review, and the gated CSV export.
+"""Views over the results store: the folder the window is working on, the post-run summary, and the gated CSV export.
 
-`review` lists every measured photo with its boxes and their numbers — the researcher checks an answer on
-the photo itself, not on a summary line. A detection row is *suspicious* when its number should not enter
+`folder` lists every JPEG in one folder — measured or not — with its boxes and their numbers, because the
+window works on a folder the technician picked, and a photo with no answer yet still has to appear in the
+list, the table and the frame. A detection row is *suspicious* when its number should not enter
 an analysis unread: the photo did not match its flag photo well (misfiled / moved camera), the detector was
 unsure of the box, SpeciesNet was unsure of the animal, or no ground could be read under it. Such rows are
-marked in the review and left out of the export unless asked — and the file says how many it left out.
+marked in the listing and left out of the export unless asked — and the file says how many it left out.
 """
 
 import csv
@@ -12,10 +13,11 @@ import io
 import statistics
 from datetime import datetime
 from ntpath import basename  # splits on / and \ alike: paths come from the dept's Windows machine or a Linux test box
+from pathlib import Path
 
-from . import store
+from . import calibration, measure, store
 from .distance import MIN_INLIERS
-from .inference import MIN_SPECIES_SCORE
+from .inference import DEFAULT_METHOD, MIN_SPECIES_SCORE
 
 LOW_CONF = 0.5  # ponytail: detector confidence below this is "weak box"; tune with the dept's first season
 DEER = {"white-tailed deer", "unsure"}  # default export: the survey target plus animals that may be it
@@ -102,28 +104,62 @@ DET_KEYS = ("idx", "x1", "y1", "x2", "y2", "species", "confidence", "distance_m"
             "method", "match_score")
 
 
-def review(site=None, date_from=None, date_to=None) -> list[dict]:
-    """One entry per measured photo - its boxes, their numbers and why any of them is suspicious - so the
-    researcher can check the answer on the photo itself instead of trusting the summary. Photos with no
-    animal are in the list too: seeing that a photo was looked at and held nothing is part of the check."""
-    out = []
-    by_path: dict[str, dict] = {}
-    for p in photos(site, date_from, date_to):
-        by_path[p["path"]] = e = {
-            "path": p["path"], "photo": basename(p["path"]), "site": p["site"], "captured_at": p["captured_at"],
-            "flag_image": p["calibration_image"], "match_score": p["match_score"], "method": p["method"],
-            "reasons": [p["held_reason"]] if p["held_reason"] else [], "detections": []}
-        out.append(e)
-    for r in rows(site, date_from, date_to):
-        e = by_path.get(r["path"])
-        if e is None:  # a detection whose photo row is out of scope: never drop a box silently
-            continue
-        why = reasons(r)
-        e["detections"].append({**{k: r[k] for k in DET_KEYS}, "reasons": why})
-        e["reasons"] += [w for w in why if w not in e["reasons"]]
-    for e in out:
-        e["detections"].sort(key=lambda d: (d["method"], d["idx"]))
-    return sorted(out, key=lambda e: (e["site"], e["captured_at"] or "", e["path"]))
+UNREADABLE = "this file could not be read — it may be truncated or not really a JPEG"
+
+# Folders `folder()` has listed since the engine started. The photo endpoint serves their JPEGs as well as
+# measured ones: the list, the table and the frame show a folder before anything in it has been measured, and
+# a thumbnail must not be the one broken thing on the page. Forgotten on restart, which only costs a relist.
+LISTED_FOLDERS: set[Path] = set()
+
+
+def listed(path: str) -> bool:
+    """Is this a JPEG sitting directly in a folder this process has listed? Strict on purpose: the parent must
+    be a listed folder itself, so no path is served merely for looking like it is somewhere below one."""
+    p = Path(path).expanduser().resolve()
+    return p.suffix.lower() in measure.JPEG and p.parent in LISTED_FOLDERS
+
+
+def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METHOD) -> dict:
+    """Every JPEG in one folder, name order, each joined with the answer the store holds for this flag photo
+    and method — measured or not, because the window renders the folder the technician picked, not the
+    measured photos. A photo measured under the OTHER method reads as unmeasured here, because the
+    question is what this method says. `stale` asks the run's own skip rule (`measure.current_answer`), so a stale row is
+    exactly a row that measuring the folder again would redo; with no flag photo chosen nothing is stale,
+    because there is nothing to be stale against. Raises ValueError with the message."""
+    d = Path(path).expanduser().resolve()
+    if not d.is_dir():
+        raise ValueError(f"Folder not found: {d}")
+    files = measure.jpegs(d)  # raises ValueError with a plain message if the folder cannot be read
+    LISTED_FOLDERS.add(d)
+    cal = next((c for c in store.calibrations() if c["site"] == site and c["image_name"] == flag), None)
+    known = {p["path"]: p for p in store.photos()}
+    dets: dict[str, list[dict]] = {}
+    for r in store.detections():
+        if r["method"] == method:
+            dets.setdefault(r["path"], []).append(r)
+    out, unreadable = [], 0
+    for p in files:
+        seen = known.get(str(p))
+        if seen and seen["method"] != method:
+            seen = None  # measured, but not under the method being asked about: no answer to this question
+        row = {"name": p.name, "path": str(p), "captured_at": None, "measured": seen is not None, "stale": False,
+               "match_score": None, "method": None, "flag_image": None, "reasons": [], "detections": []}
+        if seen:
+            row.update(captured_at=seen["captured_at"], match_score=seen["match_score"], method=seen["method"],
+                       flag_image=seen["calibration_image"],
+                       stale=cal is not None and not measure.current_answer(seen, cal, method),
+                       reasons=[seen["held_reason"]] if seen["held_reason"] else [])
+            for r in sorted(dets.get(str(p), []), key=lambda r: r["idx"]):
+                why = reasons(r)
+                row["detections"].append({**{k: r[k] for k in DET_KEYS}, "reasons": why})
+                row["reasons"] += [w for w in why if w not in row["reasons"]]
+        elif measure.readable(p):
+            row["captured_at"] = calibration.read_exif(p)["captured_at"]
+        else:  # a truncated file is listed like any other, so the technician sees which one to look at
+            unreadable += 1
+            row["reasons"] = [UNREADABLE]
+        out.append(row)
+    return {"folder": str(d), "total": len(out), "unreadable": unreadable, "rows": out}
 
 
 def export_csv(site=None, date_from=None, date_to=None, all_species=False, include_suspicious=False) -> str:

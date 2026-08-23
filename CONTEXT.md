@@ -417,6 +417,75 @@ run them (`scripts/install.ps1` from a clone; the `irm | iex` form is the same f
 - A photo with no animal is in the list too: *this frame was looked at and held nothing* is part of
   the check, and the empty frames are where a missed deer would hide.
 
+## The window becomes an app (ticket 17, 2026-08-23)
+
+- The researcher on the scrolling page: *"instead of writing the folder dir location, i want to select the
+  folder... instead of measuring all image at once, i want to have an option to individually measure each
+  image, and have an option to measure all image at once... professional apps are not vertical and take all
+  the space of the window."* Design settled on a canvas of nine artboards before any code was written
+  (https://claude.ai/code/artifact/c45a02ab-37a5-4d4e-96f1-e2c7f6b5badb): three directions offered, A
+  ("field instrument": graphite, one amber accent, three panes) chosen, C's icon rail and data grid folded
+  into it, B kept as the record of what was not taken.
+- **The shell.** Rail, title bar, context bar, work area, status bar - nothing scrolls but the photo list
+  and the table. This replaces the stacked cards of tickets 09-16: one camera, one flag photo, one folder
+  and one method live in the context bar and every section acts on them, so the thing being measured is
+  always on screen instead of being re-stated per card.
+- **The rail, not tabs.** Both were drawn; the rail won because two navigations for the same three sections
+  is one too many, and it leaves the title bar for sync and the account.
+- **Three sections, not one page.** MEASURE is the photo and its numbers; TABLE is the same photos as
+  sortable rows, which is the only place a technician can compare an alignment score or a confidence down a
+  column; RESULTS is the survey-level view and the export. The table earns its place by doing two things
+  the viewer cannot: tick many photos and measure exactly those, and see a value that is out of line with
+  its neighbours.
+- **Measure one, some, or all.** `POST /api/run` takes `photos: [...]`; an explicit pick is measured
+  whatever it already holds, because picking a photo *is* the intent to measure it. The whole-folder path
+  keeps the skip rule of ticket 15 unchanged.
+- **`GET /api/folder` replaces `GET /api/photos`.** The window works on a folder, so the listing is every
+  JPEG in it joined with the answer held for this flag photo and method - `measured` and `stale` come from
+  `measure.current_answer`, the same rule a whole-folder run skips on, so what the list calls stale is
+  exactly what a run would redo. `report.review` is gone: it was the same view without the folder.
+- **The folder picker.** `dialogs.pick_folder()` opens pywebview's native dialog on the window `main.py`
+  built. With no native window (`--no-window`, or the page opened in a browser) it returns a reason instead
+  of a path and the field stays typeable - the dev loop on Linux must not need a GUI toolkit, so `webview`
+  is imported inside the function, never at module scope.
+- **Serving unmeasured photos.** The list shows a thumbnail of every JPEG in the folder, including the ones
+  with no answer yet, so `/api/photo` can no longer refuse everything `store.photo_known` does not know. It
+  now also serves a JPEG whose resolved parent is exactly a folder `/api/folder` has listed in this
+  process. Nothing widens that set but a folder the user pointed the window at.
+- **RESULTS keeps its own filter row**, not the context bar. The other two sections measure one folder;
+  RESULTS reads the whole store across cameras and dates, and a bar offering a flag photo and a folder
+  there would be furniture. The rail is what they share.
+- **A listing is a whole-folder scan**, so a typed path waits 400 ms after the typing stops before the
+  window asks for it; Browse arrives whole. Without that, a 500-photo folder ran a 5-second scan per
+  keystroke and starved the rest of the engine (found in review).
+- **An answer stored under the other method reads as unmeasured.** The method sits in the context bar and
+  changes with one click; claiming a photo was looked at under a method it was never run with made the
+  window say "no animal" about a photo nobody had measured (found in review).
+- Built by four agents in parallel against the contract above - engine, and one file per section - with the
+  shared types, the stylesheet and the shell written first so the seams were fixed before anyone started.
+
+## The GPU is shared with the desktop (2026-08-23)
+
+- Measured on the dept machine while testing ticket 17: **7.7 of the card's 8 GB was in use** by Chrome,
+  Teams, Cursor, WebView2, the shell and the lock screen, before this app asked for anything. A run died
+  with `CUDA error: out of memory` after 53 s. This is the normal state of a consumer card in WDDM mode,
+  not a leak - stopping the engine took the card back to ~1 GB.
+- Three answers, none of them "buy a bigger card":
+  1. **Closing the window ends the process** (`main.shutdown`). The driver hands the CUDA context back
+     only when the process really dies, and a hung CUDA teardown or a daemon thread mid-run could keep it
+     alive; the launcher stops the run, gives the photo in flight two seconds to write its row, then
+     leaves hard. Safe because the store commits and closes per photo - the worst case is the photo in
+     flight, which is exactly what a cancel already costs.
+  2. **The startup warning reads free memory, not total.** `torch.cuda.mem_get_info()`; below three
+     quarters of the floor it names what is free and says which windows to close. The old check only saw
+     the card's size, which on this machine was never the problem.
+  3. **An out-of-memory failure gets plain words**, not the driver's: "close Chrome, Teams or other heavy
+     windows, then measure again. The photos already done keep their numbers." `inference.is_oom` was
+     already there for SpeciesNet's batch back-off; `measure` now reads it too.
+- Not done: shrinking the batch or the RoMa resolution when memory is short. The back-off already exists
+  for SpeciesNet and did not fire here - the failure was in alignment, which allocates once and large.
+  Revisit if the dept meets this on an idle machine rather than one running Teams.
+
 ## Auth
 
 Dept's existing FlagLabel accounts, signed in by one-time email code (ticket 14), session cached. RLS

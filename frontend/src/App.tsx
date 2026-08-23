@@ -1,506 +1,82 @@
+/* The shell: the rail, the three bars, and the one piece of state every section shares — which camera,
+   which flag photo, which folder, which method. The sections render what the engine returns; the shell
+   owns nothing but the scope, the folder listing and the run. */
+
+import Icon from './Icon'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
-type Inference = {
-  status: 'loading' | 'ready' | 'error'
-  backend: 'fake' | 'real'
-  device: string | null
-  batch: number | null
-  weights: string | null
-  warning: string | null
-  error: string | null
-  download: { done_gb: number; total_gb: number } | null
-}
-type Status = {
-  signed_in: boolean
-  email: string | null
-  last_sync: string | null
-  annotations: number
-  sites: number
-  inference: Inference
-}
-type SyncResult =
-  | { ok: true; last_sync: string; annotations: number; sites: number }
-  | { ok: false; offline: true; last_sync: string | null }
-type Flag = { image_name: string; captured_at: string | null; ok: boolean; reason: string | null }
-type Camera = { site: string; flags: Flag[] }
-type Summary = {
-  photos: number
-  detections: number
-  deer: number
-  suspicious: number
-  histogram: { lo: number; hi: number; n: number }[]
-  cameras: { site: string; photos: number; detections: number; deer: number; median_m: number | null; suspicious: number }[]
-}
-type Det = {
-  idx: number
-  x1: number
-  y1: number
-  x2: number
-  y2: number
-  species: string
-  confidence: number
-  distance_m: number | null
-  q05_m: number | null
-  q95_m: number | null
-  method: string
-  match_score: number | null
-  reasons: string[]
-}
-type Photo = {
-  path: string
-  photo: string
-  site: string
-  captured_at: string | null
-  flag_image: string | null
-  match_score: number | null
-  method: string | null
-  reasons: string[]
-  detections: Det[]
-}
-type Methods = { default: string; methods: Record<string, { label: string; hint: string }> }
-type Run = {
-  folder: string
-  site: string
-  flag: string
-  method: string
-  status: 'running' | 'done' | 'cancelled' | 'error'
-  total: number
-  done: number
-  skipped: number
-  unreadable: number
-  detections: number
-  error: string | null
-  elapsed_s: number
-  eta_s: number | null
-}
+import Measure from './Measure'
+import Results from './Results'
+import TableView from './TableView'
+import {
+  duration,
+  plural,
+  post,
+  when,
+  type Camera,
+  type Folder,
+  type Methods,
+  type Run,
+  type Scope,
+  type Status,
+} from './ui'
 
-const post = (url: string, body?: unknown) =>
-  fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+type Section = 'measure' | 'table' | 'results'
+const SECTIONS: { id: Section; label: string; icon: 'measure' | 'table' | 'results' }[] = [
+  { id: 'measure', label: 'MEASURE', icon: 'measure' },
+  { id: 'table', label: 'TABLE', icon: 'table' },
+  { id: 'results', label: 'RESULTS', icon: 'results' },
+]
 
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : 'never')
-const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
-const duration = (s: number) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`)
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
-
-function Stat({ value, label }: { value: number | string; label: string }) {
-  return (
-    <div className="stat">
-      <b>{value}</b>
-      <span>{label}</span>
-    </div>
-  )
-}
-
-function ModelsLine({ inf }: { inf: Inference }) {
-  if (inf.status === 'loading')
-    return (
-      <div className="stack">
-        <p className="muted small">
-          {inf.download ? `Downloading model weights: ${inf.download.done_gb.toFixed(1)} / ${inf.download.total_gb.toFixed(1)} GB` : 'Loading models…'}
-        </p>
-        {inf.download && <progress value={inf.download.done_gb} max={inf.download.total_gb || 1} />}
-      </div>
-    )
-  if (inf.status === 'error') return <p className="notice notice-error">Models unavailable: {inf.error}</p>
-  return (
-    <p className="muted small">
-      Models:{' '}
-      {inf.backend === 'real'
-        ? `MegaDetector + SpeciesNet ${inf.weights} on ${inf.device} (batch ${inf.batch})`
-        : 'none'}
-      {inf.warning && <span className="warn"> · ⚠ {inf.warning}</span>}
-    </p>
-  )
-}
-
-function RunPanel({ cameras, methods, ready, pollKey, onDone }: { cameras: Camera[]; methods: Methods; ready: boolean; pollKey: number; onDone: (site: string) => void }) {
-  const [run, setRun] = useState<Run | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [picked, setPicked] = useState<string | null>(null)
-  const [site, setSite] = useState('')
-  const [flag, setFlag] = useState('')
-  const method = picked ?? methods.default
-  const running = run?.status === 'running'
-  const usable = cameras.filter((c) => c.flags.some((f) => f.ok)) // a camera is offered once one of its flag photos fits
-  const flags = usable.find((c) => c.site === site)?.flags ?? []
-  useEffect(() => {
-    // keep the selects valid as the list changes (a sync, the first load): first camera, its newest usable flag photo
-    const cam = usable.find((c) => c.site === site) ?? usable[0]
-    const s = cam?.site ?? ''
-    if (s !== site) setSite(s)
-    if (!cam?.flags.some((f) => f.ok && f.image_name === flag)) setFlag(cam?.flags.find((f) => f.ok)?.image_name ?? '')
-  }, [cameras, site, flag, usable])
-
-  const poll = () => fetch('/api/run').then((r) => r.json()).then(setRun).catch(() => {}) // engine down: App's refresh says so
-
-  useEffect(() => void poll(), [pollKey]) // a sync may have started a catch-up run
-  useEffect(() => {
-    if (!running) return
-    const id = setInterval(poll, 1000)
-    return () => {
-      clearInterval(id)
-      if (run) onDone(run.site) // left the running state: show that camera's results
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running])
-
-  async function start(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const form = new FormData(e.currentTarget)
-    setError(null)
-    const r = await post('/api/run', { folder: form.get('folder'), site, flag, method: form.get('method'), rerun: form.get('rerun') === 'on' })
-    if (!r.ok) {
-      setError((await r.json()).detail ?? `Could not start (${r.status})`)
-      return
-    }
-    setRun(await r.json())
-  }
-
-  return (
-    <section className="card">
-      <h2>Measure</h2>
-      {/* ponytail: typed/pasted path; a native folder picker needs a pywebview dialog bridge — add when the dept trips over this. */}
-      {usable.length === 0 && <p className="muted small">No camera has a labeled flag photo yet — label one in FlagLabel, then Sync.</p>}
-      <form id="run-form" onSubmit={start} className="row">
-        <select value={site} onChange={(e) => setSite(e.target.value)} title="Camera">
-          {usable.map((c) => (
-            <option key={c.site} value={c.site}>{c.site}</option>
-          ))}
-        </select>
-        <select value={flag} onChange={(e) => setFlag(e.target.value)} title="Flag photo to measure against">
-          {flags.map((f) => (
-            <option key={f.image_name} value={f.image_name} disabled={!f.ok} title={f.reason ?? undefined}>
-              {f.image_name} · {f.captured_at ? day(f.captured_at) : 'no date'}{f.ok ? '' : ' — not usable'}
-            </option>
-          ))}
-        </select>
-        <input name="folder" placeholder="Folder with this camera's photos, e.g. D:\photos\TON_CAM02" required className="grow" style={{ minWidth: 320 }} />
-        <select name="method" value={method} onChange={(e) => setPicked(e.target.value)}>
-          {Object.entries(methods.methods).map(([k, m]) => (
-            <option key={k} value={k}>{m.label}</option>
-          ))}
-        </select>
-        <button type="submit" className="btn btn-primary" disabled={running || !ready || !flag}>{running ? 'Running…' : 'Measure'}</button>
-        {running && <button type="button" className="btn" onClick={() => post('/api/run/cancel').then(poll)}>Cancel</button>}
-      </form>
-      {methods.methods[method] && <p className="muted small">{methods.methods[method].hint}</p>}
-      <label className="check">
-        <input type="checkbox" name="rerun" form="run-form" />
-        <span>
-          Re-measure photos that already have an answer (otherwise only new or interrupted ones are measured — so Measure again
-          also resumes a cancelled run)
-        </span>
-      </label>
-      {error && <p className="notice notice-error">{error}</p>}
-      {run && (
-        <div className="stack">
-          <progress value={run.done} max={run.total} />
-          <p className="small">
-            <strong>{run.site}</strong> · flag photo {run.flag} · {methods.methods[run.method]?.label ?? run.method} · {run.done}/{run.total} photos · {run.detections} animals
-            {run.skipped > 0 && ` · ${run.skipped} already measured`}
-            {run.unreadable > 0 && ` · ${plural(run.unreadable, 'unreadable file')} skipped`}
-            {running && run.eta_s !== null && ` · about ${duration(run.eta_s)} left`}
-            {run.status === 'done' && ` · finished in ${duration(run.elapsed_s)}`}
-            {run.status === 'cancelled' && ` · cancelled after ${duration(run.elapsed_s)} — Measure again continues where it stopped`}
-          </p>
-          {run.status === 'error' && <p className="notice notice-error">Run failed: {run.error}</p>}
-        </div>
-      )}
-    </section>
-  )
-}
-
-
-const VIEWS = {
-  all: { label: 'All', keep: () => true },
-  animals: { label: 'With an animal', keep: (p: Photo) => p.detections.length > 0 },
-  flagged: { label: 'Needs a look', keep: (p: Photo) => p.reasons.length > 0 },
-} satisfies Record<string, { label: string; keep: (p: Photo) => boolean }>
-type View = keyof typeof VIEWS
-
-const metres = (d: Det) => (d.distance_m !== null ? `${d.distance_m.toFixed(1)} m` : 'no distance')
-const band = (d: Det) => (d.q05_m !== null && d.q95_m !== null ? `${d.q05_m.toFixed(1)}–${d.q95_m.toFixed(1)}` : '—')
-
-/** Every measured photo, one at a time: the frame it was measured on, the boxes that were found, and the
-    number read at each. Arrow keys walk the list; the flag photo it was aligned to is one click away. */
-function ReviewPanel({ qs, refreshKey, methods }: { qs: string; refreshKey: unknown; methods: Methods }) {
-  const [photos, setPhotos] = useState<Photo[]>([])
-  const [view, setView] = useState<View>('all')
-  const [path, setPath] = useState<string | null>(null)
-  const [showFlag, setShowFlag] = useState(false)
-  const [hot, setHot] = useState<number | null>(null) // the box the pointer is on, in the frame or in the table
-
-  useEffect(() => {
-    fetch(`/api/photos?${qs}`).then((r) => r.json()).then(setPhotos).catch(() => {})
-  }, [qs, refreshKey])
-
-  const list = photos.filter(VIEWS[view].keep)
-  const at = Math.max(0, list.findIndex((p) => p.path === path))
-  const cur: Photo | undefined = list[at]
-  const step = (d: number) => {
-    // no useCallback: the compiler memoizes `list`, so the key handler below re-binds only when it changes
-    const next = list[Math.min(list.length - 1, Math.max(0, at + d))]
-    if (next) {
-      setPath(next.path)
-      setHot(null)
-    }
-  }
-  useEffect(() => {
-    // arrow keys are how a reviewer walks a folder; typing in a field still wins
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
-      const d = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
-      if (!d) return
-      e.preventDefault()
-      step(d)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, at])
-
-  const src = (p: Photo, size: 'thumb' | 'full') => `/api/photo?size=${size}&path=${encodeURIComponent(p.path)}`
-  const flagSrc = (p: Photo) => `/api/flag?size=full&site=${encodeURIComponent(p.site)}&image=${encodeURIComponent(p.flag_image ?? '')}`
-
-  return (
-    <section className="card">
-      <div className="card-head">
-        <h2>Review</h2>
-        <span className="small muted">{plural(list.length, 'photo')} · arrow keys to move</span>
-        <div className="spacer" />
-        {(Object.keys(VIEWS) as View[]).map((k) => (
-          <button key={k} className={`btn${view === k ? ' btn-primary' : ''}`} onClick={() => setView(k)}>
-            {VIEWS[k].label} ({photos.filter(VIEWS[k].keep).length})
-          </button>
-        ))}
-      </div>
-      {list.length === 0 ? (
-        <p className="muted">No photos here.</p>
-      ) : (
-        <div className="review">
-          <ol className="strip">
-            {list.map((p) => (
-              <li key={p.path}>
-                <button
-                  className={`strip-item${p.path === cur?.path ? ' on' : ''}`}
-                  onClick={() => {
-                    setPath(p.path)
-                    setHot(null)
-                  }}
-                  ref={p.path === cur?.path ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
-                >
-                  <img src={src(p, 'thumb')} alt="" loading="lazy" />
-                  <span className="strip-text">
-                    <strong>{p.photo}</strong>
-                    <span className="muted">{p.captured_at ? new Date(p.captured_at).toLocaleString() : 'no date'}</span>
-                    <span>{p.detections.length === 0 ? 'no animal' : p.detections.map(metres).join(' · ')}</span>
-                  </span>
-                  {p.reasons.length > 0 && <span className="dot" title={p.reasons.join('; ')} />}
-                </button>
-              </li>
-            ))}
-          </ol>
-          {cur && (
-            <div className="viewer">
-              <div className="card-head">
-                <strong>{cur.site} · {cur.photo}</strong>
-                <span className="small muted">{cur.captured_at ? new Date(cur.captured_at).toLocaleString() : 'no capture date'}</span>
-                <div className="spacer" />
-                <span className="small muted">{at + 1} / {list.length}</span>
-                <button className="btn" onClick={() => step(-1)} disabled={at === 0} title="Previous (Left arrow)">←</button>
-                <button className="btn" onClick={() => step(1)} disabled={at === list.length - 1} title="Next (Right arrow)">→</button>
-              </div>
-              <div className="frame">
-                <img src={showFlag && cur.flag_image ? flagSrc(cur) : src(cur, 'full')} alt={cur.photo} />
-                {!showFlag &&
-                  cur.detections.map((d, i) => (
-                    <div
-                      key={`${d.method}-${d.idx}`}
-                      className={`bbox ${d.reasons.length ? 'bad' : 'ok'}${hot === i ? ' hot' : ''}${d.y1 < 0.08 ? ' low' : ''}`}
-                      style={{ left: `${d.x1 * 100}%`, top: `${d.y1 * 100}%`, width: `${(d.x2 - d.x1) * 100}%`, height: `${(d.y2 - d.y1) * 100}%` }}
-                      onMouseEnter={() => setHot(i)}
-                      onMouseLeave={() => setHot(null)}
-                    >
-                      <span className="tag">{i + 1} · {d.species} · {metres(d)}</span>
-                    </div>
-                  ))}
-                {showFlag && <span className="flag-tag">Flag photo {cur.flag_image} — every distance is read against this frame</span>}
-              </div>
-              <div className="row small muted">
-                <button className="btn" onClick={() => setShowFlag((f) => !f)} disabled={!cur.flag_image}>
-                  {showFlag ? 'Back to the photo' : 'Show the flag photo'}
-                </button>
-                <span>
-                  aligned to {cur.flag_image ?? '—'} · {cur.match_score === null ? 'no alignment' : plural(cur.match_score, 'match point')} ·{' '}
-                  {cur.method ? methods.methods[cur.method]?.label ?? cur.method : '—'}
-                </span>
-              </div>
-              {cur.detections.length === 0 ? (
-                <p className="muted small">No animal was detected in this photo.</p>
-              ) : (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>#</th><th>Species</th><th className="num">Distance</th><th className="num">90% interval, m</th>
-                        <th className="num">Box conf.</th><th>Method</th><th>Why it needs a look</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cur.detections.map((d, i) => (
-                        <tr key={`${d.method}-${d.idx}`} className={hot === i ? 'hot' : undefined} onMouseEnter={() => setHot(i)} onMouseLeave={() => setHot(null)}>
-                          <td>{i + 1}</td>
-                          <td>{d.species}</td>
-                          <td className="num">{metres(d)}</td>
-                          <td className="num">{band(d)}</td>
-                          <td className="num">{d.confidence.toFixed(2)}</td>
-                          <td className="small muted">{methods.methods[d.method]?.label ?? d.method}</td>
-                          <td className="warn small">{d.reasons.join('; ')}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </section>
-  )
-}
-
-function ResultsPanel({ sites, focus, methods }: { sites: string[]; focus: { site: string; n: number }; methods: Methods }) {
-  const [pick, setPick] = useState<{ site: string; n: number } | null>(null)
-  const site = pick && pick.n === focus.n ? pick.site : focus.site // a finished run refocuses on its camera; the user can re-pick after
-  const setSite = (s: string) => setPick({ site: s, n: focus.n })
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [allSpecies, setAllSpecies] = useState(false)
-  const [includeSuspicious, setIncludeSuspicious] = useState(false)
-  const [summary, setSummary] = useState<Summary | null>(null)
-
-  const scope = new URLSearchParams()
-  if (site) scope.set('site', site)
-  if (from) scope.set('date_from', from)
-  if (to) scope.set('date_to', to)
-  const qs = scope.toString()
-
-  useEffect(() => {
-    fetch(`/api/summary?${qs}${allSpecies ? '&all_species=true' : ''}`).then((r) => r.json()).then(setSummary).catch(() => {})
-  }, [qs, allSpecies, focus])
-
-  const exportQs = new URLSearchParams(scope)
-  if (allSpecies) exportQs.set('all_species', 'true')
-  if (includeSuspicious) exportQs.set('include_suspicious', 'true')
-  const peak = Math.max(1, ...(summary?.histogram.map((b) => b.n) ?? [1]))
-
-  return (
-    <>
-      <section className="card">
-        <div className="card-head">
-          <h2>Results</h2>
-          <div className="spacer" />
-          <select value={site} onChange={(e) => setSite(e.target.value)}>
-            <option value="">All cameras</option>
-            {sites.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-          <label className="row small muted">from <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-          <label className="row small muted">to <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
-        </div>
-        {!summary || summary.photos === 0 ? (
-          <p className="muted">No measured photos in this range yet.</p>
-        ) : (
-          <>
-            <div className="stats">
-              <Stat value={summary.photos} label="photos" />
-              <Stat value={summary.detections} label="animals" />
-              <Stat value={summary.deer} label="deer" />
-              <Stat value={summary.suspicious} label={`suspicious${allSpecies ? '' : ' deer'} rows`} />
-            </div>
-            {summary.histogram.length > 0 && (
-              <div className="stack">
-                <div className="hist">
-                  {summary.histogram.map((b) => (
-                    <div key={b.lo} title={`${b.lo}–${b.hi} m: ${b.n}`}>
-                      <div style={{ height: (80 * b.n) / peak }} />
-                      {b.lo}
-                    </div>
-                  ))}
-                </div>
-                <div className="small muted">Deer distances, metres ({summary.histogram[0].hi - summary.histogram[0].lo} m bins)</div>
-              </div>
-            )}
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Camera</th><th className="num">Photos</th><th className="num">Animals</th><th className="num">Deer</th><th className="num">Median m</th><th className="num">Suspicious</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.cameras.map((c) => (
-                    <tr key={c.site}>
-                      <td>{c.site}</td><td className="num">{c.photos}</td><td className="num">{c.detections}</td><td className="num">{c.deer}</td>
-                      <td className="num">{c.median_m ?? '—'}</td><td className="num">{c.suspicious}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </section>
-
-      {summary && summary.photos > 0 && (
-        <>
-          <ReviewPanel qs={qs} refreshKey={focus} methods={methods} />
-
-          <section className="card">
-            <h2>Export</h2>
-            <label className="check">
-              <input type="checkbox" checked={allSpecies} onChange={(e) => setAllSpecies(e.target.checked)} />
-              <span>All species (default: white-tailed deer and unsure only)</span>
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={includeSuspicious} onChange={(e) => setIncludeSuspicious(e.target.checked)} />
-              <span>Include the {plural(summary.suspicious, 'suspicious row')} (they carry their reason in the flag column)</span>
-            </label>
-            <p className="row">
-              <a className="btn btn-primary" href={`/api/export.csv?${exportQs}`} download>Download CSV</a>
-              <span className="small muted">
-                {!includeSuspicious && summary.suspicious > 0 && `${plural(summary.suspicious, 'suspicious row')} will be left out · `}
-                columns and units are documented in the file's header lines
-              </span>
-            </p>
-          </section>
-        </>
-      )}
-    </>
-  )
-}
+const initials = (email: string | null) =>
+  (email ?? '?')
+    .split('@')[0]
+    .split(/[._-]/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('') || '?'
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
   const [cameras, setCameras] = useState<Camera[]>([])
   const [methods, setMethods] = useState<Methods>({ default: '', methods: {} })
-  const [notice, setNotice] = useState<{ text: string; kind: 'info' | 'warn' | 'error' } | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [focus, setFocus] = useState({ site: '', n: 0 })
-  const [pollKey, setPollKey] = useState(0)
   const [build, setBuild] = useState<{ version: string; commit: string | null } | null>(null)
-  const [codeSentTo, setCodeSentTo] = useState<string | null>(null) // sign-in step two: a code is on its way to this address
+  const [notice, setNotice] = useState<{ text: string; kind: 'warn' | 'error' } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null)
+
+  const [section, setSection] = useState<Section>('measure')
+  const [picked, setPicked] = useState<Scope>({ site: '', flag: '', folder: '', method: '' })
+  const [typedPath, setTypedPath] = useState('') // what is in the box; the settled value is what is listed
+  const [listing, setListing] = useState<{ of: string; data: Folder } | null>(null)
+  const [folderError, setFolderError] = useState<string | null>(null)
+  const [stale, setStale] = useState(0) // bumped when a run or a sync makes the listing out of date
+  const [rerun, setRerun] = useState(false)
+  const [run, setRun] = useState<Run | null>(null)
+  const [focus, setFocus] = useState<string | null>(null) // a row the table handed to the measure section
+
+  const usable = cameras.filter((c) => c.flags.some((f) => f.ok))
+  const cam = usable.find((c) => c.site === picked.site) ?? usable[0]
+  const flags = cam?.flags ?? []
+  // What the window actually acts on: what was picked, corrected to something that exists as the lists
+  // load. Derived rather than stored — storing it would mean writing state back from an effect on every sync.
+  const scope: Scope = {
+    site: cam?.site ?? '',
+    flag: flags.some((f) => f.ok && f.image_name === picked.flag)
+      ? picked.flag
+      : (flags.find((f) => f.ok)?.image_name ?? ''),
+    folder: picked.folder,
+    method: methods.methods[picked.method] ? picked.method : methods.default,
+  }
+  const of = [scope.folder, scope.site, scope.flag, scope.method].join('\u0000')
+  // only ever show a listing that was fetched for the scope now on screen, never the previous camera's
+  const folder = listing && listing.of === of ? listing.data : null
 
   const refresh = useCallback(
     () =>
       Promise.all([fetch('/api/status').then((r) => r.json()), fetch('/api/cameras').then((r) => r.json())])
-        .then(([s, c]) => {
+        .then(([s, c]: [Status, Camera[]]) => {
           setStatus(s)
           setCameras(c)
         })
@@ -509,15 +85,97 @@ export default function App() {
   )
   useEffect(() => {
     void refresh()
-    fetch('/api/methods').then((r) => r.json()).then(setMethods)
+    fetch('/api/methods').then((r) => r.json()).then(setMethods).catch(() => {})
     fetch('/api/health').then((r) => r.json()).then(setBuild).catch(() => {})
   }, [refresh])
+
   const loading = status?.inference.status === 'loading'
   useEffect(() => {
     if (!loading) return
-    const id = setInterval(refresh, 1000) // model load / weights download in progress
+    const id = setInterval(refresh, 1000) // the weights download reports through /api/status
     return () => clearInterval(id)
   }, [loading, refresh])
+
+  // listing a folder is a full scan of it plus a read of every unmeasured file, so a typed path waits
+  // until the typing stops; Browse… arrives whole and settles on the next tick anyway
+  useEffect(() => {
+    const id = setTimeout(() => setPicked((s) => ({ ...s, folder: typedPath.trim() })), 400)
+    return () => clearTimeout(id)
+  }, [typedPath])
+
+  const { site, flag, folder: path, method } = scope
+  useEffect(() => {
+    if (!path || !site || !flag || !method) return
+    let live = true // a slower answer for a folder the user has already left must not land
+    const q = new URLSearchParams({ path, site, flag, method })
+    fetch(`/api/folder?${q}`)
+      .then(async (r) => {
+        if (!live) return
+        if (!r.ok) {
+          setFolderError((await r.json()).detail ?? `Could not read that folder (${r.status})`)
+          return
+        }
+        setFolderError(null)
+        setListing({ of: [path, site, flag, method].join('\u0000'), data: await r.json() })
+      })
+      .catch((e) => live && setFolderError(`Engine unreachable: ${e}`))
+    return () => {
+      live = false
+    }
+  }, [path, site, flag, method, stale])
+
+  const running = run?.status === 'running'
+  useEffect(() => {
+    if (!running) return
+    const poll = () => fetch('/api/run').then((r) => r.json()).then(setRun).catch(() => {})
+    const id = setInterval(poll, 1000)
+    return () => {
+      clearInterval(id)
+      setStale((n) => n + 1) // the run left the running state: what is on screen is now out of date
+    }
+  }, [running])
+
+  /** Measure exactly these photos; an empty list means the whole folder under the re-measure rule. */
+  async function measure(paths: string[]) {
+    setNotice(null)
+    const r = await post('/api/run', {
+      folder: scope.folder,
+      site: scope.site,
+      flag: scope.flag,
+      method: scope.method,
+      rerun,
+      photos: paths.length ? paths : undefined,
+    })
+    if (!r.ok) {
+      setNotice({ text: (await r.json()).detail ?? `Could not start (${r.status})`, kind: 'error' })
+      return
+    }
+    setRun(await r.json())
+  }
+
+  async function browse() {
+    setNotice(null)
+    const r = await post('/api/folder/pick')
+    const body: { folder: string | null; reason: string | null } = await r.json()
+    if (body.folder) setTypedPath(body.folder)
+    else if (body.reason) setNotice({ text: body.reason, kind: 'warn' })
+  }
+
+  async function sync() {
+    setBusy(true)
+    setNotice(null)
+    const r = await post('/api/sync')
+    setBusy(false)
+    if (!r.ok) {
+      setNotice({ text: (await r.json()).detail ?? `Sync failed (${r.status})`, kind: 'error' })
+      await refresh()
+      return
+    }
+    const body = await r.json()
+    if (!body.ok) setNotice({ text: `Offline — using the flag photos from ${when(body.last_sync)}.`, kind: 'warn' })
+    setStale((n) => n + 1)
+    await refresh()
+  }
 
   async function sendCode(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -535,10 +193,10 @@ export default function App() {
 
   async function login(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const form = new FormData(e.currentTarget)
+    const code = String(new FormData(e.currentTarget).get('code'))
     setBusy(true)
     setNotice(null)
-    const r = await post('/api/login', { email: codeSentTo, code: form.get('code') })
+    const r = await post('/api/login', { email: codeSentTo, code })
     setBusy(false)
     if (!r.ok) {
       setNotice({ text: (await r.json()).detail ?? 'Sign-in failed', kind: 'error' })
@@ -548,105 +206,291 @@ export default function App() {
     await refresh()
   }
 
-  async function sync() {
-    setBusy(true)
-    setNotice(null)
-    const r = await post('/api/sync')
-    setBusy(false)
-    if (!r.ok) {
-      setNotice({ text: (await r.json()).detail ?? `Sync failed (${r.status})`, kind: 'error' })
-      await refresh() // 401 means the session was cleared
-      return
-    }
-    const body: SyncResult = await r.json()
-    if (body.ok) {
-      setNotice({ text: `Synced ${body.annotations} annotations, ${body.sites} cameras.`, kind: 'info' })
-      setPollKey((k) => k + 1)
-    } else {
-      setNotice({ text: `Offline — using calibrations from last sync ${when(body.last_sync)}.`, kind: 'warn' })
-    }
-    await refresh()
+  if (!status) return <p className="empty dim">{notice ? notice.text : 'Starting the engine…'}</p>
+
+  if (!status.signed_in) {
+    return (
+      <div className="signin">
+        <div className="brand">
+          <div className="row" style={{ gap: 11 }}>
+            <span style={{ color: 'var(--amber)', display: 'flex' }}>
+              <Icon name="mark" size={26} width={1.6} />
+            </span>
+            <span className="wordmark" style={{ fontSize: 15 }}>CAMTRAP MEASURE</span>
+          </div>
+          <div style={{ maxWidth: 430 }}>
+            <h1>How far away<br />was that deer?</h1>
+            <p className="dim" style={{ marginTop: 20, fontSize: 15, lineHeight: 1.65 }}>
+              Point it at a folder of camera-trap photos. It finds each animal, reads the ground distance against the
+              flag photo you labelled in FlagLabel, and gives you a distance and its 90% interval — photo by photo,
+              with the numbers on the picture where you can check them.
+            </p>
+          </div>
+          <span className="mono tiny" style={{ color: 'var(--ghost)' }}>
+            Southern Illinois University · white-tailed deer distance survey
+          </span>
+        </div>
+
+        <div className="form">
+          {codeSentTo === null ? (
+            <form key="email" onSubmit={sendCode}>
+              <div className="cap">Step 1 of 2</div>
+              <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Sign in</h2>
+              <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
+                Use the FlagLabel account you label with. There is no password — a one-time code is emailed to you.
+              </p>
+              {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
+              <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Email</label>
+              <input className="input" name="email" type="email" placeholder="you@siu.edu" required autoFocus />
+              <button type="submit" className="btn btn-amber btn-wide" style={{ height: 40, marginTop: 14, fontSize: 14 }} disabled={busy}>
+                {busy ? 'Sending…' : 'Email me a code'}
+              </button>
+            </form>
+          ) : (
+            <form key="code" onSubmit={login}>
+              <div className="cap">Step 2 of 2</div>
+              <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Enter the code</h2>
+              <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
+                Sent to {codeSentTo} — check the spam folder if it takes a minute.
+              </p>
+              {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
+              <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Code from the email</label>
+              <input className="input mono" name="code" inputMode="numeric" autoComplete="one-time-code" required autoFocus
+                     style={{ letterSpacing: '0.4em', fontSize: 17 }} />
+              <button type="submit" className="btn btn-amber btn-wide" style={{ height: 40, marginTop: 14, fontSize: 14 }} disabled={busy}>
+                {busy ? 'Signing in…' : 'Sign in'}
+              </button>
+              <button type="button" className="btn btn-wide" style={{ marginTop: 8 }} onClick={() => setCodeSentTo(null)} disabled={busy}>
+                Use a different email
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    )
   }
 
-  async function logout() {
-    await post('/api/logout')
-    setNotice(null)
-    await refresh()
-  }
-
-  const labeled = cameras.filter((c) => c.flags.some((f) => f.ok)).length
+  const shownError = path && site && flag && method ? folderError : null
+  const inf = status.inference
+  const measured = folder ? folder.rows.filter((r) => r.measured).length : 0
+  const flagged = folder ? folder.rows.filter((r) => r.reasons.length > 0).length : 0
+  const ready = inf.status === 'ready'
 
   return (
-    <>
-      <header className="topbar">
-        <h1>CamTrap Measure</h1>
-        {build && (
-          <span className="version" title="The version this computer runs; the launcher updates it at every start">
-            v{build.version}{build.commit && ` (${build.commit})`}
-          </span>
-        )}
+    <div className="app">
+      <nav className="rail">
+        <div className="rail-mark"><Icon name="mark" size={21} width={1.7} /></div>
+        {SECTIONS.map((s) => (
+          <button key={s.id} className="rail-item" aria-current={section === s.id}
+                  onClick={() => {
+                    setFocus(null) // going back by the rail resumes where you were, not the row the table handed over
+                    setSection(s.id)
+                  }}
+                  disabled={s.id !== section && s.id === 'table' && folder === null}>
+            <Icon name={s.icon} size={18} width={1.9} />
+            <span>{s.label}</span>
+          </button>
+        ))}
         <div className="spacer" />
-        {status?.signed_in && (
-          <>
-            <span className="small muted">{status.email}</span>
-            <button className="btn" onClick={logout}>Sign out</button>
-          </>
-        )}
-      </header>
-      <main className="page">
-        {notice && <p className={`notice notice-${notice.kind}`}>{notice.text}</p>}
-        {!status ? (
-          !notice && <p className="muted">Connecting to engine…</p>
-        ) : !status.signed_in ? (
-          <>
-            {loading && (
-              <section className="card">
-                <ModelsLine inf={status.inference} />
-              </section>
-            )}
-            {codeSentTo === null ? (
-              <form key="email" onSubmit={sendCode} className="card center">
-                <h2>Sign in</h2>
-                <p className="muted small">Use your FlagLabel account: a one-time code is emailed to you.</p>
-                <input name="email" type="email" placeholder="Email" required autoFocus />
-                <button type="submit" className="btn btn-primary" disabled={busy}>
-                  {busy ? 'Sending…' : 'Email me a code'}
+        <button className="rail-foot" title={`${status.email} — sign out`}
+                onClick={() => post('/api/logout').then(refresh)}>
+          {initials(status.email)}
+        </button>
+      </nav>
+
+      <div className="body">
+        <header className="topbar">
+          <span className="wordmark">CAMTRAP MEASURE</span>
+          {build && (
+            <span className="mono" style={{ fontSize: 10, color: 'var(--faint)' }}
+                  title="The version this computer runs; the launcher updates it at every start">
+              v{build.version}{build.commit && ` (${build.commit})`}
+            </span>
+          )}
+          <div className="spacer" />
+          <span className="mono tiny" style={{ color: 'var(--faint)' }}>
+            {status.last_sync
+              ? `synced ${new Date(status.last_sync).toLocaleTimeString(undefined, { hour12: false })}`
+              : 'never synced'}
+            {` · ${status.annotations} flag photos · ${usable.length}/${cameras.length} cameras labelled`}
+          </span>
+          <button className="btn" onClick={sync} disabled={busy}>
+            <Icon name="sync" size={13} />
+            {busy ? 'Syncing…' : 'Sync'}
+          </button>
+        </header>
+
+        {section !== 'results' && (
+          <div className="ctxbar">
+            <label className="field" style={{ width: 152 }}>
+              <span className="cap">Camera</span>
+              <span className="field-val">
+                <select className="bare" value={scope.site} onChange={(e) => setPicked((s) => ({ ...s, site: e.target.value }))}
+                        disabled={usable.length === 0}>
+                  {usable.length === 0 && <option value="">Sync first</option>}
+                  {usable.map((c) => <option key={c.site} value={c.site}>{c.site}</option>)}
+                </select>
+                <Icon name="down" size={12} width={2.4} />
+              </span>
+            </label>
+            <div className="sep" />
+
+            <label className="field" style={{ width: 216 }}>
+              <span className="cap">Flag photo</span>
+              <span className="field-val">
+                <span style={{ color: 'var(--amber)', display: 'flex' }}><Icon name="flag" size={13} width={1.8} /></span>
+                <select className="bare mono" style={{ fontSize: 12 }} value={scope.flag}
+                        onChange={(e) => setPicked((s) => ({ ...s, flag: e.target.value }))} disabled={flags.length === 0}>
+                  {flags.length === 0 && <option value="">—</option>}
+                  {flags.map((f) => (
+                    <option key={f.image_name} value={f.image_name} disabled={!f.ok} title={f.reason ?? undefined}>
+                      {f.image_name}{f.captured_at ? ` · ${new Date(f.captured_at).toLocaleDateString()}` : ''}
+                      {f.ok ? '' : ' — not usable'}
+                    </option>
+                  ))}
+                </select>
+                <Icon name="down" size={12} width={2.4} />
+              </span>
+            </label>
+            <div className="sep" />
+
+            <div className="field" style={{ flex: 1, maxWidth: 380 }}>
+              <span className="cap">Photo folder</span>
+              <span className="field-val">
+                <input className="path" value={typedPath} placeholder="No folder chosen" spellCheck={false}
+                       onChange={(e) => setTypedPath(e.target.value)} />
+                <button className="btn btn-sm" onClick={browse} title="Choose the folder that holds this camera's photos">
+                  <Icon name="folder" size={12} width={1.8} />
+                  Browse…
                 </button>
-              </form>
+              </span>
+            </div>
+            <div className="sep" />
+
+            <label className="field" style={{ width: 200 }}>
+              <span className="cap">Distance read at</span>
+              <span className="field-val">
+                <select className="bare" value={scope.method} title={methods.methods[scope.method]?.hint}
+                        onChange={(e) => setPicked((s) => ({ ...s, method: e.target.value }))}>
+                  {Object.entries(methods.methods).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+                </select>
+                <Icon name="down" size={12} width={2.4} />
+              </span>
+            </label>
+
+            <div className="spacer" />
+            <label className="check tiny" style={{ alignItems: 'center' }}>
+              <input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />
+              Re-measure photos that already have a number
+            </label>
+            {running ? (
+              <button className="btn btn-danger" onClick={() => post('/api/run/cancel')}>
+                <Icon name="stop" size={14} width={2.1} />
+                Stop
+              </button>
             ) : (
-              <form key="code" onSubmit={login} className="card center">
-                <h2>Enter the code</h2>
-                <p className="muted small">Sent to {codeSentTo} — check the spam folder if it takes a minute.</p>
-                <input name="code" inputMode="numeric" autoComplete="one-time-code" placeholder="Code from the email" required autoFocus />
-                <button type="submit" className="btn btn-primary" disabled={busy}>
-                  {busy ? 'Signing in…' : 'Sign in'}
-                </button>
-                <button type="button" className="btn" onClick={() => setCodeSentTo(null)} disabled={busy}>
-                  Use a different email
-                </button>
-              </form>
+              <button className="btn btn-amber" onClick={() => measure([])} disabled={!ready || !folder || folder.total === 0}>
+                <Icon name="measure" size={14} width={2.1} />
+                Measure all{folder ? ` ${folder.total}` : ''}
+              </button>
             )}
-          </>
-        ) : (
-          <>
-            <section className="card">
-              <div className="card-head">
-                <h2>Cameras</h2>
-                <span className="small muted">
-                  Last sync: {when(status.last_sync)} · {status.annotations} flag photos · {labeled}/{cameras.length} cameras with a labeled flag photo
-                </span>
-                <div className="spacer" />
-                <button className="btn btn-primary" onClick={sync} disabled={busy}>
-                  {busy ? 'Syncing…' : 'Sync'}
-                </button>
-              </div>
-              <ModelsLine inf={status.inference} />
-            </section>
-            <RunPanel cameras={cameras} methods={methods} ready={status.inference.status === 'ready'} pollKey={pollKey} onDone={(site) => setFocus((f) => ({ site, n: f.n + 1 }))} />
-            <ResultsPanel sites={cameras.map((c) => c.site)} focus={focus} methods={methods} />
-          </>
+          </div>
         )}
-      </main>
-    </>
+
+        {notice && section !== 'results' && (
+          <p className={`notice notice-${notice.kind}`} style={{ margin: '10px 14px 0' }}>{notice.text}</p>
+        )}
+
+        <div className={section === 'results' ? 'body' : 'work'}>
+          {section === 'measure' && (
+            <Measure scope={scope} folder={folder} methods={methods} busy={running || !ready} running={running}
+                     onMeasure={measure} focus={focus} error={shownError} />
+          )}
+          {section === 'table' && (
+            <TableView scope={scope} folder={folder} methods={methods} busy={running || !ready} onMeasure={measure}
+                       error={shownError} onOpen={(p) => { setFocus(p); setSection('measure') }} />
+          )}
+          {section === 'results' && <Results site={scope.site} sites={cameras.map((c) => c.site)} />}
+        </div>
+
+        {running && run ? (
+          <div className="runbar">
+            <div className="track"><div style={{ width: `${(100 * run.done) / Math.max(1, run.total)}%` }} /></div>
+            <div className="line">
+              <span className="spin" style={{ color: 'var(--amber)', display: 'flex' }}>
+                <Icon name="spinner" size={14} width={2.2} />
+              </span>
+              <span style={{ fontWeight: 500 }}>Measuring</span>
+              <span className="mono" style={{ color: 'var(--text-2)' }}>{run.done} / {run.total} photos</span>
+              <span style={{ color: 'var(--line)' }}>·</span>
+              <span className="mono dim">{plural(run.detections, 'animal')}</span>
+              {run.eta_s !== null && (
+                <>
+                  <span style={{ color: 'var(--line)' }}>·</span>
+                  <span className="mono dim">about {duration(run.eta_s)} left</span>
+                </>
+              )}
+              <div className="spacer" />
+              <span className="mono tiny" style={{ color: 'var(--faint)' }}>
+                {inf.backend === 'real'
+                  ? `MegaDetector + SpeciesNet · ${inf.device} · batch ${inf.batch}`
+                  : 'made-up numbers (no models installed)'}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <footer className="statusbar">
+            {inf.status === 'loading' ? (
+              <>
+                <span className="spin" style={{ color: 'var(--amber)', display: 'flex' }}>
+                  <Icon name="spinner" size={12} width={2.2} />
+                </span>
+                <span>
+                  {inf.download
+                    ? `Downloading model weights ${inf.download.done_gb.toFixed(1)} / ${inf.download.total_gb.toFixed(1)} GB — one time only`
+                    : 'Loading models…'}
+                </span>
+              </>
+            ) : inf.status === 'error' ? (
+              <>
+                <span className="warn" style={{ display: 'flex' }}><Icon name="warn" size={12} /></span>
+                <span className="warn">Models unavailable: {inf.error}</span>
+              </>
+            ) : (
+              <>
+                <span className="dot" style={{ color: 'var(--ok)' }} />
+                <span>Models ready</span>
+                <span style={{ color: 'var(--line)' }}>·</span>
+                <span className="mono">
+                  {inf.backend === 'real'
+                    ? `MegaDetector + SpeciesNet ${inf.weights} · ${inf.device} · batch ${inf.batch}`
+                    : 'made-up numbers (no models installed)'}
+                </span>
+                {inf.warning && <span className="warn">⚠ {inf.warning}</span>}
+              </>
+            )}
+            <div className="spacer" />
+            {run?.status === 'error' && <span className="warn">Run failed: {run.error}</span>}
+            {folder && (
+              <>
+                <span className="mono">{measured} / {folder.total} measured</span>
+                {flagged > 0 && (
+                  <>
+                    <span style={{ color: 'var(--line)' }}>·</span>
+                    <span style={{ color: 'var(--bad)' }}>{plural(flagged, 'photo')} need a look</span>
+                  </>
+                )}
+                {folder.unreadable > 0 && (
+                  <>
+                    <span style={{ color: 'var(--line)' }}>·</span>
+                    <span className="mono">{plural(folder.unreadable, 'unreadable file')}</span>
+                  </>
+                )}
+              </>
+            )}
+          </footer>
+        )}
+      </div>
+    </div>
   )
 }

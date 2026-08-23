@@ -1,0 +1,351 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0E1013; color: #E8EAED;
+      font-family: 'IBM Plex Sans', system-ui, 'Segoe UI', sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A13C; } a:hover { color: #F2B75F; }
+    .grot { font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif; }
+    .mono { font-family: 'IBM Plex Mono', ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .cap { font-family: 'Space Grotesk', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #5C646E; }
+    .dim { color: #8A929C; }
+    .pane { display: flex; flex-direction: column; background: #14171B; }
+    .pane-head { height: 38px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #262B32; }
+    .btn { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid #2E343C; border-radius: 4px; background: #1C2026; color: #E8EAED; font-size: 12px; font-weight: 500; }
+    .btn-amber { background: #E8A13C; border-color: #E8A13C; color: #17120A; font-weight: 600; }
+    .btn-icon { width: 30px; padding: 0; justify-content: center; }
+    .field { display: grid; gap: 3px; }
+    .field-val { height: 24px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+    .sep { width: 1px; align-self: stretch; margin: 10px 4px; background: #262B32; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+    .item { height: 60px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #1B1F24; border-left: 3px solid transparent; }
+    .item-on { background: #1C2026; border-left-color: #E8A13C; }
+    .thumb { width: 70px; height: 44px; border-radius: 3px; flex: none; overflow: hidden; position: relative;
+      background: linear-gradient(#3C444C 0 50%, #7E858B 50% 100%); }
+    .thumb i { position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 8px, rgba(16,18,21,.45) 8px 10px, transparent 10px 23px); }
+    .chip { font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 3px; color: #8A929C; }
+    .chip-on { background: #232830; color: #E8EAED; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; align-items: baseline; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; background: #0E1013; overflow: hidden;">
+
+  <!-- ── Section rail ──────────────────────────────────────────── -->
+  <div style="width: 62px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-bottom: 12px; background: #0B0D0F; border-right: 1px solid #262B32;">
+    <div style="height: 46px; width: 100%; flex: none; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #262B32; margin-bottom: 11px;">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="1.7" stroke-linecap="round">
+        <path d="M3 8V4h4"></path><path d="M21 8V4h-4"></path><path d="M3 16v4h4"></path><path d="M21 16v4h-4"></path>
+        <circle cx="12" cy="12" r="3.2"></circle><path d="M12 5.5v2"></path><path d="M12 16.5v2"></path><path d="M5.5 12h2"></path><path d="M16.5 12h2"></path>
+      </svg>
+    </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: #E8A13C; color: #17120A;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h4l2.5-7 3.5 14 2.5-7h4"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">MEASURE</span>
+      </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: transparent; color: #6E7681;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="1.5"></rect><path d="M3 9.5h18"></path><path d="M3 14.5h18"></path><path d="M9.5 9.5V19.5"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">TABLE</span>
+      </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: transparent; color: #6E7681;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"></path><path d="M10 20V5"></path><path d="M16 20v-8"></path><path d="M21 20H3"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">RESULTS</span>
+      </div>
+    <div style="flex: 1;"></div>
+    <div style="width: 48px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #4A5058;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.45V14"></path><path d="M12 17h.01"></path></svg>
+    </div>
+    <div class="grot" title="toqitahamid.sarker@siu.edu — account and sign out" style="width: 30px; height: 30px; border-radius: 50%; border: 1px solid #4A3B22; background: #1F1A11; color: #E8A13C; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;">TS</div>
+  </div>
+
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+
+  <!-- ── Title bar ─────────────────────────────────────────────── -->
+  <div style="height: 46px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid #262B32;">
+    <span class="grot" style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em;">CAMTRAP MEASURE</span>
+    <span class="mono" style="font-size: 10px; color: #5C646E;">v0.1.0</span>
+
+    <div style="flex: 1;"></div>
+
+    <span class="mono" style="font-size: 11px; color: #5C646E;">synced 01:10 · 314 flags · 141/167 cameras</span>
+    <div class="btn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 4v5h-5"></path></svg>
+      Sync
+    </div>
+  </div>
+
+  <!-- ── Context bar: what is being measured ───────────────────── -->
+  <div style="height: 58px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 14px; background: #14171B; border-bottom: 1px solid #262B32;">
+    <div class="field" style="width: 152px;">
+      <span class="cap">Camera</span>
+      <div class="field-val">
+        <span style="flex: 1;">MAS_CAM01</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5C646E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+      </div>
+    </div>
+    <div class="sep"></div>
+
+    <div class="field" style="width: 210px;">
+      <span class="cap">Flag photo</span>
+      <div class="field-val">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"></path><path d="M6 5h11l-2.6 3.6L17 13H6"></path></svg>
+        <span style="flex: 1;" class="mono">IMG_0004.JPG</span>
+        <span style="font-size: 11px; color: #5C646E;">Dec 19</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5C646E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+      </div>
+    </div>
+    <div class="sep"></div>
+
+    <div class="field" style="flex: 1; max-width: 372px;">
+      <span class="cap">Photo folder</span>
+      <div class="field-val">
+        <span class="mono" style="flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #C7CCD2;">D:\research\photo\MAS_CAM01</span>
+        <div class="btn" style="height: 24px; padding: 0 9px; font-size: 11px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4L11 8.5h8.5A1.5 1.5 0 0 1 21 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"></path></svg>
+          Browse…
+        </div>
+      </div>
+    </div>
+    <div class="sep"></div>
+
+    <div class="field" style="width: 196px;">
+      <span class="cap">Distance read at</span>
+      <div class="field-val">
+        <span style="flex: 1;">MegaDetector box</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5C646E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+      </div>
+    </div>
+
+    <div style="flex: 1;"></div>
+
+    <label class="row" style="font-size: 12px; color: #8A929C; gap: 7px; margin-right: 4px;">
+      <span style="width: 13px; height: 13px; border: 1px solid #2E343C; border-radius: 3px; background: #1C2026;"></span>
+      Re-measure photos that already have a number
+    </label>
+    <div class="btn" style="border-color: #D6544A; color: #E8A08F;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"></rect></svg>
+      Stop
+    </div>
+  </div>
+
+  <!-- ── Work area ─────────────────────────────────────────────── -->
+  <div style="flex: 1; min-height: 0; display: flex;">
+
+    <!-- Photo list -->
+    <div class="pane" style="width: 288px; flex: none; border-right: 1px solid #262B32;">
+      <div class="pane-head">
+        <span class="cap">Photos</span>
+        <span class="mono" style="font-size: 11px; color: #5C646E;">11</span>
+        <div style="flex: 1;"></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5C646E" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4 4"></path></svg>
+      </div>
+      <div style="display: flex; gap: 3px; padding: 8px 11px; border-bottom: 1px solid #1B1F24;">
+        <span class="chip chip-on">All 11</span>
+        <span class="chip">Not measured 1</span>
+        <span class="chip">Needs a look 1</span>
+      </div>
+
+      <div style="flex: 1; min-height: 0; overflow: hidden;">
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px;">IMG_1030.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:40:41</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="grot" style="font-size: 13px; font-weight: 600;">7.9<span style="font-size: 10px; color: #5C646E;"> m</span></div>
+          </div>
+          <span class="dot" style="background: #7FB069;"></span>
+        </div>
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px;">IMG_1031.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:40:49</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="grot" style="font-size: 13px; font-weight: 600;">8.0<span style="font-size: 10px; color: #5C646E;"> m</span></div>
+          </div>
+          <span class="dot" style="background: #7FB069;"></span>
+        </div>
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px;">IMG_1032.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:40:56</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="grot" style="font-size: 13px; font-weight: 600;">8.2<span style="font-size: 10px; color: #5C646E;"> m</span></div>
+          </div>
+          <span class="dot" style="background: #7FB069;"></span>
+        </div>
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px;">IMG_1033.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:41:03</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="grot" style="font-size: 13px; font-weight: 600;">8.4<span style="font-size: 10px; color: #5C646E;"> m</span></div>
+          </div>
+          <span class="dot" style="background: #7FB069;"></span>
+        </div>
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px;">IMG_1034.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:41:03</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="grot" style="font-size: 13px; font-weight: 600;">8.4<span style="font-size: 10px; color: #5C646E;"> m</span></div>
+          </div>
+          <span class="dot" style="background: #7FB069;"></span>
+        </div>
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px;">IMG_1035.JPG</div>
+            <div style="font-size: 11px; color: #D6544A;">species unsure</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="grot" style="font-size: 13px; font-weight: 600;">6.1<span style="font-size: 10px; color: #5C646E;"> m</span></div>
+          </div>
+          <span class="dot" style="background: #D6544A;"></span>
+        </div>
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px;">IMG_1036.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:42:18</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="grot" style="font-size: 13px; font-weight: 600;">9.1<span style="font-size: 10px; color: #5C646E;"> m</span></div>
+          </div>
+          <span class="dot" style="background: #7FB069;"></span>
+        </div>
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px;">IMG_1037.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:42:52 · no animal</div>
+          </div>
+          <span class="dot" style="background: #2E343C;"></span>
+        </div>
+        <div class="item item-on">
+          <div class="thumb" style="outline: 1px solid #E8A13C;"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px; color: #FFFFFF;">IMG_1038.JPG</div>
+            <div style="font-size: 11px; color: #E8A13C;">measuring…</div>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="2.4" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"></path></svg>
+        </div>
+        <div class="item">
+          <div class="thumb"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px; color: #8A929C;">IMG_1039.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:43:31 · waiting</div>
+          </div>
+          <span class="dot" style="background: #2E343C;"></span>
+        </div>
+        <div class="item">
+          <div class="thumb" style="opacity: .55;"><i></i></div>
+          <div style="flex: 1; min-width: 0;">
+            <div class="mono" style="font-size: 12px; color: #8A929C;">IMG_1041.JPG</div>
+            <div style="font-size: 11px; color: #5C646E;">08:44:02 · waiting</div>
+          </div>
+          <span class="dot" style="background: #2E343C;"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Viewer -->
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; background: #08090B;">
+      <div class="pane-head" style="background: #14171B;">
+        <span class="mono" style="font-size: 12px; font-weight: 500;">IMG_1038.JPG</span>
+        <span style="font-size: 12px; color: #5C646E;">22 Jan 2026 · 08:43:07</span>
+        <div style="flex: 1;"></div>
+        <div class="btn" style="height: 26px; padding: 0 10px; font-size: 11px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"></path><path d="M6 5h11l-2.6 3.6L17 13H6"></path></svg>
+          Flag photo
+        </div>
+        <div class="btn" style="height: 26px; padding: 0 10px; font-size: 11px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M8 3v18"></path></svg>
+          Boxes
+        </div>
+        <span class="mono" style="font-size: 11px; color: #5C646E; margin: 0 4px;">09 / 11</span>
+        <div class="btn btn-icon" style="height: 26px; width: 26px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"></path></svg>
+        </div>
+        <div class="btn btn-icon" style="height: 26px; width: 26px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6l6 6-6 6"></path></svg>
+        </div>
+      </div>
+
+      <div style="flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 22px;">
+        <div style="position: relative; width: 100%; max-width: 726px; aspect-ratio: 16 / 10; border-radius: 4px; overflow: hidden; box-shadow: 0 10px 34px rgba(0,0,0,.6);">
+          <!-- drawn stand-in for the trail-camera frame -->
+          <div style="position: absolute; inset: 0; background: linear-gradient(#38404A 0%, #4C555E 32%, #616870 49%, #868C91 50%, #A2A8AC 100%);"></div>
+          <div style="position: absolute; left: 0; right: 0; top: 0; height: 60%; background: repeating-linear-gradient(90deg, transparent 0 24px, rgba(24,27,32,.5) 24px 29px, transparent 29px 70px);"></div>
+          <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 52%; background: linear-gradient(rgba(200,206,210,0), rgba(214,219,222,.5));"></div>
+          <div style="position: absolute; left: 6%; bottom: 15%; width: 24%; height: 6%; border-radius: 50%; background: rgba(230,234,237,.5);"></div>
+          <div style="position: absolute; left: 58%; bottom: 23%; width: 28%; height: 5%; border-radius: 50%; background: rgba(230,234,237,.4);"></div>
+
+          <div class="mono" style="position: absolute; left: 0; right: 0; bottom: 0; height: 24px; background: #0A0B0C; display: flex; align-items: center; justify-content: center; gap: 24px; font-size: 10px; color: #C7CCD2; letter-spacing: .06em;">
+            <span>34°F</span><span>01/22/2026</span><span>08:40AM</span><span>MAS01</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inspector -->
+    <div class="pane" style="width: 336px; flex: none; border-left: 1px solid #262B32;">
+      <div class="pane-head">
+        <span class="cap">Measurement</span>
+        <div style="flex: 1;"></div>
+        <span class="row" style="gap: 6px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 3px; background: #2A2213; color: #E8A13C;">
+          <span class="dot" style="background: #E8A13C;"></span> Running
+        </span>
+      </div>
+
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 28px; text-align: center;">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"></path></svg>
+        <div class="grot" style="font-size: 14px; font-weight: 600;">Measuring this photo…</div>
+        <p style="margin: 0; font-size: 12px; color: #8A929C; line-height: 1.55;">
+          Detecting animals, then aligning the frame to <span class="mono" style="color: #C7CCD2;">IMG_0004.JPG</span> to read the ground distance.
+        </p>
+      </div>
+
+      <div style="flex: 1;"></div>
+
+
+    </div>
+  </div>
+
+  <!-- ── Status bar ────────────────────────────────────────────── -->
+  <div style="height: 46px; flex: none; background: #14171B; border-top: 1px solid #262B32;">
+    <div style="height: 2px; background: #1C2026;"><div style="width: 63.6%; height: 2px; background: #E8A13C;"></div></div>
+    <div class="row" style="height: 44px; gap: 10px; padding: 0 14px; font-size: 12px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="2.2" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"></path></svg>
+      <span style="font-weight: 500;">Measuring</span>
+      <span class="mono" style="color: #C7CCD2;">IMG_1038.JPG</span>
+      <span style="color: #262B32;">·</span>
+      <span class="mono" style="color: #8A929C;">7 / 11 photos · 7 animals</span>
+      <span style="color: #262B32;">·</span>
+      <span class="mono" style="color: #8A929C;">about 1 min left</span>
+      <div style="flex: 1;"></div>
+      <span class="mono" style="font-size: 11px; color: #5C646E;">MegaDetector + SpeciesNet · cuda · batch 32</span>
+    </div>
+  </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

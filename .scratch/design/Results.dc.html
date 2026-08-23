@@ -1,0 +1,270 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0E1013; color: #E8EAED;
+      font-family: 'IBM Plex Sans', system-ui, 'Segoe UI', sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A13C; } a:hover { color: #F2B75F; }
+    .grot { font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif; }
+    .mono { font-family: 'IBM Plex Mono', ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .cap { font-family: 'Space Grotesk', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #5C646E; }
+    .btn { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid #2E343C; border-radius: 4px; background: #1C2026; color: #E8EAED; font-size: 12px; font-weight: 500; }
+    .btn-amber { background: #E8A13C; border-color: #E8A13C; color: #17120A; font-weight: 600; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+    .field { display: grid; gap: 3px; }
+    .field-val { height: 24px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+    .sep { width: 1px; align-self: stretch; margin: 10px 4px; background: #262B32; }
+    .card { border: 1px solid #262B32; border-radius: 6px; background: #14171B; }
+    .pane-head { height: 38px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #262B32; }
+    th { text-align: left; font-family: 'Space Grotesk', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #5C646E; padding: 0 12px 8px; }
+    td { padding: 9px 12px; border-top: 1px solid #1B1F24; font-size: 13px; }
+    .num { text-align: right; font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; background: #0E1013; overflow: hidden;">
+
+  <!-- ── Section rail ──────────────────────────────────────────── -->
+  <div style="width: 62px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-bottom: 12px; background: #0B0D0F; border-right: 1px solid #262B32;">
+    <div style="height: 46px; width: 100%; flex: none; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #262B32; margin-bottom: 11px;">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="1.7" stroke-linecap="round">
+        <path d="M3 8V4h4"></path><path d="M21 8V4h-4"></path><path d="M3 16v4h4"></path><path d="M21 16v4h-4"></path>
+        <circle cx="12" cy="12" r="3.2"></circle><path d="M12 5.5v2"></path><path d="M12 16.5v2"></path><path d="M5.5 12h2"></path><path d="M16.5 12h2"></path>
+      </svg>
+    </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: transparent; color: #6E7681;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h4l2.5-7 3.5 14 2.5-7h4"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">MEASURE</span>
+      </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: transparent; color: #6E7681;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="1.5"></rect><path d="M3 9.5h18"></path><path d="M3 14.5h18"></path><path d="M9.5 9.5V19.5"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">TABLE</span>
+      </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: #E8A13C; color: #17120A;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"></path><path d="M10 20V5"></path><path d="M16 20v-8"></path><path d="M21 20H3"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">RESULTS</span>
+      </div>
+    <div style="flex: 1;"></div>
+    <div style="width: 48px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #4A5058;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.45V14"></path><path d="M12 17h.01"></path></svg>
+    </div>
+    <div class="grot" title="toqitahamid.sarker@siu.edu — account and sign out" style="width: 30px; height: 30px; border-radius: 50%; border: 1px solid #4A3B22; background: #1F1A11; color: #E8A13C; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;">TS</div>
+  </div>
+
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+
+  <!-- Title bar -->
+  <div style="height: 46px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid #262B32;">
+    <span class="grot" style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em;">CAMTRAP MEASURE</span>
+    <span class="mono" style="font-size: 10px; color: #5C646E;">v0.1.0</span>
+
+    <div style="flex: 1;"></div>
+    <span class="mono" style="font-size: 11px; color: #5C646E;">synced 01:10 · 314 flags · 141/167 cameras</span>
+    <div class="btn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 4v5h-5"></path></svg>
+      Sync
+    </div>
+  </div>
+
+  <!-- Filter bar -->
+  <div style="height: 58px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 14px; background: #14171B; border-bottom: 1px solid #262B32;">
+    <div class="field" style="width: 168px;">
+      <span class="cap">Camera</span>
+      <div class="field-val">
+        <span style="flex: 1;">All 12 measured</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5C646E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="field" style="width: 132px;">
+      <span class="cap">Captured from</span>
+      <div class="field-val mono" style="font-size: 12px;">2026-01-01</div>
+    </div>
+    <div class="sep"></div>
+    <div class="field" style="width: 132px;">
+      <span class="cap">To</span>
+      <div class="field-val mono" style="font-size: 12px;">2026-02-28</div>
+    </div>
+    <div class="sep"></div>
+    <div class="field" style="width: 232px;">
+      <span class="cap">Species</span>
+      <div class="field-val">
+        <span style="flex: 1;">White-tailed deer + unsure</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5C646E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+      </div>
+    </div>
+    <div style="flex: 1;"></div>
+    <span class="mono" style="font-size: 11px; color: #5C646E;">last measured today 01:26</span>
+  </div>
+
+  <!-- Body -->
+  <div style="flex: 1; min-height: 0; display: flex; gap: 14px; padding: 14px;">
+
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+
+      <!-- stat strip -->
+      <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; flex: none;">
+        <div class="card" style="padding: 13px 15px;">
+          <div class="cap">Photos</div>
+          <div class="grot" style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 3px;">248</div>
+        </div>
+        <div class="card" style="padding: 13px 15px;">
+          <div class="cap">Animals</div>
+          <div class="grot" style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 3px;">264</div>
+        </div>
+        <div class="card" style="padding: 13px 15px;">
+          <div class="cap">Deer</div>
+          <div class="grot" style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 3px;">231</div>
+        </div>
+        <div class="card" style="padding: 13px 15px;">
+          <div class="cap">Median distance</div>
+          <div class="grot" style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 3px;">8.7<span style="font-size: 14px; color: #8A929C;"> m</span></div>
+        </div>
+        <div class="card" style="padding: 13px 15px; border-color: #3A2A26;">
+          <div class="cap" style="color: #D6544A;">Needs a look</div>
+          <div class="grot" style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 3px; color: #D6544A;">9</div>
+        </div>
+      </div>
+
+      <!-- histogram -->
+      <div class="card" style="flex: none; display: flex; flex-direction: column;">
+        <div class="pane-head">
+          <span class="cap">Deer distances</span>
+          <span style="font-size: 12px; color: #5C646E;">2 m bins · 231 measurements</span>
+          <div style="flex: 1;"></div>
+          <span class="mono" style="font-size: 11px; color: #5C646E;">median 8.7 m · 90% of animals within 4.1 – 16.8 m</span>
+        </div>
+        <div style="padding: 16px 16px 10px;">
+          <div style="display: flex; align-items: flex-end; gap: 5px; height: 148px;">
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 9px; background: #3E3524; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">0</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 25px; background: #6B5326; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">2</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 58px; background: #A8752D; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">4</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 96px; background: #E8A13C; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">6</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 124px; background: #E8A13C; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #C7CCD2; text-align: center;">8</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 88px; background: #E8A13C; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">10</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 61px; background: #A8752D; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">12</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 40px; background: #6B5326; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">14</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 28px; background: #6B5326; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">16</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 17px; background: #3E3524; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">18</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 11px; background: #3E3524; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">20</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 6px; background: #3E3524; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">22</span></div>
+            <div style="flex: 1; display: grid; align-content: end; gap: 5px;"><div style="height: 3px; background: #3E3524; border-radius: 2px 2px 0 0;"></div><span class="mono" style="font-size: 10px; color: #5C646E; text-align: center;">24 m</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- per-camera table -->
+      <div class="card" style="flex: 1; min-height: 0; display: flex; flex-direction: column;">
+        <div class="pane-head">
+          <span class="cap">By camera</span>
+          <div style="flex: 1;"></div>
+          <span style="font-size: 12px; color: #5C646E;">click a row to review that camera's photos</span>
+        </div>
+        <div style="flex: 1; min-height: 0; overflow: hidden; padding: 12px 2px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr><th>Camera</th><th class="num">Photos</th><th class="num">Animals</th><th class="num">Deer</th><th class="num">Median m</th><th class="num">Needs a look</th><th style="width: 190px;">Distances</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">MAS_CAM01</td><td class="num">11</td><td class="num">11</td><td class="num">11</td><td class="num">8.7</td><td class="num" style="color: #D6544A;">1</td>
+                <td><div style="height: 6px; border-radius: 2px; background: linear-gradient(90deg, #1C2026 0 22%, #E8A13C 22% 46%, #1C2026 46% 100%);"></div></td>
+              </tr>
+              <tr>
+                <td class="mono">MAS_CAM02</td><td class="num">34</td><td class="num">38</td><td class="num">35</td><td class="num">6.9</td><td class="num" style="color: #5C646E;">0</td>
+                <td><div style="height: 6px; border-radius: 2px; background: linear-gradient(90deg, #1C2026 0 14%, #E8A13C 14% 39%, #1C2026 39% 100%);"></div></td>
+              </tr>
+              <tr>
+                <td class="mono">MAS_CAM03</td><td class="num">52</td><td class="num">55</td><td class="num">49</td><td class="num">11.4</td><td class="num" style="color: #D6544A;">4</td>
+                <td><div style="height: 6px; border-radius: 2px; background: linear-gradient(90deg, #1C2026 0 28%, #E8A13C 28% 62%, #1C2026 62% 100%);"></div></td>
+              </tr>
+              <tr>
+                <td class="mono">MAS_CAM04</td><td class="num">27</td><td class="num">29</td><td class="num">26</td><td class="num">9.2</td><td class="num" style="color: #5C646E;">0</td>
+                <td><div style="height: 6px; border-radius: 2px; background: linear-gradient(90deg, #1C2026 0 20%, #E8A13C 20% 51%, #1C2026 51% 100%);"></div></td>
+              </tr>
+              <tr>
+                <td class="mono">MAS_CAM05</td><td class="num">63</td><td class="num">71</td><td class="num">62</td><td class="num">7.6</td><td class="num" style="color: #D6544A;">3</td>
+                <td><div style="height: 6px; border-radius: 2px; background: linear-gradient(90deg, #1C2026 0 16%, #E8A13C 16% 44%, #1C2026 44% 100%);"></div></td>
+              </tr>
+              <tr>
+                <td class="mono">MAS_CAM07</td><td class="num">39</td><td class="num">42</td><td class="num">36</td><td class="num">10.1</td><td class="num" style="color: #D6544A;">1</td>
+                <td><div style="height: 6px; border-radius: 2px; background: linear-gradient(90deg, #1C2026 0 24%, #E8A13C 24% 57%, #1C2026 57% 100%);"></div></td>
+              </tr>
+              <tr>
+                <td class="mono">MAS_CAM08</td><td class="num">22</td><td class="num">18</td><td class="num">12</td><td class="num">5.4</td><td class="num" style="color: #5C646E;">0</td>
+                <td><div style="height: 6px; border-radius: 2px; background: linear-gradient(90deg, #1C2026 0 9%, #E8A13C 9% 33%, #1C2026 33% 100%);"></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export panel -->
+    <div class="card" style="width: 336px; flex: none; display: flex; flex-direction: column;">
+      <div class="pane-head"><span class="cap">Export</span></div>
+
+      <div style="padding: 16px; display: grid; gap: 14px;">
+        <p style="margin: 0; font-size: 12px; color: #8A929C; line-height: 1.6;">
+          One row per animal, with its distance, the 90% interval and the flag photo it was measured against.
+          Columns and units are written into the file's header lines.
+        </p>
+
+        <label class="row" style="align-items: flex-start; gap: 9px; font-size: 12px; color: #C7CCD2;">
+          <span style="width: 14px; height: 14px; margin-top: 1px; border: 1px solid #2E343C; border-radius: 3px; background: #1C2026; flex: none;"></span>
+          <span>All species<br><span style="color: #5C646E;">Default keeps white-tailed deer and unsure only</span></span>
+        </label>
+        <label class="row" style="align-items: flex-start; gap: 9px; font-size: 12px; color: #C7CCD2;">
+          <span style="width: 14px; height: 14px; margin-top: 1px; border: 1px solid #2E343C; border-radius: 3px; background: #1C2026; flex: none;"></span>
+          <span>Include the 9 rows that need a look<br><span style="color: #5C646E;">They carry their reason in the flag column</span></span>
+        </label>
+
+        <div style="padding: 11px 12px; border: 1px solid #3A2A26; border-radius: 4px; background: #1E1613;">
+          <div class="row" style="gap: 7px; font-size: 12px; color: #E8A08F;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17h.01"></path></svg>
+            9 rows will be left out
+          </div>
+        </div>
+
+        <div class="btn btn-amber" style="height: 36px; justify-content: center; font-size: 13px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"></path><path d="M8 12l4 4 4-4"></path><path d="M5 19h14"></path></svg>
+          Download CSV
+        </div>
+        <span class="mono" style="font-size: 11px; color: #5C646E; text-align: center;">camtrap-measure_all_2026-01-01_2026-02-28.csv</span>
+      </div>
+
+      <div style="flex: 1;"></div>
+
+      <div style="padding: 14px 16px; border-top: 1px solid #1B1F24;">
+        <div class="cap" style="margin-bottom: 9px;">In this selection</div>
+        <div style="display: grid; grid-template-columns: auto 1fr; gap: 7px 16px; align-items: baseline;">
+          <span style="font-size: 12px; color: #8A929C;">Rows exported</span><span class="mono" style="font-size: 12px; text-align: right;">222</span>
+          <span style="font-size: 12px; color: #8A929C;">Cameras</span><span class="mono" style="font-size: 12px; text-align: right;">7</span>
+          <span style="font-size: 12px; color: #8A929C;">Date span</span><span class="mono" style="font-size: 12px; text-align: right;">58 days</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="row" style="height: 28px; flex: none; gap: 10px; padding: 0 14px; background: #14171B; border-top: 1px solid #262B32; font-size: 11px; color: #5C646E;">
+    <span class="dot" style="background: #7FB069;"></span>
+    <span>Models ready</span>
+    <span style="color: #262B32;">·</span>
+    <span class="mono">MegaDetector + SpeciesNet 2026.08.20c · cuda · batch 32</span>
+    <div style="flex: 1;"></div>
+    <span class="mono">248 photos measured across 7 cameras</span>
+  </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; background: #0E1013; color: #E8EAED;
+      font-family: 'IBM Plex Sans', system-ui, 'Segoe UI', sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+    a { color: #E8A13C; } a:hover { color: #F2B75F; }
+    .grot { font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif; }
+    .mono { font-family: 'IBM Plex Mono', ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .cap { font-family: 'Space Grotesk', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #5C646E; }
+    .btn { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid #2E343C; border-radius: 4px; background: #1C2026; color: #E8EAED; font-size: 12px; font-weight: 500; }
+    .btn-amber { background: #E8A13C; border-color: #E8A13C; color: #17120A; font-weight: 600; }
+    .btn-off { color: #4A5058; border-color: #23282F; background: #16191D; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+    .field { display: grid; gap: 3px; }
+    .field-val { height: 24px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+    .sep { width: 1px; align-self: stretch; margin: 10px 4px; background: #262B32; }
+    .pane { display: flex; flex-direction: column; background: #14171B; }
+    .pane-head { height: 38px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #262B32; }
+    .step { display: flex; gap: 12px; align-items: flex-start; }
+    .step-n { width: 22px; height: 22px; flex: none; border-radius: 50%; border: 1px solid #2E343C; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #5C646E; }
+    .step-done { background: #16241A; border-color: #2E4A34; color: #7FB069; }
+    .step-now { background: #E8A13C; border-color: #E8A13C; color: #17120A; font-weight: 600; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; background: #0E1013; overflow: hidden;">
+
+  <!-- ── Section rail ──────────────────────────────────────────── -->
+  <div style="width: 62px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-bottom: 12px; background: #0B0D0F; border-right: 1px solid #262B32;">
+    <div style="height: 46px; width: 100%; flex: none; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #262B32; margin-bottom: 11px;">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="1.7" stroke-linecap="round">
+        <path d="M3 8V4h4"></path><path d="M21 8V4h-4"></path><path d="M3 16v4h4"></path><path d="M21 16v4h-4"></path>
+        <circle cx="12" cy="12" r="3.2"></circle><path d="M12 5.5v2"></path><path d="M12 16.5v2"></path><path d="M5.5 12h2"></path><path d="M16.5 12h2"></path>
+      </svg>
+    </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: #E8A13C; color: #17120A;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h4l2.5-7 3.5 14 2.5-7h4"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">MEASURE</span>
+      </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: transparent; color: #31373E;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="1.5"></rect><path d="M3 9.5h18"></path><path d="M3 14.5h18"></path><path d="M9.5 9.5V19.5"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">TABLE</span>
+      </div>
+      <div style="width: 48px; padding: 7px 0 5px; border-radius: 6px; display: grid; justify-items: center; gap: 4px; background: transparent; color: #31373E;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"></path><path d="M10 20V5"></path><path d="M16 20v-8"></path><path d="M21 20H3"></path></svg>
+        <span class="grot" style="font-size: 9px; font-weight: 700; letter-spacing: .04em;">RESULTS</span>
+      </div>
+    <div style="flex: 1;"></div>
+    <div style="width: 48px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #4A5058;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.45V14"></path><path d="M12 17h.01"></path></svg>
+    </div>
+    <div class="grot" title="toqitahamid.sarker@siu.edu — account and sign out" style="width: 30px; height: 30px; border-radius: 50%; border: 1px solid #4A3B22; background: #1F1A11; color: #E8A13C; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;">TS</div>
+  </div>
+
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+
+  <!-- Title bar -->
+  <div style="height: 46px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid #262B32;">
+    <span class="grot" style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em;">CAMTRAP MEASURE</span>
+    <span class="mono" style="font-size: 10px; color: #5C646E;">v0.1.0</span>
+
+    <div style="flex: 1;"></div>
+    <span class="mono" style="font-size: 11px; color: #5C646E;">never synced</span>
+    <div class="btn btn-amber">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 4v5h-5"></path></svg>
+      Sync
+    </div>
+  </div>
+
+  <!-- Context bar, nothing chosen yet -->
+  <div style="height: 58px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 14px; background: #14171B; border-bottom: 1px solid #262B32;">
+    <div class="field" style="width: 152px;">
+      <span class="cap">Camera</span>
+      <div class="field-val" style="color: #4A5058; font-weight: 400;">
+        <span style="flex: 1;">Sync first</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3A4048" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="field" style="width: 210px;">
+      <span class="cap">Flag photo</span>
+      <div class="field-val" style="color: #4A5058; font-weight: 400;"><span style="flex: 1;">—</span></div>
+    </div>
+    <div class="sep"></div>
+    <div class="field" style="flex: 1; max-width: 372px;">
+      <span class="cap">Photo folder</span>
+      <div class="field-val">
+        <span style="flex: 1; color: #4A5058; font-weight: 400;">No folder chosen</span>
+        <div class="btn btn-off" style="height: 24px; padding: 0 9px; font-size: 11px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4L11 8.5h8.5A1.5 1.5 0 0 1 21 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"></path></svg>
+          Browse…
+        </div>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="field" style="width: 196px;">
+      <span class="cap">Distance read at</span>
+      <div class="field-val">
+        <span style="flex: 1;">MegaDetector box</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5C646E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+      </div>
+    </div>
+    <div style="flex: 1;"></div>
+    <div class="btn btn-off">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h4l2.5-7 3.5 14 2.5-7h4"></path></svg>
+      Measure all
+    </div>
+  </div>
+
+  <!-- Work area, empty -->
+  <div style="flex: 1; min-height: 0; display: flex;">
+
+    <div class="pane" style="width: 288px; flex: none; border-right: 1px solid #262B32;">
+      <div class="pane-head"><span class="cap">Photos</span></div>
+      <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center;">
+        <span style="font-size: 12px; color: #3A4048; line-height: 1.6;">Photos in the chosen<br>folder appear here</span>
+      </div>
+    </div>
+
+    <div style="flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; background: #08090B; padding: 40px;">
+      <div style="width: 100%; max-width: 468px;">
+        <div style="display: flex; align-items: center; gap: 13px;">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4L11 8.5h8.5A1.5 1.5 0 0 1 21 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"></path></svg>
+          <h2 class="grot" style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em;">Three steps to a distance</h2>
+        </div>
+
+        <div style="display: grid; gap: 20px; margin-top: 28px;">
+          <div class="step">
+            <span class="step-n step-done">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+            </span>
+            <div>
+              <div style="font-size: 14px; font-weight: 600; color: #8A929C;">Signed in as toqitahamid.sarker@siu.edu</div>
+            </div>
+          </div>
+
+          <div class="step">
+            <span class="step-n step-now">1</span>
+            <div style="flex: 1;">
+              <div style="font-size: 14px; font-weight: 600;">Sync from FlagLabel</div>
+              <p style="margin: 5px 0 11px; font-size: 12px; color: #8A929C; line-height: 1.6;">
+                Pulls the flagged reference photo for every camera you have labelled. First time takes a few minutes; after that, seconds.
+              </p>
+              <div class="btn btn-amber">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 4v5h-5"></path></svg>
+                Sync now
+              </div>
+            </div>
+          </div>
+
+          <div class="step" style="opacity: .5;">
+            <span class="step-n">2</span>
+            <div>
+              <div style="font-size: 14px; font-weight: 600;">Pick the camera and its flag photo</div>
+              <p style="margin: 5px 0 0; font-size: 12px; color: #8A929C; line-height: 1.6;">
+                You choose which flagged frame a folder of photos belongs to.
+              </p>
+            </div>
+          </div>
+
+          <div class="step" style="opacity: .5;">
+            <span class="step-n">3</span>
+            <div>
+              <div style="font-size: 14px; font-weight: 600;">Browse to that camera's photo folder</div>
+              <p style="margin: 5px 0 0; font-size: 12px; color: #8A929C; line-height: 1.6;">
+                Measure the whole folder, or one photo at a time. The folder's name does not matter.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane" style="width: 336px; flex: none; border-left: 1px solid #262B32;">
+      <div class="pane-head"><span class="cap">Measurement</span></div>
+      <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center;">
+        <span style="font-size: 12px; color: #3A4048; line-height: 1.6;">Select a photo to see<br>its distance and boxes</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status bar: weights still coming down -->
+  <div style="height: 46px; flex: none; background: #14171B; border-top: 1px solid #262B32;">
+    <div style="height: 2px; background: #1C2026;"><div style="width: 30%; height: 2px; background: #E8A13C;"></div></div>
+    <div class="row" style="height: 44px; gap: 10px; padding: 0 14px; font-size: 12px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E8A13C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"></path><path d="M8 12l4 4 4-4"></path><path d="M5 19h14"></path></svg>
+      <span style="font-weight: 500;">Downloading model weights</span>
+      <span class="mono" style="color: #8A929C;">2.1 / 7.0 GB</span>
+      <span style="color: #262B32;">·</span>
+      <span style="color: #8A929C;">one time only — you can sync while it finishes</span>
+      <div style="flex: 1;"></div>
+      <span class="mono" style="font-size: 11px; color: #5C646E;">cuda · RTX 2060 SUPER 8 GB</span>
+    </div>
+  </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

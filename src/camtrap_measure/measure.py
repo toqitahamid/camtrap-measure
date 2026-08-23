@@ -23,8 +23,19 @@ current: dict | None = None
 _lock = threading.Lock()
 
 
-def prepare(folder: str, site: str, flag: str, method: str) -> tuple[Path, list[Path], dict]:
-    """Check the folder, the camera and its flag photo. Raises ValueError with the message."""
+def jpegs(d: Path) -> list[Path]:
+    """Every JPEG directly in the folder, name order. Not recursive: one folder is one SD-card dump, and a
+    subfolder is another camera's. The folder listing shows exactly this set, so what is on screen is what
+    Measure all measures."""
+    try:
+        return sorted(p for p in d.iterdir() if p.suffix.lower() in JPEG)
+    except OSError as e:  # a share that dropped, or a folder this Windows account may not read
+        raise ValueError(f"Could not read {d}: {e}")
+
+
+def prepare(folder: str, site: str, flag: str, method: str, photos: list[str] | None = None) -> tuple[Path, list[Path], dict]:
+    """Check the folder, the camera and its flag photo, and settle which photos the run measures — the whole
+    folder, or the picked subset in the order given. Raises ValueError with the message."""
     d = Path(folder).expanduser().resolve()  # results are keyed by absolute path
     if method not in inference.METHODS:
         raise ValueError(f"Unknown method {method!r}; choose one of {', '.join(inference.METHODS)}.")
@@ -41,24 +52,44 @@ def prepare(folder: str, site: str, flag: str, method: str) -> tuple[Path, list[
         raise ValueError(cal["reason"])
     if not store.ref_path(site, flag).exists():
         raise ValueError(f"The flag photo {flag} is not on this computer yet — run Sync, then measure again.")
-    photos = sorted(p for p in d.iterdir() if p.suffix.lower() in JPEG)
-    if not photos:
-        raise ValueError(f"No JPEG photos in {d}")
-    return d, photos, cal
+    if photos is None:
+        found = jpegs(d)
+        if not found:
+            raise ValueError(f"No JPEG photos in {d}")
+        return d, found, cal
+    chosen = []
+    for name in photos:
+        p = Path(name).expanduser().resolve()
+        if p.suffix.lower() not in JPEG or p.parent != d or not p.is_file():
+            raise ValueError(f"{name} is not a photo in {d} — pick photos from the folder you are measuring.")
+        chosen.append(p)
+    if not chosen:
+        raise ValueError("No photos picked — tick at least one photo, or measure the whole folder.")
+    return d, chosen, cal
 
 
-def start(folder: str, site: str, flag: str, method: str, rerun: bool = False) -> dict:
+def start(folder: str, site: str, flag: str, method: str, rerun: bool = False, photos: list[str] | None = None) -> dict:
     """Validate, then measure in a background thread. Raises ValueError (bad input) or RuntimeError (busy)."""
     global current
     with _lock:
         if current and current["status"] == "running":
             raise RuntimeError("A run is already in progress.")
-        d, photos, cal = prepare(folder, site, flag, method)
+        d, chosen, cal = prepare(folder, site, flag, method, photos)
         current = {"folder": str(d), "site": site, "flag": flag, "method": method, "status": "running",
-                   "total": len(photos), "done": 0, "skipped": 0, "unreadable": 0, "detections": 0, "error": None, "cancel": False,
+                   "total": len(chosen), "done": 0, "skipped": 0, "unreadable": 0, "detections": 0, "error": None, "cancel": False,
                    "started": time.monotonic(), "elapsed_s": 0.0, "eta_s": None}
-        threading.Thread(target=_work, args=(current, photos, cal, rerun), daemon=True).start()
+        # picking photos by hand IS the intent to measure them: only a whole-folder run skips what already has an answer
+        threading.Thread(target=_work, args=(current, chosen, cal, rerun or photos is not None), daemon=True).start()
         return status()
+
+
+def _plain(e: Exception) -> str:
+    """A run's failure as something to act on. Out of memory is the one a technician can actually fix,
+    and on a card shared with the desktop it is the one they will meet (seen 2026-08-23)."""
+    if inference.is_oom(e):
+        return ("The GPU ran out of memory. Other programs are using it — close Chrome, Teams or other "
+                "heavy windows, then measure again. The photos already done keep their numbers.")
+    return f"{type(e).__name__}: {e}"
 
 
 def cancel() -> dict | None:
@@ -81,7 +112,7 @@ def status() -> dict | None:
     return r
 
 
-def _current_answer(known: dict | None, cal: dict, method: str) -> bool:
+def current_answer(known: dict | None, cal: dict, method: str) -> bool:
     """Does the store already hold this photo's answer under this method and this very calibration? The
     calibration's annotation `updated_at` is its version: a relabel changes it → measure again. Versions are
     compared, never clocks (the dept machine's and the cloud's need not agree)."""
@@ -89,7 +120,7 @@ def _current_answer(known: dict | None, cal: dict, method: str) -> bool:
                 and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at"))
 
 
-def _readable(p: Path) -> bool:
+def readable(p: Path) -> bool:
     """A truncated or non-JPEG file must not sink the whole batch; it is counted and skipped."""
     try:
         with Image.open(p) as im:
@@ -105,11 +136,11 @@ def _work(run: dict, photos: list[Path], cal: dict, rerun: bool) -> None:
     try:
         batch = []
         for p in photos:
-            if not rerun and _current_answer(known.get(str(p)), cal, method):
+            if not rerun and current_answer(known.get(str(p)), cal, method):
                 run["skipped"] += 1
                 run["done"] += 1
                 continue
-            if not _readable(p):
+            if not readable(p):
                 run["unreadable"] += 1
                 run["done"] += 1
                 continue
@@ -126,6 +157,6 @@ def _work(run: dict, photos: list[Path], cal: dict, rerun: bool) -> None:
                     break
         outcome = ("cancelled", None) if run["cancel"] else ("done", None)
     except Exception as e:
-        outcome = ("error", f"{type(e).__name__}: {e}")
+        outcome = ("error", _plain(e))
     run["elapsed_s"] = round(time.monotonic() - run["started"], 1)
     run["status"], run["error"] = outcome
