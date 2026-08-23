@@ -137,3 +137,20 @@ def test_server_blip_during_refresh_is_not_an_auth_error(monkeypatch):
     )
     with pytest.raises(httpx.HTTPStatusError):
         sb.refresh("rt")  # must NOT be AuthError — the caller would sign the user out
+
+
+def test_known_supabase_error_codes_become_plain_language(monkeypatch):
+    answers = {"/auth/v1/otp": (422, "otp_disabled", "Signups not allowed for otp"),
+               "/auth/v1/verify": (403, "otp_expired", "Token has expired or is invalid")}
+
+    def handler(req):
+        status, code, msg = answers[req.url.path]
+        return httpx.Response(status, json={"code": status, "error_code": code, "msg": msg})
+
+    monkeypatch.setattr(
+        sb, "_http", httpx.Client(base_url=sb._http.base_url, transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(sb.AuthError, match="No FlagLabel account uses this email"):
+        sb.request_code("nobody@example.com")
+    with pytest.raises(sb.AuthError, match="code was not accepted"):
+        sb.verify_code("a@b", "000000")

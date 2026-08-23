@@ -57,11 +57,23 @@ def _msg(r: httpx.Response) -> str:
         return r.text
 
 
+_PLAIN = {  # Supabase error_code → what a technician can act on (seen at the first real sign-in, 2026-08-23)
+    "otp_disabled": "No FlagLabel account uses this email — use the address you sign in to FlagLabel with.",
+    "otp_expired": "That code was not accepted. Use the newest email's code within an hour; if the email has a link and "
+                   "no code, tell the researcher (the Supabase email template needs the code).",
+    "over_email_send_rate_limit": "A code was sent less than a minute ago — check the mailbox (and spam), or wait a minute.",
+}
+
+
 def _auth_post(path: str, **body) -> httpx.Response:
     """An auth POST whose 4xx/429 answers are the user's to act on (unknown email, bad code, too many requests)."""
     r = _send("POST", path, json=body)
     if r.status_code in (400, 401, 403, 404, 422, 429):
-        raise AuthError(_msg(r))
+        try:
+            code = r.json().get("error_code")
+        except ValueError:
+            code = None
+        raise AuthError(_PLAIN.get(code) or _msg(r))
     r.raise_for_status()
     return r
 
