@@ -651,3 +651,26 @@ The installer keeps the one question only a person can answer: a masked box for 
 when none is stored, handed to the checks through `HF_TOKEN` so it is written where the app reads it. The
 FlagLabel sign-in was dropped from the installer altogether - it belongs to the window.
 
+### What the first real double-click found (2026-08-23, workstation)
+
+Four faults, all in the new plumbing, all fixed and each now nailed down in `tests/test_launcher.py`:
+
+1. The **splash carried the app's own window title**, so it answered the question "is the app already
+   running?" and `win_icon` would have dressed it instead of the window. It is "Starting CamTrap
+   Measure" now.
+2. The launcher waited on `MainWindowHandle` of the process it started, **which never gets one**: the
+   generated entry point re-runs itself as `pythonw`, so the window belongs to a child.
+3. `**$null` is marshalled by PowerShell as an empty string**, so `FindWindowW($null, $Title)` searched
+   for a window of class `""` and matched nothing - the single-instance check never fired and a second
+   engine started beside the first, both holding the GPU. `[NullString]::Value` is a real NULL. The
+   check now asks about the *process* anyway: for the first minute the models are loading and there is
+   no window to find.
+4. `.gitignore` **takes no trailing comments**: `logs/  # note` ignored nothing, every install then had
+   an untracked `logs/`, and the launcher reads a clone with local changes as a developer's tree and
+   stops updating it - for ever.
+
+Accepted on the workstation: cold start from the desktop icon with no console at any point, a second
+double-click bringing the running window forward instead of starting a second engine, the window closing
+and its process going with it, and the installer's own window writing the shortcut, the Start-menu entry
+and the Settings > Apps registration.
+

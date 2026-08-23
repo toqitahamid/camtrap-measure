@@ -7,7 +7,7 @@ leaves it there for the whole session, and the install is a command a technician
 
 **Blocked by:** 11 — Auto-update launcher; 12 — Guided installer; 17 — The window becomes an app.
 
-**Status:** done (2026-08-23) - 189 tests green; the launcher checked hidden and in a console on the workstation, the GUI entry point checked to be PE subsystem 2; the researcher's own double-click is the remaining acceptance
+**Status:** done (2026-08-23) - 197 tests green; accepted on the workstation: cold start from the desktop icon with no console, a second double-click focusing the running window, the installer's window writing the shortcut, Start-menu entry and Settings > Apps registration
 
 ## Why the console appears (the fault being fixed)
 
