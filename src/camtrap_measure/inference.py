@@ -153,7 +153,7 @@ class Real:
         self.sam3 = None  # (model, processor) once the precise method has been asked for
         if self.device == "cuda":
             gb = torch.cuda.get_device_properties(0).total_memory / 2**30
-            if gb < VRAM_FLOOR_GB:
+            if round(gb) < VRAM_FLOOR_GB:  # an "8 GB" card reports ~7.99 GiB usable (seen on the dept RTX 2060 SUPER)
                 self.warning = f"This GPU has {gb:.1f} GB of memory, below the {VRAM_FLOOR_GB} GB the app is designed for — runs will be slow."
             self.batch = self._probe_batch()
         else:
