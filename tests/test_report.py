@@ -27,6 +27,7 @@ SCRIPT = {
     "IMG_0005.JPG": ([det(d=7.0)], 9),
     "IMG_0006.JPG": ([], None),
     "IMG_0008.JPG": ([det(species="raccoon", conf=0.2, d=4.0)], 300),
+    "IMG_0007.JPG": ([det(species="raccoon", d=7.0)], 300),  # no capture date: measured like any other (ticket 15), in every date range
 }
 
 
@@ -38,10 +39,10 @@ def measured(synced, tmp_path, monkeypatch):
             yield inference.PhotoResult(dets, score)
 
     monkeypatch.setattr(api.inference, "backend", scripted)
-    photos = {n: jpeg(f"2026:05:{i + 1:02d} 08:00:00") for i, n in enumerate(SCRIPT)}
-    photos["IMG_0007.JPG"] = jpeg(None)  # no capture date → held
+    photos = {n: jpeg(f"2026:05:{i + 1:02d} 08:00:00") for i, n in enumerate(SCRIPT) if n != "IMG_0007.JPG"}
+    photos["IMG_0007.JPG"] = jpeg(None)
     st = run(synced, folder(tmp_path, photos=photos))
-    assert st["status"] == "done" and st["held"] == 1
+    assert st["status"] == "done" and st["unreadable"] == 0
     return synced
 
 
@@ -57,19 +58,19 @@ def export(c, **params):
 
 def test_summary_counts_histogram_and_per_camera_stats(measured):
     s = measured.get("/api/summary").json()
-    assert s["photos"] == 8 and s["held"] == 1 and s["detections"] == 7 and s["deer"] == 5
+    assert s["photos"] == 8 and s["held"] == 0 and s["detections"] == 8 and s["deer"] == 5
     assert s["suspicious"] == 3  # the weak box, the unsure animal, the misfiled photo's deer; the raccoon is filtered, not suspicious
     bins = {(b["lo"], b["hi"]): b["n"] for b in s["histogram"]}  # deer rows only: the survey target
     assert bins[(4, 6)] == 1 and bins[(6, 8)] == 2 and bins[(12, 14)] == 1 and sum(bins.values()) == 5
     [cam] = s["cameras"]
-    assert cam["site"] == "TON_CAM02" and cam["photos"] == 8 and cam["held"] == 1 and cam["deer"] == 5
+    assert cam["site"] == "TON_CAM02" and cam["photos"] == 8 and cam["held"] == 0 and cam["deer"] == 5
     assert cam["median_m"] == 7.0 and cam["suspicious"] == 3
 
 
 def test_summary_filters_by_site_and_date(measured):
     assert measured.get("/api/summary", params={"site": "TON_CAM99"}).json()["photos"] == 0
     s = measured.get("/api/summary", params={"date_from": "2026-05-02", "date_to": "2026-05-03"}).json()
-    assert s["photos"] == 3 and s["held"] == 1 and s["detections"] == 3  # the undated held photo is in every range
+    assert s["photos"] == 3 and s["detections"] == 4  # the undated photo is in every range
     assert measured.get("/api/summary", params={"date_from": "May 2nd"}).status_code == 422
 
 
@@ -86,14 +87,13 @@ def test_summary_suspicious_count_matches_what_the_export_leaves_out(measured):
 def test_gallery_shows_only_suspicious_photos_each_with_its_reason(measured):
     g = measured.get("/api/suspicious").json()
     by = {x["photo"]: x for x in g}
-    assert set(by) == {"IMG_0002.JPG", "IMG_0003.JPG", "IMG_0005.JPG", "IMG_0007.JPG", "IMG_0008.JPG"}
+    assert set(by) == {"IMG_0002.JPG", "IMG_0003.JPG", "IMG_0005.JPG", "IMG_0008.JPG"}
     assert "confidence" in by["IMG_0002.JPG"]["reasons"][0] and "0.30" in by["IMG_0002.JPG"]["reasons"][0]
     assert any("unsure" in r for r in by["IMG_0003.JPG"]["reasons"])
     assert any("flag photo" in r and "9" in r for r in by["IMG_0005.JPG"]["reasons"])
-    assert by["IMG_0007.JPG"]["held"] and "capture date" in by["IMG_0007.JPG"]["reasons"][0]
     assert by["IMG_0003.JPG"]["detections"][0]["species"] == "unsure"  # boxes come along for the overlay
     g = measured.get("/api/suspicious", params={"date_from": "2026-05-04"}).json()
-    assert {x["photo"] for x in g} == {"IMG_0005.JPG", "IMG_0007.JPG", "IMG_0008.JPG"}  # undated held photo never drops out
+    assert {x["photo"] for x in g} == {"IMG_0005.JPG", "IMG_0008.JPG"}
 
 
 def test_photo_endpoint_serves_measured_photos_only(measured, tmp_path):
@@ -131,7 +131,7 @@ def test_export_checkbox_includes_suspicious_rows_with_their_reason_in_the_flag_
 
 def test_export_all_species_toggle_adds_the_raccoon(measured):
     _, rows = export(measured, all_species=True)
-    assert [r["species"] for r in rows] == ["white-tailed deer", "white-tailed deer", "raccoon"]  # the weak raccoon is still gated
+    assert [r["species"] for r in rows] == ["raccoon", "white-tailed deer", "white-tailed deer", "raccoon"]  # undated photo first; the weak raccoon is still gated
 
 
 def test_export_names_every_method_present_so_doubled_animals_are_not_a_surprise(measured, tmp_path):

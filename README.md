@@ -42,7 +42,17 @@ the download if it is missing). A Git or uv already on the PATH is used as is.
 
 ## Run (department machine, Windows)
 
-Double-click the desktop shortcut (= `run.bat` in the app folder).
+Double-click the desktop shortcut (= `run.bat` in the app folder). Sign in with your FlagLabel
+email and the code it emails you, then:
+
+1. **Sync** — pulls the flag-photo labels from FlagLabel (first time: a few minutes; later: seconds).
+2. **Measure** — pick the camera, pick one of its labeled flag photos, type the folder that holds
+   that camera's photos, press Measure. Every JPEG in the folder is measured against that flag
+   photo; the folder's name does not matter. Photos already measured are skipped unless you tick
+   *Re-measure*. Results, the suspicious gallery and the CSV export are below.
+
+A flag photo is offered once it is labeled in FlagLabel; there is no other check — you choose
+which flag photo a folder belongs to.
 
 ### Updates and rollback
 

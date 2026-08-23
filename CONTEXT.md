@@ -370,6 +370,29 @@ run them (`scripts/install.ps1` from a clone; the `irm | iex` form is the same f
   expired code, "only request this after N seconds"); `refresh` keeps its narrower rule so a
   429 there cannot sign the user out.
 
+## Pick the flag photo, pick the folder, measure (ticket 15, 2026-08-23)
+
+- The researcher, after the first real session on the dept machine: *no warnings, as simple as
+  possible — select the site's flags, select the folder of images, it measures*. Confirmed by
+  question: the user picks the flag photo (no automatic date windows), the quality verdict goes
+  away entirely, Sync stays a button.
+- This overrides tickets 04/05/10's design (EXIF-date validity windows, green/red verdict with
+  leave-one-out QC, held photos, post-sync catch-up, folder named after the camera). Reason that
+  beats the recorded one: the person operating the app knows which flag photo a folder belongs
+  to, and the first sync showed the QC reading real terrain and click scatter as error (section
+  above). What the windows protected against — a photo measured against the wrong flag photo
+  after a camera was moved — is now the operator's responsibility, stated in the README.
+- What remains of calibration QC: a flag photo is unusable only when it cannot be fitted at all
+  (not labeled, too few flags, missing from storage, malformed); such photos are listed greyed
+  with their reason. `calib/qc.py` (monotonicity, LOO) stays as a research diagnostic.
+- `POST /api/run {folder, site, flag, method, rerun}`; `/api/cameras` = each camera's flag photos
+  newest first with `ok`/`reason`; run status has `unreadable` (a truncated file is skipped and
+  counted, never sinks the batch) instead of `held`/`held_reasons`; `/api/sync` no longer returns
+  `remeasure`. A photo without an EXIF date is measured like any other and sits in every date
+  range of the reports. The skip rule is unchanged: same method, same flag photo, same annotation
+  version; picking another flag photo re-measures and replaces the rows.
+- Store keeps the `held_reason` column (always NULL now) — no migration for a column nobody reads.
+
 ## Auth
 
 Dept's existing FlagLabel accounts, signed in by one-time email code (ticket 14), session cached. RLS

@@ -19,31 +19,23 @@ type Status = {
   inference: Inference
 }
 type SyncResult =
-  | { ok: true; last_sync: string; annotations: number; sites: number; remeasure: number | null }
+  | { ok: true; last_sync: string; annotations: number; sites: number }
   | { ok: false; offline: true; last_sync: string | null }
-type Calibration = {
-  image_name: string
-  captured_at: string | null
-  window_end: string | null
-  ok: boolean
-  reason: string | null
-}
-type Camera = { site: string; verdict: 'green' | 'red'; reason: string | null; calibrations: Calibration[] }
+type Flag = { image_name: string; captured_at: string | null; ok: boolean; reason: string | null }
+type Camera = { site: string; flags: Flag[] }
 type Summary = {
   photos: number
-  held: number
   detections: number
   deer: number
   suspicious: number
   histogram: { lo: number; hi: number; n: number }[]
-  cameras: { site: string; photos: number; held: number; detections: number; deer: number; median_m: number | null; suspicious: number }[]
+  cameras: { site: string; photos: number; detections: number; deer: number; median_m: number | null; suspicious: number }[]
 }
 type Suspect = {
   path: string
   photo: string
   site: string
   captured_at: string | null
-  held: boolean
   reasons: string[]
   detections: { x1: number; y1: number; x2: number; y2: number; species: string; confidence: number; distance_m: number | null; method: string }[]
 }
@@ -51,14 +43,14 @@ type Methods = { default: string; methods: Record<string, { label: string; hint:
 type Run = {
   folder: string
   site: string
-  method: string | null
+  flag: string
+  method: string
   status: 'running' | 'done' | 'cancelled' | 'error'
   total: number
   done: number
-  held: number
   skipped: number
+  unreadable: number
   detections: number
-  held_reasons: { reason: string; count: number }[]
   error: string | null
   elapsed_s: number
   eta_s: number | null
@@ -107,12 +99,23 @@ function ModelsLine({ inf }: { inf: Inference }) {
   )
 }
 
-function RunPanel({ methods, ready, pollKey, onDone }: { methods: Methods; ready: boolean; pollKey: number; onDone: (site: string) => void }) {
+function RunPanel({ cameras, methods, ready, pollKey, onDone }: { cameras: Camera[]; methods: Methods; ready: boolean; pollKey: number; onDone: (site: string) => void }) {
   const [run, setRun] = useState<Run | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [picked, setPicked] = useState<string | null>(null)
+  const [site, setSite] = useState('')
+  const [flag, setFlag] = useState('')
   const method = picked ?? methods.default
   const running = run?.status === 'running'
+  const usable = cameras.filter((c) => c.flags.some((f) => f.ok)) // a camera is offered once one of its flag photos fits
+  const flags = usable.find((c) => c.site === site)?.flags ?? []
+  useEffect(() => {
+    // keep the selects valid as the list changes (a sync, the first load): first camera, its newest usable flag photo
+    const cam = usable.find((c) => c.site === site) ?? usable[0]
+    const s = cam?.site ?? ''
+    if (s !== site) setSite(s)
+    if (!cam?.flags.some((f) => f.ok && f.image_name === flag)) setFlag(cam?.flags.find((f) => f.ok)?.image_name ?? '')
+  }, [cameras, site, flag, usable])
 
   const poll = () => fetch('/api/run').then((r) => r.json()).then(setRun).catch(() => {}) // engine down: App's refresh says so
 
@@ -131,7 +134,7 @@ function RunPanel({ methods, ready, pollKey, onDone }: { methods: Methods; ready
     e.preventDefault()
     const form = new FormData(e.currentTarget)
     setError(null)
-    const r = await post('/api/run', { folder: form.get('folder'), method: form.get('method'), rerun: form.get('rerun') === 'on' })
+    const r = await post('/api/run', { folder: form.get('folder'), site, flag, method: form.get('method'), rerun: form.get('rerun') === 'on' })
     if (!r.ok) {
       setError((await r.json()).detail ?? `Could not start (${r.status})`)
       return
@@ -143,21 +146,34 @@ function RunPanel({ methods, ready, pollKey, onDone }: { methods: Methods; ready
     <section className="card">
       <h2>Measure</h2>
       {/* ponytail: typed/pasted path; a native folder picker needs a pywebview dialog bridge — add when the dept trips over this. */}
+      {usable.length === 0 && <p className="muted small">No camera has a labeled flag photo yet — label one in FlagLabel, then Sync.</p>}
       <form id="run-form" onSubmit={start} className="row">
-        <input name="folder" placeholder="Photo folder named after the camera, e.g. D:\photos\TON_CAM02" required className="grow" style={{ minWidth: 320 }} />
+        <select value={site} onChange={(e) => setSite(e.target.value)} title="Camera">
+          {usable.map((c) => (
+            <option key={c.site} value={c.site}>{c.site}</option>
+          ))}
+        </select>
+        <select value={flag} onChange={(e) => setFlag(e.target.value)} title="Flag photo to measure against">
+          {flags.map((f) => (
+            <option key={f.image_name} value={f.image_name} disabled={!f.ok} title={f.reason ?? undefined}>
+              {f.image_name} · {f.captured_at ? day(f.captured_at) : 'no date'}{f.ok ? '' : ' — not usable'}
+            </option>
+          ))}
+        </select>
+        <input name="folder" placeholder="Folder with this camera's photos, e.g. D:\photos\TON_CAM02" required className="grow" style={{ minWidth: 320 }} />
         <select name="method" value={method} onChange={(e) => setPicked(e.target.value)}>
           {Object.entries(methods.methods).map(([k, m]) => (
             <option key={k} value={k}>{m.label}</option>
           ))}
         </select>
-        <button type="submit" className="btn btn-primary" disabled={running || !ready}>{running ? 'Running…' : 'Measure'}</button>
+        <button type="submit" className="btn btn-primary" disabled={running || !ready || !flag}>{running ? 'Running…' : 'Measure'}</button>
         {running && <button type="button" className="btn" onClick={() => post('/api/run/cancel').then(poll)}>Cancel</button>}
       </form>
       {methods.methods[method] && <p className="muted small">{methods.methods[method].hint}</p>}
       <label className="check">
         <input type="checkbox" name="rerun" form="run-form" />
         <span>
-          Re-measure photos that already have an answer (otherwise only new, held or interrupted ones are measured — so Measure again
+          Re-measure photos that already have an answer (otherwise only new or interrupted ones are measured — so Measure again
           also resumes a cancelled run)
         </span>
       </label>
@@ -166,23 +182,14 @@ function RunPanel({ methods, ready, pollKey, onDone }: { methods: Methods; ready
         <div className="stack">
           <progress value={run.done} max={run.total} />
           <p className="small">
-            <strong>{run.site || 'Held photos, all cameras'}</strong> · {run.method ? methods.methods[run.method]?.label ?? run.method : 'each under its own method'} · {run.done}/{run.total} photos · {run.detections} animals · {run.held} held
+            <strong>{run.site}</strong> · flag photo {run.flag} · {methods.methods[run.method]?.label ?? run.method} · {run.done}/{run.total} photos · {run.detections} animals
             {run.skipped > 0 && ` · ${run.skipped} already measured`}
+            {run.unreadable > 0 && ` · ${plural(run.unreadable, 'unreadable file')} skipped`}
             {running && run.eta_s !== null && ` · about ${duration(run.eta_s)} left`}
             {run.status === 'done' && ` · finished in ${duration(run.elapsed_s)}`}
             {run.status === 'cancelled' && ` · cancelled after ${duration(run.elapsed_s)} — Measure again continues where it stopped`}
           </p>
           {run.status === 'error' && <p className="notice notice-error">Run failed: {run.error}</p>}
-          {run.held_reasons.length > 0 && (
-            <div className="notice notice-warn">
-              <strong>{plural(run.held, 'photo')} held — not measured.</strong> After fixing, Sync and run this folder again:
-              <ul>
-                {run.held_reasons.map((h) => (
-                  <li key={h.reason}>{h.reason} ({plural(h.count, 'photo')})</li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       )}
     </section>
@@ -237,7 +244,7 @@ function ResultsPanel({ sites, focus }: { sites: string[]; focus: { site: string
         ) : (
           <>
             <div className="stats">
-              <Stat value={summary.photos} label={`photos (${summary.held} held)`} />
+              <Stat value={summary.photos} label="photos" />
               <Stat value={summary.detections} label="animals" />
               <Stat value={summary.deer} label="deer" />
               <Stat value={summary.suspicious} label={`suspicious${allSpecies ? '' : ' deer'} rows`} />
@@ -259,13 +266,13 @@ function ResultsPanel({ sites, focus }: { sites: string[]; focus: { site: string
               <table>
                 <thead>
                   <tr>
-                    <th>Camera</th><th className="num">Photos</th><th className="num">Held</th><th className="num">Animals</th><th className="num">Deer</th><th className="num">Median m</th><th className="num">Suspicious</th>
+                    <th>Camera</th><th className="num">Photos</th><th className="num">Animals</th><th className="num">Deer</th><th className="num">Median m</th><th className="num">Suspicious</th>
                   </tr>
                 </thead>
                 <tbody>
                   {summary.cameras.map((c) => (
                     <tr key={c.site}>
-                      <td>{c.site}</td><td className="num">{c.photos}</td><td className="num">{c.held}</td><td className="num">{c.detections}</td><td className="num">{c.deer}</td>
+                      <td>{c.site}</td><td className="num">{c.photos}</td><td className="num">{c.detections}</td><td className="num">{c.deer}</td>
                       <td className="num">{c.median_m ?? '—'}</td><td className="num">{c.suspicious}</td>
                     </tr>
                   ))}
@@ -299,7 +306,7 @@ function ResultsPanel({ sites, focus }: { sites: string[]; focus: { site: string
                     </div>
                     <figcaption>
                       <strong>{s.site} · {s.photo}</strong> <span className="muted">· {s.captured_at ? new Date(s.captured_at).toLocaleString() : 'no date'}</span>
-                      <ul className={s.held ? 'danger' : 'warn'}>
+                      <ul className="warn">
                         {s.reasons.map((r) => (
                           <li key={r}>{r}</li>
                         ))}
@@ -409,8 +416,7 @@ export default function App() {
     }
     const body: SyncResult = await r.json()
     if (body.ok) {
-      const catchUp = body.remeasure ? ` Re-checking ${plural(body.remeasure, 'held photo')} now.` : ''
-      setNotice({ text: `Synced ${body.annotations} annotations, ${body.sites} cameras.${catchUp}`, kind: 'info' })
+      setNotice({ text: `Synced ${body.annotations} annotations, ${body.sites} cameras.`, kind: 'info' })
       setPollKey((k) => k + 1)
     } else {
       setNotice({ text: `Offline — using calibrations from last sync ${when(body.last_sync)}.`, kind: 'warn' })
@@ -424,7 +430,7 @@ export default function App() {
     await refresh()
   }
 
-  const ready = cameras.filter((c) => c.verdict === 'green').length
+  const labeled = cameras.filter((c) => c.flags.some((f) => f.ok)).length
 
   return (
     <>
@@ -483,47 +489,16 @@ export default function App() {
               <div className="card-head">
                 <h2>Cameras</h2>
                 <span className="small muted">
-                  Last sync: {when(status.last_sync)} · {status.annotations} annotations · {ready}/{cameras.length} cameras ready
+                  Last sync: {when(status.last_sync)} · {status.annotations} flag photos · {labeled}/{cameras.length} cameras with a labeled flag photo
                 </span>
                 <div className="spacer" />
                 <button className="btn btn-primary" onClick={sync} disabled={busy}>
                   {busy ? 'Syncing…' : 'Sync'}
                 </button>
               </div>
-              {cameras.length > 0 && (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Camera</th>
-                        <th>Status</th>
-                        <th>Calibrations (flag photo · valid from → until)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cameras.map((c) => (
-                        <tr key={c.site}>
-                          <td className="nowrap">{c.site}</td>
-                          <td className="nowrap">
-                            <span className={`badge ${c.verdict === 'green' ? 'badge-ok' : 'badge-danger'}`}>{c.verdict === 'green' ? 'Ready' : 'Needs attention'}</span>
-                          </td>
-                          <td>
-                            {c.calibrations.map((cal) => (
-                              <div key={cal.image_name} className={cal.ok ? undefined : 'danger'}>
-                                {cal.image_name} · {day(cal.captured_at)} → {cal.window_end ? day(cal.window_end) : 'now'}
-                              </div>
-                            ))}
-                            {c.reason && <div className="danger">{c.reason}</div>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
               <ModelsLine inf={status.inference} />
             </section>
-            <RunPanel methods={methods} ready={status.inference.status === 'ready'} pollKey={pollKey} onDone={(site) => setFocus((f) => ({ site, n: f.n + 1 }))} />
+            <RunPanel cameras={cameras} methods={methods} ready={status.inference.status === 'ready'} pollKey={pollKey} onDone={(site) => setFocus((f) => ({ site, n: f.n + 1 }))} />
             <ResultsPanel sites={cameras.map((c) => c.site)} focus={focus} />
           </>
         )}

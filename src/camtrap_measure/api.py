@@ -99,8 +99,8 @@ def logout():
 
 
 def _fit_changed(annotations: list[dict], token: str) -> list[dict]:
-    """Fit every annotation that is new, relabeled, or still red since the last sync (EXIF read from storage)."""
-    known = store.calibration_versions()  # green rows only: red ones are re-checked every sync (re-uploads)
+    """Fit every annotation that is new, relabeled, or still unusable since the last sync (EXIF read from storage)."""
+    known = store.calibration_versions()  # usable rows only: the others are re-checked every sync (re-uploads, labels)
     fits = []
     for a in annotations:
         if known.get((a["site"], a["image_name"]), "") == a.get("updated_at"):
@@ -136,29 +136,30 @@ def sync():
     except sb.Offline:
         return {"ok": False, "offline": True, "last_sync": store.summary()["last_sync"]}
     last_sync = store.replace_mirror(annotations, sites, fits)
-    remeasure = measure.start_held() if inference.state["status"] == "ready" else None  # held photos whose calibration may have arrived
-    return {"ok": True, "last_sync": last_sync, "annotations": len(annotations), "sites": len(sites), "remeasure": remeasure}
+    return {"ok": True, "last_sync": last_sync, "annotations": len(annotations), "sites": len(sites)}
 
 
 @app.get("/api/cameras")
 def cameras():
-    """Per-camera calibration verdict, reason, and validity windows."""
+    """Every camera with its flag photos (usable ones carry ok=True) — what the Measure card offers."""
     return calibration.cameras(store.sites(), store.calibrations())
 
 
 class RunRequest(BaseModel):
     folder: str
+    site: str
+    flag: str  # image_name of the flag photo to measure against
     method: str = inference.DEFAULT_METHOD
     rerun: bool = False  # replace current answers too; default measures only what has none yet
 
 
 @app.post("/api/run")
 def start_run(body: RunRequest):
-    """Measure every JPEG in a folder named after a camera. Progress via GET /api/run."""
+    """Measure every JPEG in a folder against one camera's flag photo. Progress via GET /api/run."""
     if inference.state["status"] != "ready":
         raise HTTPException(503, inference.state["error"] or "Models are still loading — try again in a moment.")
     try:
-        return measure.start(body.folder, body.method, body.rerun)
+        return measure.start(body.folder, body.site, body.flag, body.method, body.rerun)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:

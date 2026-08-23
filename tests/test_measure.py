@@ -1,4 +1,5 @@
-"""Measurement runs through the API, with inference faked at its boundary and Supabase faked at its seam."""
+"""Measurement runs through the API (every JPEG in a folder against the flag photo the user picked), with
+inference faked at its boundary and Supabase faked at its seam."""
 
 import threading
 import time
@@ -11,7 +12,7 @@ from camtrap_measure import api, inference
 
 from tests.conftest import ANN, flag_photo_data, jpeg
 
-IN_WINDOW = "2026:05:01 08:00:00"  # after the March flag photo
+IN_WINDOW = "2026:05:01 08:00:00"  # a plausible capture date; nothing depends on it any more (ticket 15)
 
 
 def folder(tmp_path: Path, site="TON_CAM02", photos: dict[str, bytes] | None = None) -> Path:
@@ -22,9 +23,12 @@ def folder(tmp_path: Path, site="TON_CAM02", photos: dict[str, bytes] | None = N
     return d
 
 
-def run(c: TestClient, d: Path, method: str | None = "md", timeout=4.0, rerun=False) -> dict:
-    """Start a run (method=None: let the API pick its default) and poll until it ends."""
-    r = c.post("/api/run", json={"folder": str(d), "rerun": rerun, **({"method": method} if method else {})})
+SITE, FLAG = "TON_CAM02", "IMG_5304.JPG"
+
+
+def run(c: TestClient, d: Path, method: str | None = "md", timeout=4.0, rerun=False, site=SITE, flag=FLAG) -> dict:
+    """Start a run against one flag photo (method=None: let the API pick its default) and poll until it ends."""
+    r = c.post("/api/run", json={"folder": str(d), "site": site, "flag": flag, "rerun": rerun, **({"method": method} if method else {})})
     assert r.status_code == 200, r.text
     return wait(c, timeout)
 
@@ -60,26 +64,50 @@ def expected_detections(names: list[str]) -> int:
 
 # --- folder validation ----------------------------------------------------------
 
-def test_folder_named_after_unknown_camera_is_refused(synced, tmp_path):
-    d = folder(tmp_path, site="TON_CAM99")
-    r = synced.post("/api/run", json={"folder": str(d), "method": "md"})
-    assert r.status_code == 400
-    assert "TON_CAM99" in r.json()["detail"] and "not a registered camera" in r.json()["detail"]
+def test_unknown_camera_is_refused(synced, tmp_path):
+    r = synced.post("/api/run", json={"folder": str(folder(tmp_path)), "site": "TON_CAM99", "flag": FLAG, "method": "md"})
+    assert r.status_code == 400 and "TON_CAM99" in r.json()["detail"] and "not a camera" in r.json()["detail"]
+
+
+def test_unknown_flag_photo_is_refused(synced, tmp_path):
+    r = synced.post("/api/run", json={"folder": str(folder(tmp_path)), "site": SITE, "flag": "IMG_0000.JPG", "method": "md"})
+    assert r.status_code == 400 and "IMG_0000.JPG" in r.json()["detail"] and "Sync" in r.json()["detail"]
+
+
+def test_unusable_flag_photo_is_refused_with_its_reason(cloud, synced, tmp_path):
+    cloud["annotations"] = [{**ANN, "status": "empty", "data": None, "updated_at": "2026-07-01T00:00:00+00:00"}]
+    synced.post("/api/sync")
+    r = synced.post("/api/run", json={"folder": str(folder(tmp_path)), "site": SITE, "flag": FLAG, "method": "md"})
+    assert r.status_code == 400 and "not labeled" in r.json()["detail"]
+
+
+def test_flag_photo_missing_from_disk_asks_for_sync(synced, tmp_path):
+    from camtrap_measure import store
+    store.ref_path(SITE, FLAG).unlink()
+    r = synced.post("/api/run", json={"folder": str(folder(tmp_path)), "site": SITE, "flag": FLAG, "method": "md"})
+    assert r.status_code == 400 and FLAG in r.json()["detail"] and "Sync" in r.json()["detail"]
+    synced.post("/api/sync")  # refetches it
+    assert run(synced, folder(tmp_path / "again"))["status"] == "done"
+
+
+def test_folder_name_does_not_matter(synced, tmp_path):
+    st = run(synced, folder(tmp_path, site="anything"))
+    assert st["status"] == "done" and st["site"] == SITE and st["flag"] == FLAG and results(synced)[0]["site"] == SITE
 
 
 def test_missing_folder_is_refused(synced, tmp_path):
-    r = synced.post("/api/run", json={"folder": str(tmp_path / "nope" / "TON_CAM02"), "method": "md"})
+    r = synced.post("/api/run", json={"folder": str(tmp_path / "nope"), "site": SITE, "flag": FLAG, "method": "md"})
     assert r.status_code == 400 and "not found" in r.json()["detail"]
 
 
 def test_folder_without_jpegs_is_refused(synced, tmp_path):
     d = folder(tmp_path, photos={"notes.txt": b"x"})
-    r = synced.post("/api/run", json={"folder": str(d), "method": "md"})
+    r = synced.post("/api/run", json={"folder": str(d), "site": SITE, "flag": FLAG, "method": "md"})
     assert r.status_code == 400 and "no jpeg" in r.json()["detail"].lower()
 
 
 def test_before_first_sync_asks_for_sync(client, tmp_path):
-    r = client.post("/api/run", json={"folder": str(folder(tmp_path)), "method": "md"})
+    r = client.post("/api/run", json={"folder": str(folder(tmp_path)), "site": SITE, "flag": FLAG, "method": "md"})
     assert r.status_code == 400 and "Sync" in r.json()["detail"]
 
 
@@ -89,7 +117,7 @@ def test_run_writes_one_row_per_detection_with_exif_make_model(synced, tmp_path)
     names = ["IMG_0001.JPG", "IMG_0002.jpg", "IMG_0003.JPEG"]
     d = folder(tmp_path, photos={n: jpeg(IN_WINDOW, "Browning", "BTC-7E") for n in names})
     st = run(synced, d)
-    assert st["status"] == "done" and st["total"] == 3 and st["done"] == 3 and st["held"] == 0
+    assert st["status"] == "done" and st["total"] == 3 and st["done"] == 3 and st["unreadable"] == 0
     rows = results(synced)
     assert len(rows) == st["detections"] == expected_detections(names) > 0
     r = rows[0]
@@ -110,10 +138,10 @@ def test_progress_reports_counts_and_time_estimate(synced, tmp_path, monkeypatch
 
     monkeypatch.setattr(api.inference, "backend", slow)
     d = folder(tmp_path, photos={f"IMG_{i}.JPG": jpeg(IN_WINDOW) for i in range(4)})
-    synced.post("/api/run", json={"folder": str(d), "method": "md"})
+    synced.post("/api/run", json={"folder": str(d), "site": SITE, "flag": FLAG, "method": "md"})
     st = synced.get("/api/run").json()
     assert st["status"] == "running" and st["total"] == 4 and st["done"] == 0 and st["eta_s"] is None
-    assert synced.post("/api/run", json={"folder": str(d), "method": "md"}).status_code == 409
+    assert synced.post("/api/run", json={"folder": str(d), "site": SITE, "flag": FLAG, "method": "md"}).status_code == 409
     gate.set()
     for _ in range(200):
         st = synced.get("/api/run").json()
@@ -155,84 +183,36 @@ def test_inference_crash_is_an_error_and_keeps_earlier_answers(synced, tmp_path,
     assert [r["distance_m"] for r in results(synced)] == [r["distance_m"] for r in before]  # rows replaced only once new ones exist
 
 
-# --- calibration windows and holds ------------------------------------------------
+# --- no windows, no holds (ticket 15) ---------------------------------------------------
 
-def test_photo_before_any_flag_photo_is_held_and_banner_names_the_gap(synced, tmp_path):
-    d = folder(tmp_path, photos={"IMG_0001.JPG": jpeg("2026:01:15 08:00:00")})
+def test_photo_without_capture_date_is_measured_anyway(synced, tmp_path):
+    st = run(synced, folder(tmp_path, photos={"IMG_0005.JPG": jpeg(date=None)}))
+    assert st["status"] == "done" and st["detections"] == expected_detections(["IMG_0005.JPG"])
+    assert results(synced)[0]["captured_at"] is None
+
+
+def test_photo_older_than_the_flag_photo_is_measured_against_it_anyway(synced, tmp_path):
+    st = run(synced, folder(tmp_path, photos={"IMG_0005.JPG": jpeg("2025:01:01 08:00:00")}))
+    assert st["status"] == "done" and results(synced)[0]["calibration_image"] == FLAG
+
+
+def test_corrupt_photo_is_skipped_and_counted_not_a_crashed_run(synced, tmp_path):
+    d = folder(tmp_path, photos={"IMG_0005.JPG": jpeg(IN_WINDOW)[:40], "IMG_0006.JPG": jpeg(IN_WINDOW)})
     st = run(synced, d)
-    assert st["held"] == 1 and st["detections"] == 0 and results(synced) == []
-    [banner] = st["held_reasons"]
-    assert banner["count"] == 1
-    assert "TON_CAM02" in banner["reason"] and "2026-01-15" in banner["reason"] and "FlagLabel" in banner["reason"]
+    assert st["status"] == "done" and st["unreadable"] == 1 and st["done"] == 2
+    assert st["detections"] == expected_detections(["IMG_0006.JPG"])
 
 
-def test_photo_without_capture_date_is_held(synced, tmp_path):
-    d = folder(tmp_path, photos={"IMG_0001.JPG": jpeg(None)})
-    st = run(synced, d)
-    assert st["held"] == 1 and "capture date" in st["held_reasons"][0]["reason"]
-
-
-def test_red_calibration_holds_photos_and_banner_says_what_to_fix(cloud, synced, tmp_path):
-    cloud["annotations"] = [{**ANN, "data": flag_photo_data(n=4), "updated_at": "2026-07-01T00:00:00+00:00"}]
-    synced.post("/api/sync")
-    d = folder(tmp_path, photos={f"IMG_{i}.JPG": jpeg(IN_WINDOW) for i in range(3)})
-    st = run(synced, d)
-    assert st["held"] == 3 and results(synced) == []
-    [banner] = st["held_reasons"]
-    assert banner["count"] == 3 and "IMG_5304.JPG" in banner["reason"] and "label more flags" in banner["reason"]
-
-
-def test_photo_matches_latest_window_at_or_before_its_timestamp(cloud, synced, tmp_path):
+def test_the_chosen_flag_photo_is_used_even_when_a_newer_one_exists(cloud, synced, tmp_path):
     cloud["annotations"].append({**ANN, "image_name": "IMG_7000.JPG", "storage_path": "TON_CAM02/IMG_7000.JPG",
                                  "data": flag_photo_data(image="IMG_7000.JPG")})
     cloud["photos"]["TON_CAM02/IMG_7000.JPG"] = jpeg("2026:07:04 09:00:00")
     synced.post("/api/sync")
-    d = folder(tmp_path, photos={"IMG_0005.JPG": jpeg("2026:05:01 08:00:00"),   # old geometry
-                                 "IMG_0006.JPG": jpeg("2026:07:04 09:00:00"),   # exactly at the re-flag: new
-                                 "IMG_0007.JPG": jpeg("2026:08:01 08:00:00")})  # new geometry
-    st = run(synced, d)
-    assert st["held"] == 0
-    by_photo = {Path(r["path"]).name: r["calibration_image"] for r in results(synced)}
-    assert by_photo == {"IMG_0005.JPG": "IMG_5304.JPG", "IMG_0006.JPG": "IMG_7000.JPG", "IMG_0007.JPG": "IMG_7000.JPG"}
-
-
-def test_held_photo_loses_stale_rows_of_every_method_on_rerun(cloud, synced, tmp_path):
     d = folder(tmp_path)
-    run(synced, d, method="md")
-    run(synced, d, method="sam3")
-    assert results(synced)
-    cloud["annotations"] = [{**ANN, "data": flag_photo_data(n=4), "updated_at": "2026-07-01T00:00:00+00:00"}]
-    synced.post("/api/sync")  # the flag photo got relabeled badly: its window is red now
-    st = run(synced, d, method="md")
-    assert st["held"] == 1 and results(synced) == []
-
-
-def test_undated_flag_photo_holds_the_camera_like_its_verdict_does(cloud, synced, tmp_path):
-    cloud["annotations"].append({**ANN, "image_name": "IMG_7000.JPG", "storage_path": "TON_CAM02/IMG_7000.JPG",
-                                 "status": "empty", "data": None})
-    cloud["photos"]["TON_CAM02/IMG_7000.JPG"] = jpeg(date=None)
-    synced.post("/api/sync")
-    assert {c["site"]: c["verdict"] for c in synced.get("/api/cameras").json()} == {"TON_CAM02": "red"}
-    st = run(synced, folder(tmp_path))
-    assert st["held"] == 1 and "IMG_7000.JPG" in st["held_reasons"][0]["reason"]
-
-
-def test_corrupt_photo_is_held_not_a_crashed_run(synced, tmp_path):
-    d = folder(tmp_path, photos={"IMG_0005.JPG": jpeg(IN_WINDOW)[:40], "IMG_0006.JPG": jpeg(IN_WINDOW)})
-    st = run(synced, d)
-    assert st["status"] == "done" and st["held"] == 1 and st["detections"] == expected_detections(["IMG_0006.JPG"])
-
-
-def test_photo_is_held_until_its_flag_photo_is_on_disk(synced, tmp_path):
-    from camtrap_measure import store
-    store.ref_path("TON_CAM02", "IMG_5304.JPG").unlink()
-    st = run(synced, folder(tmp_path))
-    assert st["held"] == 1 and results(synced) == []
-    assert "IMG_5304.JPG" in st["held_reasons"][0]["reason"] and "Sync" in st["held_reasons"][0]["reason"]
-    assert synced.post("/api/sync").json()["remeasure"] == 1  # refetches the missing flag photo, then measures the held photo
-    wait(synced)
-    assert results(synced)
-    assert run(synced, folder(tmp_path / "again"))["held"] == 0
+    run(synced, d, flag="IMG_5304.JPG")
+    assert results(synced)[0]["calibration_image"] == "IMG_5304.JPG"
+    st = run(synced, d, flag="IMG_7000.JPG")  # a different flag photo is a different answer: measured again, rows replaced
+    assert st["skipped"] == 0 and results(synced)[0]["calibration_image"] == "IMG_7000.JPG"
 
 
 def test_backend_gets_the_calibration_row_and_its_flag_photo(synced, tmp_path, monkeypatch):
@@ -292,7 +272,7 @@ def test_cancel_stops_between_photos_and_the_next_run_picks_up_the_rest(synced, 
     monkeypatch.setattr(api.inference, "backend", gated_backend(gate, seen))
     names = [f"IMG_{i}.JPG" for i in range(4)]
     d = folder(tmp_path, photos={n: jpeg(IN_WINDOW) for n in names})
-    synced.post("/api/run", json={"folder": str(d), "method": "md"})
+    synced.post("/api/run", json={"folder": str(d), "site": SITE, "flag": FLAG, "method": "md"})
     gate.release()
     for _ in range(200):  # cancel once the first photo is in
         if synced.get("/api/run").json()["done"] >= 1:
@@ -353,35 +333,3 @@ def test_relabeled_flag_photo_remeasures_its_photos_on_the_next_run(cloud, synce
     seen.clear()
     st = run(synced, d)
     assert st["skipped"] == 0 and [p.name for p in seen] == ["IMG_0005.JPG"]
-
-
-# --- held photos are measured after the sync that calibrates them --------------------------
-
-def test_sync_measures_held_photos_once_their_calibration_arrives(cloud, client, tmp_path):
-    cloud["annotations"] = []  # camera registered, no flag photo labeled yet
-    client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
-    client.post("/api/sync")
-    d = folder(tmp_path)
-    st = run(client, d)
-    assert st["held"] == 1 and results(client) == []
-    cloud["annotations"] = [ANN]  # the flag photo gets labeled
-    r = client.post("/api/sync").json()
-    assert r["ok"] and r["remeasure"] == 1
-    st = wait(client)
-    assert st["status"] == "done" and st["held"] == 0 and st["done"] == 1 and st["method"] is None and st["site"] == ""
-    assert len(results(client)) == expected_detections(["IMG_0005.JPG"])
-    assert client.post("/api/sync").json()["remeasure"] == 0  # nothing left to catch up on
-
-
-def test_photos_a_sync_can_never_fix_are_not_retried(synced, tmp_path):
-    d = folder(tmp_path, photos={"IMG_0001.JPG": jpeg(None), "IMG_0002.JPG": jpeg("2026:01:15 08:00:00")})
-    assert run(synced, d)["held"] == 2  # no capture date; before any flag photo
-    assert synced.post("/api/sync").json()["remeasure"] == 1  # only the dated one could be helped by a future flag photo
-
-
-def test_sync_during_a_run_leaves_held_photos_for_the_next_sync(cloud, synced, tmp_path, monkeypatch):
-    gate = threading.Semaphore(0)
-    monkeypatch.setattr(api.inference, "backend", gated_backend(gate, []))
-    synced.post("/api/run", json={"folder": str(folder(tmp_path)), "method": "md"})
-    assert synced.post("/api/sync").json()["remeasure"] is None  # busy: not attempted, not an error
-    gate.release()

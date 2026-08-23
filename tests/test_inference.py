@@ -119,7 +119,7 @@ def test_offline_first_start_is_an_error_and_runs_are_refused(cloud, hub, models
     hub["offline"] = True
     c, s = start()
     assert s["status"] == "error" and "internet" in s["error"] and s["backend"] == "fake"
-    r = c.post("/api/run", json={"folder": str(folder(tmp_path)), "method": "md"})
+    r = c.post("/api/run", json={"folder": str(folder(tmp_path)), "site": "TON_CAM02", "flag": "IMG_5304.JPG", "method": "md"})
     assert r.status_code == 503 and "internet" in r.json()["detail"]
 
 
@@ -154,7 +154,7 @@ def test_no_gpu_warns_loudly_but_still_runs(cloud, hub, models_installed, start,
     monkeypatch.setattr(inference, "Real", lambda d: StubReal(d, device="cpu"))
     c, s = start()
     assert s["status"] == "ready" and s["device"] == "cpu" and "No GPU" in s["warning"] and "driver" in s["warning"]
-    assert c.post("/api/run", json={"folder": str(folder(tmp_path)), "method": "md"}).status_code == 200
+    assert c.post("/api/run", json={"folder": str(folder(tmp_path)), "site": "TON_CAM02", "flag": "IMG_5304.JPG", "method": "md"}).status_code == 200
 
 
 def test_small_gpu_warning_is_shown(cloud, hub, models_installed, start, monkeypatch):
@@ -184,7 +184,7 @@ def test_runs_are_refused_while_models_load(cloud, hub, models_installed, start,
     monkeypatch.setattr(inference, "Real", slow)
     c = TestClient(api.app)
     with c:
-        r = c.post("/api/run", json={"folder": str(folder(tmp_path)), "method": "md"})
+        r = c.post("/api/run", json={"folder": str(folder(tmp_path)), "site": "TON_CAM02", "flag": "IMG_5304.JPG", "method": "md"})
         assert r.status_code == 503 and "loading" in r.json()["detail"]
         gate.set()
         for _ in range(100):
