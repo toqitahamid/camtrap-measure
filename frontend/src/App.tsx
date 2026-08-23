@@ -455,7 +455,7 @@ export default function App() {
               </section>
             )}
             {codeSentTo === null ? (
-              <form onSubmit={sendCode} className="card center">
+              <form key="email" onSubmit={sendCode} className="card center">
                 <h2>Sign in</h2>
                 <p className="muted small">Use your FlagLabel account: a one-time code is emailed to you.</p>
                 <input name="email" type="email" placeholder="Email" required autoFocus />
@@ -464,7 +464,7 @@ export default function App() {
                 </button>
               </form>
             ) : (
-              <form onSubmit={login} className="card center">
+              <form key="code" onSubmit={login} className="card center">
                 <h2>Enter the code</h2>
                 <p className="muted small">Sent to {codeSentTo} — check the spam folder if it takes a minute.</p>
                 <input name="code" inputMode="numeric" autoComplete="one-time-code" placeholder="Code from the email" required autoFocus />
