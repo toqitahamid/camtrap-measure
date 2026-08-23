@@ -48,7 +48,8 @@ export default function App() {
 
   const [section, setSection] = useState<Section>('measure')
   const [picked, setPicked] = useState<Scope>({ site: '', flag: '', folder: '', method: '' })
-  const [typedPath, setTypedPath] = useState('') // what is in the box; the settled value is what is listed
+  const [typedPath, setTypedPath] = useState('') // only reachable where there is no native folder dialog
+  const [pickable, setPickable] = useState(true) // until a pick says this window has no native dialog
   const [listing, setListing] = useState<{ of: string; data: Folder } | null>(null)
   const [folderError, setFolderError] = useState<string | null>(null)
   const [stale, setStale] = useState(0) // bumped when a run or a sync makes the listing out of date
@@ -157,8 +158,12 @@ export default function App() {
     setNotice(null)
     const r = await post('/api/folder/pick')
     const body: { folder: string | null; reason: string | null } = await r.json()
-    if (body.folder) setTypedPath(body.folder)
-    else if (body.reason) setNotice({ text: body.reason, kind: 'warn' })
+    if (body.folder) {
+      setTypedPath(body.folder)
+      return
+    }
+    if (body.reason?.includes('cannot open')) setPickable(false) // no native dialog here: fall back to typing
+    if (body.reason) setNotice({ text: body.reason, kind: 'warn' })
   }
 
   async function sync() {
@@ -278,28 +283,9 @@ export default function App() {
 
   return (
     <div className="app">
-      <nav className="rail">
-        <div className="rail-mark"><Icon name="mark" size={21} width={1.7} /></div>
-        {SECTIONS.map((s) => (
-          <button key={s.id} className="rail-item" aria-current={section === s.id}
-                  onClick={() => {
-                    setFocus(null) // going back by the rail resumes where you were, not the row the table handed over
-                    setSection(s.id)
-                  }}
-                  disabled={s.id !== section && s.id === 'table' && folder === null}>
-            <Icon name={s.icon} size={18} width={1.9} />
-            <span>{s.label}</span>
-          </button>
-        ))}
-        <div className="spacer" />
-        <button className="rail-foot" title={`${status.email} — sign out`}
-                onClick={() => post('/api/logout').then(refresh)}>
-          {initials(status.email)}
-        </button>
-      </nav>
-
       <div className="body">
         <header className="topbar">
+          <span style={{ color: 'var(--amber)', display: 'flex' }}><Icon name="mark" size={19} width={1.7} /></span>
           <span className="wordmark">CAMTRAP MEASURE</span>
           {build && (
             <span className="mono" style={{ fontSize: 10, color: 'var(--faint)' }}
@@ -307,6 +293,21 @@ export default function App() {
               v{build.version}{build.commit && ` (${build.commit})`}
             </span>
           )}
+
+          <div className="tabs">
+            {SECTIONS.map((t) => (
+              <button key={t.id} className="tab" aria-current={section === t.id}
+                      onClick={() => {
+                        setFocus(null) // coming back by the tab resumes where you were, not the row the table opened
+                        setSection(t.id)
+                      }}
+                      disabled={t.id !== section && t.id === 'table' && folder === null}>
+                <Icon name={t.icon} size={13} width={2} />
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           <div className="spacer" />
           <span className="mono tiny" style={{ color: 'var(--faint)' }}>
             {status.last_sync
@@ -317,6 +318,11 @@ export default function App() {
           <button className="btn" onClick={sync} disabled={busy}>
             <Icon name="sync" size={13} />
             {busy ? 'Syncing…' : 'Sync'}
+          </button>
+          <div className="sep" style={{ margin: '12px 2px' }} />
+          <button className="rail-foot" title={`${status.email} — sign out`}
+                  onClick={() => post('/api/logout').then(refresh)}>
+            {initials(status.email)}
           </button>
         </header>
 
@@ -357,11 +363,19 @@ export default function App() {
             <div className="field" style={{ flex: 1, maxWidth: 380 }}>
               <span className="cap">Photo folder</span>
               <span className="field-val">
-                <input className="path" value={typedPath} placeholder="No folder chosen" spellCheck={false}
-                       onChange={(e) => setTypedPath(e.target.value)} />
+                {/* picked, never typed — except where there is no native dialog to pick with, which is
+                    the browser and `--no-window`; `pickable` only goes false once a pick has said so. */}
+                {pickable ? (
+                  <span className={`path ellipsis${scope.folder ? '' : ' faint'}`} title={scope.folder || undefined}>
+                    {scope.folder || 'No folder chosen'}
+                  </span>
+                ) : (
+                  <input className="path" value={typedPath} placeholder="Type or paste the folder" spellCheck={false}
+                         onChange={(e) => setTypedPath(e.target.value)} />
+                )}
                 <button className="btn btn-sm" onClick={browse} title="Choose the folder that holds this camera's photos">
                   <Icon name="folder" size={12} width={1.8} />
-                  Browse…
+                  {scope.folder ? 'Change…' : 'Browse…'}
                 </button>
               </span>
             </div>

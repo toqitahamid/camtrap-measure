@@ -198,63 +198,50 @@ select {
   background: currentColor;
 }
 
-/* Rail ------------------------------------------------------------------- */
+/* Tabs ------------------------------------------------------------------ */
 
-.rail {
-  width: 62px;
-  flex: none;
+.tabs {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding-bottom: 12px;
-  background: var(--rail);
-  border-right: 1px solid var(--line);
+  gap: 2px;
+  margin-left: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--pane);
 }
-.rail-mark {
-  height: 46px;
-  width: 100%;
-  flex: none;
-  display: flex;
+.tab {
+  height: 24px;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  margin-bottom: 11px;
-  border-bottom: 1px solid var(--line);
-  color: var(--amber);
-}
-.rail-item {
-  width: 48px;
-  padding: 7px 0 5px;
+  gap: 7px;
+  padding: 0 12px;
   border: 0;
-  border-radius: var(--r);
+  border-radius: 3px;
   background: none;
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  color: #6e7681;
+  color: var(--dim);
+  font-family: var(--grot);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   cursor: pointer;
 }
-.rail-item span {
-  font-family: var(--grot);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+.tab:hover:not(:disabled) {
+  color: var(--text);
 }
-.rail-item:hover:not(:disabled) {
-  background: var(--raised);
-  color: var(--text-2);
-}
-.rail-item[aria-current='true'] {
+.tab[aria-current='true'] {
   background: var(--amber);
   color: var(--amber-ink);
+  font-weight: 700;
 }
-.rail-item:disabled {
+.tab:disabled {
   color: #31373e;
   cursor: default;
 }
+/* the account, kept round so it reads as a person rather than another control */
 .rail-foot {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
+  flex: none;
   border-radius: 50%;
   border: 1px solid var(--amber-line);
   background: var(--amber-bg);

@@ -43,16 +43,17 @@ the download if it is missing). A Git or uv already on the PATH is used as is.
 ## Run (department machine, Windows)
 
 Double-click the desktop shortcut (= `run.bat` in the app folder). Sign in with your FlagLabel email and
-the code it emails you. The window is one screen with a rail down the left — **Measure**, **Table**,
-**Results** — and a bar across the top holding the four things every section works on: the camera, which
-of its flag photos to measure against, the photo folder, and where the distance is read.
+the code it emails you. The window is one screen: three tabs along the top — **Measure**, **Table**, **Results** — and under them
+a bar holding the four things every section works on: the camera, which of its flag photos to measure
+against, the photo folder, and where the distance is read.
 
 1. **Sync** — pulls the flag-photo labels from FlagLabel (first time: a few minutes; later: seconds).
 2. **Pick the camera and its flag photo**, then **Browse…** to the folder holding that camera's photos.
-   The folder's name does not matter; you choose which flag photo it belongs to. (Typing or pasting the
-   path still works, and is the only way when the page is opened in a browser instead of the app window.)
-3. **Measure** — the whole folder with *Measure all*, one photo with the **Measure** button on its row or
-   in the panel beside it, or a few by ticking them in the Table and pressing *Measure these N*. A photo
+   The folder's name does not matter; you choose which flag photo it belongs to. (Opened in a browser
+   rather than the app window there is no folder chooser, so the bar lets you type the path instead.)
+3. **Measure** — the whole folder with *Measure all*, one photo with the button on its row (every row has
+   one, whether or not it already has a number) or the one in the panel beside the photo, or a few by
+   ticking them in the Table and pressing *Measure these N*. A photo
    you pick explicitly is measured whatever it already holds; *Measure all* skips the ones already
    answered unless you tick *Re-measure*.
 4. **Check the numbers** — Measure shows one photo at a time with its boxes labelled `species · distance`,

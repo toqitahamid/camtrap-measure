@@ -430,13 +430,27 @@ run them (`scripts/install.ps1` from a clone; the `irm | iex` form is the same f
   and the table. This replaces the stacked cards of tickets 09-16: one camera, one flag photo, one folder
   and one method live in the context bar and every section acts on them, so the thing being measured is
   always on screen instead of being re-stated per card.
-- **The rail, not tabs.** Both were drawn; the rail won because two navigations for the same three sections
-  is one too many, and it leaves the title bar for sync and the account.
+- **Tabs, not a rail.** Both were drawn and both were built. The rail was taken first, on the argument that
+  two navigations for the same three sections is one too many. The researcher, on seeing it: *"the measure,
+  table, result was at the top bar of the ui as a tab. why did you put them in the left?"* Reason that beats
+  the recorded one: they had already read the sections as tabs and looked for them there, and Lightroom —
+  the closest thing to this app that any of them has used — puts its modules along the top. The rail went
+  with them, because a rail carrying no navigation is 62 px of empty chrome; the app mark and the account
+  moved into the title bar. Direction C's data grid, the other half of what the rail came in with, stays.
 - **Three sections, not one page.** MEASURE is the photo and its numbers; TABLE is the same photos as
   sortable rows, which is the only place a technician can compare an alignment score or a confidence down a
   column; RESULTS is the survey-level view and the export. The table earns its place by doing two things
   the viewer cannot: tick many photos and measure exactly those, and see a value that is out of line with
   its neighbours.
+- **Every row carries its own measure button**, whether or not it has a number. It first appeared only on
+  unmeasured photos, which meant a folder that had already been run showed no way to redo one frame — the
+  researcher looked for the feature they had asked for and could not find it. A measured row's button says
+  "measure again" and carries the refresh mark; an unmeasured one is amber.
+- **The folder is picked, never typed.** The path is a label beside a Browse button, per the researcher:
+  *"the photo dir location should be slected by browse, dont need the option to type the dir in the app"*.
+  The typed field survives in exactly one place — a window with no native dialog behind it (a browser, or
+  `--no-window`), which the pick reports and the bar then falls back to. That also disposes of the
+  per-keystroke listing: there are no keystrokes.
 - **Measure one, some, or all.** `POST /api/run` takes `photos: [...]`; an explicit pick is measured
   whatever it already holds, because picking a photo *is* the intent to measure it. The whole-folder path
   keeps the skip rule of ticket 15 unchanged.
@@ -455,9 +469,9 @@ run them (`scripts/install.ps1` from a clone; the `irm | iex` form is the same f
 - **RESULTS keeps its own filter row**, not the context bar. The other two sections measure one folder;
   RESULTS reads the whole store across cameras and dates, and a bar offering a flag photo and a folder
   there would be furniture. The rail is what they share.
-- **A listing is a whole-folder scan**, so a typed path waits 400 ms after the typing stops before the
-  window asks for it; Browse arrives whole. Without that, a 500-photo folder ran a 5-second scan per
-  keystroke and starved the rest of the engine (found in review).
+- **A listing is a whole-folder scan**, so the typed fallback waits 400 ms after the typing stops before the
+  window asks for it. Without that, a 500-photo folder ran a 5-second scan per keystroke and starved the
+  rest of the engine (found in review); picking the folder sidesteps it entirely.
 - **An answer stored under the other method reads as unmeasured.** The method sits in the context bar and
   changes with one click; claiming a photo was looked at under a method it was never run with made the
   window say "no animal" about a photo nobody had measured (found in review).

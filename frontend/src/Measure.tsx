@@ -87,11 +87,11 @@ export default function Measure({
   const [view, setView] = useState<View>('all')
   const [showFlag, setShowFlag] = useState(false)
   const [showBoxes, setShowBoxes] = useState(true)
-  const [hot, setHot] = useState<number | null>(null)
+  const [hot, setHot] = useState<number | null>(null) // the animal the pointer is on, in the frame or the panel
 
   // scroll the selected row into view when the SELECTION moves, not on every render: a run polls once a
   // second, and re-scrolling then would drag a reviewer who is reading ahead back up the list
-  const seen = useRef<HTMLDivElement | null>(null) // the animal the pointer is on, in the frame or in the panel
+  const seen = useRef<HTMLDivElement | null>(null)
 
   const rows = folder?.rows ?? []
   const list = rows.filter(VIEWS.find((v) => v.key === view)?.keep ?? (() => true))
@@ -143,7 +143,7 @@ export default function Measure({
   return (
     <>
       {/* ── Photo list ───────────────────────────────────────────── */}
-      <div className="pane pane-l" style={{ width: 288, flex: 'none' }}>
+      <div className="pane pane-l" style={{ width: 304, flex: 'none' }}>
         <div className="pane-head">
           <span className="cap">Photos</span>
           <span className="mono tiny faint">{rows.length}</span>
@@ -206,24 +206,23 @@ export default function Measure({
                     <span className="mono small">{r.name}</span>
                     <span className={`tiny ${rst === 'flagged' ? 'warn' : 'faint'}`}>{note(r)}</span>
                   </span>
-                  {/* measuring one photo has to be one click, so the button lives in the row and
-                      stopPropagation keeps it from also selecting */}
-                  {!r.measured ? (
-                    <button
-                      type="button"
-                      className={`btn btn-sm${sel ? ' btn-amber' : ''}`}
-                      title="Measure just this photo"
-                      disabled={busy}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onMeasure([r.path])
-                      }}
-                    >
-                      Measure
-                    </button>
-                  ) : (
-                    d && <span className="grot" style={{ fontWeight: 600 }}>{metres(d)}</span>
-                  )}
+                  {r.measured && d && <span className="grot" style={{ fontWeight: 600 }}>{metres(d)}</span>}
+                  {/* measuring one photo has to be one click, so the button lives in the row itself and
+                      stopPropagation keeps it from also selecting. On every row, not only the unmeasured
+                      ones: a folder that has already been run must still let one frame be redone. */}
+                  <button
+                    type="button"
+                    className={`btn btn-sm btn-icon${r.measured ? '' : ' btn-amber'}`}
+                    title={r.measured ? `Measure ${r.name} again` : `Measure ${r.name}`}
+                    aria-label={r.measured ? `Measure ${r.name} again` : `Measure ${r.name}`}
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onMeasure([r.path])
+                    }}
+                  >
+                    <Icon name={r.measured ? 'sync' : 'measure'} size={12} width={2} />
+                  </button>
                   <span className="dot" style={{ color: DOT[rst] }} />
                 </div>
               )
@@ -439,9 +438,9 @@ export default function Measure({
             </div>
 
             <div className="stack" style={{ padding: '14px 16px', borderTop: '1px solid var(--line)', gap: 9 }}>
-              <button className="btn btn-wide" disabled={busy} onClick={() => onMeasure([cur.path])}>
+              <button className="btn btn-amber btn-wide" disabled={busy} onClick={() => onMeasure([cur.path])}>
                 <Icon name="sync" />
-                Measure this photo again
+                Measure {cur.name} again
               </button>
               <span className="tiny faint" style={{ textAlign: 'center' }}>Uses the flag photo and method set in the bar above</span>
             </div>
