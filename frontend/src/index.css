@@ -106,8 +106,20 @@ select {
   color: inherit;
 }
 :focus-visible {
-  outline: 2px solid var(--info);
+  outline: 2px solid var(--amber);
   outline-offset: 1px;
+}
+/* The dropdown list is painted by the browser, not by this file, and it takes its colours from the select.
+   A transparent select gets a white list under our light text - unreadable (seen 2026-08-23). */
+select {
+  color-scheme: dark;
+}
+option {
+  background-color: var(--raised);
+  color: var(--text);
+}
+option:disabled {
+  color: var(--ghost);
 }
 
 /* Type ------------------------------------------------------------------- */
@@ -289,6 +301,7 @@ select {
   min-width: 0;
 }
 .field-val {
+  position: relative; /* the chevron sits over the select's right end, so clicking it opens the list */
   height: 24px;
   display: flex;
   align-items: center;
@@ -297,12 +310,22 @@ select {
   font-weight: 500;
   min-width: 0;
 }
+/* Drawn, not interactive: the click must reach the select underneath, which is what a chevron promises. */
+.chev {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  pointer-events: none;
+  color: var(--faint);
+}
 /* a select that reads as a value, not a form control */
 .bare {
   flex: 1;
   min-width: 0;
   height: 24px;
-  padding: 0;
+  padding: 0 16px 0 0; /* room for the chevron lying over it */
   border: 0;
   background: none;
   font-weight: 500;

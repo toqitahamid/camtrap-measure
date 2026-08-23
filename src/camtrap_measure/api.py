@@ -212,9 +212,11 @@ def _iso(d: date | None) -> str | None:
 
 
 @app.get("/api/summary")
-def summary(site: str | None = None, date_from: date | None = None, date_to: date | None = None, all_species: bool = False):
-    """Counts, deer-distance histogram, per-camera stats for the chosen site / capture-date range (YYYY-MM-DD, inclusive)."""
-    return report.summary(site, _iso(date_from), _iso(date_to), all_species)
+def summary(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
+            all_species: bool = False, folder: str | None = None):
+    """Counts, deer-distance histogram, per-camera stats for the chosen site / capture-date range (YYYY-MM-DD,
+    inclusive). `folder` narrows it to the photos measured out of that one folder."""
+    return report.summary(site, _iso(date_from), _iso(date_to), all_species, folder)
 
 
 SIZES = {"thumb": 320, "full": 1600}  # list icon / the viewer; the originals are 20-MP and never reach the page whole
@@ -254,10 +256,10 @@ def flag_photo(site: str, image: str, size: str = "full"):
 
 @app.get("/api/export.csv")
 def export(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
-           all_species: bool = False, include_suspicious: bool = False):
+           all_species: bool = False, include_suspicious: bool = False, folder: str | None = None):
     """The documented CSV. Suspicious rows stay out unless include_suspicious is set — never silently."""
     name = f"camtrap-measure_{site or 'all'}_{date_from or 'start'}_{date_to or 'end'}.csv"
-    return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, include_suspicious),
+    return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, include_suspicious, folder),
                     media_type="text/csv; charset=utf-8", headers={"content-disposition": f'attachment; filename="{name}"'})
 
 

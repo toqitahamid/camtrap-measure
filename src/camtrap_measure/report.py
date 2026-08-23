@@ -62,25 +62,38 @@ def _in_range(captured_at: str | None, date_from: str | None, date_to: str | Non
     return (not date_from or day >= date_from) and (not date_to or day <= date_to)
 
 
-def rows(site=None, date_from=None, date_to=None) -> list[dict]:
+def _in_folder(path: str, folder: str | None) -> bool:
+    """Was this photo measured out of `folder`? Directly inside it, not below it: a run only ever reads the
+    JPEGs sitting in the one folder the window is pointed at. On Windows the comparison folds case, as the
+    filesystem does — the picker and a typed path can disagree about drive letters and capitals."""
+    return not folder or Path(path).parent == Path(folder)
+
+
+def rows(site=None, date_from=None, date_to=None, folder=None) -> list[dict]:
     """Detection rows in scope, each with `flag` = '; '.join(reasons)."""
     out = []
     for r in store.detections():
         if (site and r["site"] != site) or not _in_range(r["captured_at"], date_from, date_to):
             continue
+        if not _in_folder(r["path"], folder):
+            continue
         out.append({**r, "flag": "; ".join(reasons(r))})
     return out
 
 
-def photos(site=None, date_from=None, date_to=None) -> list[dict]:
+def photos(site=None, date_from=None, date_to=None, folder=None) -> list[dict]:
     """Photo rows in scope — measured and held."""
-    return [p for p in store.photos() if (not site or p["site"] == site) and _in_range(p["captured_at"], date_from, date_to)]
+    return [p for p in store.photos()
+            if (not site or p["site"] == site) and _in_range(p["captured_at"], date_from, date_to)
+            and _in_folder(p["path"], folder)]
 
 
-def summary(site=None, date_from=None, date_to=None, all_species=False) -> dict:
+def summary(site=None, date_from=None, date_to=None, all_species=False, folder=None) -> dict:
     """Counts, a histogram of deer distances, and one line per camera. `suspicious` counts the rows the
-    export with the same species setting would leave out, so the number on screen is the number in the file."""
-    ph, rs = photos(site, date_from, date_to), rows(site, date_from, date_to)
+    export with the same species setting would leave out, so the number on screen is the number in the file.
+    `folder` narrows all of it to the photos measured out of one folder — what RESULTS shows by default, so
+    the screen answers for the folder in the bar rather than for everything ever measured."""
+    ph, rs = photos(site, date_from, date_to, folder), rows(site, date_from, date_to, folder)
     deer = [r for r in rs if all_species or r["species"] in DEER]
     dists = [r["distance_m"] for r in deer if r["distance_m"] is not None]
     hist = {}
@@ -162,15 +175,17 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
     return {"folder": str(d), "total": len(out), "unreadable": unreadable, "rows": out}
 
 
-def export_csv(site=None, date_from=None, date_to=None, all_species=False, include_suspicious=False) -> str:
+def export_csv(site=None, date_from=None, date_to=None, all_species=False, include_suspicious=False,
+               folder=None) -> str:
     """The documented CSV: header lines (#) state the filters, what was excluded, and every column's meaning."""
-    rs = [r for r in rows(site, date_from, date_to) if all_species or r["species"] in DEER]
+    rs = [r for r in rows(site, date_from, date_to, folder) if all_species or r["species"] in DEER]
     kept = [r for r in rs if include_suspicious or not r["flag"]]
     excluded = len(rs) - len(kept)
     methods = sorted({r["method"] for r in kept})
     buf = io.StringIO()
     buf.write(f"# CamTrap Measure export {datetime.now().astimezone().isoformat(timespec='seconds')}; "
               f"site={site or 'all'}; from={date_from or 'start'}; to={date_to or 'end'}; "
+              f"folder={folder or 'all'}; "
               f"species={'all' if all_species else 'white-tailed deer + unsure'}; "
               f"{'suspicious rows included (see flag)' if include_suspicious else f'{excluded} suspicious rows excluded'}\n")
     buf.write(DOC)

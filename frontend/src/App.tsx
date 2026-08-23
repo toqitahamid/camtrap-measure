@@ -336,7 +336,7 @@ export default function App() {
                   {usable.length === 0 && <option value="">Sync first</option>}
                   {usable.map((c) => <option key={c.site} value={c.site}>{c.site}</option>)}
                 </select>
-                <Icon name="down" size={12} width={2.4} />
+                <span className="chev"><Icon name="down" size={12} width={2.4} /></span>
               </span>
             </label>
             <div className="sep" />
@@ -355,7 +355,7 @@ export default function App() {
                     </option>
                   ))}
                 </select>
-                <Icon name="down" size={12} width={2.4} />
+                <span className="chev"><Icon name="down" size={12} width={2.4} /></span>
               </span>
             </label>
             <div className="sep" />
@@ -388,7 +388,7 @@ export default function App() {
                         onChange={(e) => setPicked((s) => ({ ...s, method: e.target.value }))}>
                   {Object.entries(methods.methods).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
                 </select>
-                <Icon name="down" size={12} width={2.4} />
+                <span className="chev"><Icon name="down" size={12} width={2.4} /></span>
               </span>
             </label>
 
@@ -424,7 +424,9 @@ export default function App() {
             <TableView scope={scope} folder={folder} methods={methods} busy={running || !ready} onMeasure={measure}
                        error={shownError} onOpen={(p) => { setFocus(p); setSection('measure') }} />
           )}
-          {section === 'results' && <Results site={scope.site} sites={cameras.map((c) => c.site)} />}
+          {section === 'results' && (
+            <Results site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder} />
+          )}
         </div>
 
         {running && run ? (

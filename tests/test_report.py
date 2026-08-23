@@ -75,6 +75,24 @@ def test_summary_filters_by_site_and_date(measured):
     assert measured.get("/api/summary", params={"date_from": "May 2nd"}).status_code == 422
 
 
+def test_summary_and_export_narrow_to_the_chosen_folder(measured, tmp_path):
+    """RESULTS answers for the folder in the bar. Without this a freshly opened window showed the last run's
+    numbers over photos nobody had chosen (reported 2026-08-23)."""
+    d = tmp_path / "photos" / "TON_CAM02"
+    s = measured.get("/api/summary", params={"folder": str(d)}).json()
+    assert s["photos"] == 8 and s["detections"] == 8 and s["deer"] == 5
+
+    elsewhere = measured.get("/api/summary", params={"folder": str(tmp_path / "photos" / "TON_CAM03")}).json()
+    assert elsewhere["photos"] == 0 and elsewhere["detections"] == 0 and elsewhere["cameras"] == []
+    # the folder itself, never what lies under it: a run reads the JPEGs of one folder only
+    assert measured.get("/api/summary", params={"folder": str(tmp_path / "photos")}).json()["photos"] == 0
+
+    doc, rows = export(measured, folder=str(d))
+    assert f"folder={d}" in doc[0] and len(rows) == 2  # the five deer less the three suspicious
+    _, none = export(measured, folder=str(tmp_path / "photos" / "TON_CAM03"))
+    assert none == []
+
+
 def test_summary_suspicious_count_matches_what_the_export_leaves_out(measured):
     for all_species in (False, True):
         n = measured.get("/api/summary", params={"all_species": all_species}).json()["suspicious"]

@@ -44,7 +44,11 @@ function Message({ icon, title, line, action }: { icon: 'warn' | 'results'; titl
   )
 }
 
-export default function Results({ site, sites }: { site: string; sites: string[] }) {
+export default function Results({ site, sites, folder }: { site: string; sites: string[]; folder: string }) {
+  // The screen answers for the folder in the bar, not for everything this computer has ever measured:
+  // otherwise a fresh window shows the last run's numbers over photos the researcher has not opened.
+  const [where, setWhere] = useState<'folder' | 'all'>('folder')
+  const onlyFolder = where === 'folder'
   // The shell's camera is the default; a local pick holds until the shell is pointed at another camera.
   const [pick, setPick] = useState<{ shell: string; value: string } | null>(null)
   const camera = pick && pick.shell === site ? pick.value : site
@@ -64,6 +68,7 @@ export default function Results({ site, sites }: { site: string; sites: string[]
   if (from) params.set('date_from', from)
   if (to) params.set('date_to', to)
   if (allSpecies) params.set('all_species', 'true')
+  if (onlyFolder && folder) params.set('folder', folder)
   const query = params.toString()
 
   useEffect(() => {
@@ -89,6 +94,19 @@ export default function Results({ site, sites }: { site: string; sites: string[]
 
   const filters = (
     <div className="row" style={{ flex: 'none', gap: 6, padding: '9px 14px', borderBottom: '1px solid var(--line)' }}>
+      <div className="field" style={{ width: 186 }}>
+        <span className="cap">Photos</span>
+        <div className="field-val">
+          <select className="bare" value={where} onChange={(e) => setWhere(e.target.value === 'all' ? 'all' : 'folder')}>
+            <option value="folder">The chosen folder</option>
+            <option value="all">Everything measured</option>
+          </select>
+          <span className="chev">
+            <Icon name="down" size={12} width={2.4} />
+          </span>
+        </div>
+      </div>
+      <div className="sep" />
       <div className="field" style={{ width: 168 }}>
         <span className="cap">Camera</span>
         <div className="field-val">
@@ -100,7 +118,7 @@ export default function Results({ site, sites }: { site: string; sites: string[]
               </option>
             ))}
           </select>
-          <span className="faint" style={{ display: 'flex' }}>
+          <span className="chev">
             <Icon name="down" size={12} width={2.4} />
           </span>
         </div>
@@ -127,7 +145,7 @@ export default function Results({ site, sites }: { site: string; sites: string[]
             <option value="deer">White-tailed deer + unsure</option>
             <option value="all">All species</option>
           </select>
-          <span className="faint" style={{ display: 'flex' }}>
+          <span className="chev">
             <Icon name="down" size={12} width={2.4} />
           </span>
         </div>
@@ -152,6 +170,17 @@ export default function Results({ site, sites }: { site: string; sites: string[]
         />
       </>
     )
+  if (onlyFolder && !folder)
+    return (
+      <>
+        {filters}
+        <Message
+          icon="results"
+          title="No photo folder chosen"
+          line="These are the results for one folder of photos. Pick a folder in MEASURE, or set Photos to everything measured to see every result on this computer."
+        />
+      </>
+    )
   if (summary === null)
     return (
       <>
@@ -165,8 +194,12 @@ export default function Results({ site, sites }: { site: string; sites: string[]
         {filters}
         <Message
           icon="results"
-          title="Nothing measured in this selection"
-          line="Measure a folder in MEASURE, or widen the camera and dates above."
+          title={onlyFolder ? 'Nothing measured in this folder yet' : 'Nothing measured in this selection'}
+          line={
+            onlyFolder
+              ? 'Measure this folder in MEASURE, or set Photos to everything measured.'
+              : 'Measure a folder in MEASURE, or widen the camera and dates above.'
+          }
         />
       </>
     )
