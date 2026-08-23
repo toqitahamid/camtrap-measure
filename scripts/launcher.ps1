@@ -157,12 +157,24 @@ Add-Type -Namespace CamTrap -Name Win -MemberDefinition @"
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 "@
 
-$hwnd = [CamTrap.Win]::FindWindowW($null, $Title)
-if ($hwnd -ne [IntPtr]::Zero) {
-    # Double-clicking the icon again must not start a second engine: two of them would fight over the GPU.
-    Log "already running - bringing the window forward"
-    [CamTrap.Win]::ShowWindow($hwnd, 9) | Out-Null  # SW_RESTORE
-    [CamTrap.Win]::SetForegroundWindow($hwnd) | Out-Null
+function App-Window {
+    # $null is marshalled as an EMPTY class name, which matches nothing; [NullString]::Value is a real
+    # NULL. With $null the check never fired and a second engine started (seen 2026-08-23).
+    return [CamTrap.Win]::FindWindowW([NullString]::Value, $Title)
+}
+
+# Double-clicking the icon again must not start a second engine: two would fight over the GPU. The
+# process, not the window, is the real answer - during the first minute the models are loading and there
+# is no window yet. The window is only how the running app is brought forward.
+$already = @(Get-Process -Name "camtrap-measure-app" -ErrorAction SilentlyContinue |
+             Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) })
+if ($already.Count -gt 0) {
+    Log "already running (pid $($already[0].Id)) - bringing its window forward"
+    $hwnd = App-Window
+    if ($hwnd -ne [IntPtr]::Zero) {
+        [CamTrap.Win]::ShowWindow($hwnd, 9) | Out-Null  # SW_RESTORE
+        [CamTrap.Win]::SetForegroundWindow($hwnd) | Out-Null
+    }
     Close-Splash
     exit 0
 }
@@ -232,7 +244,7 @@ while ((Get-Date) -lt $deadline) {
     Pump
     Start-Sleep -Milliseconds 200
     if ($app.HasExited) { break }
-    if ([CamTrap.Win]::FindWindowW($null, $Title) -ne [IntPtr]::Zero) { break }
+    if ((App-Window) -ne [IntPtr]::Zero) { break }
 }
 if ($app.HasExited -and $app.ExitCode -ne 0) {
     foreach ($f in @((Join-Path $LogDir "app.out"), (Join-Path $LogDir "app.err"))) {

@@ -146,7 +146,7 @@ def test_the_splash_is_not_mistaken_for_the_app():
 def test_the_launcher_waits_for_the_window_not_the_process_it_started():
     """The generated entry point re-runs itself as pythonw: the window belongs to a child process."""
     ps = text(SCRIPTS / "launcher.ps1")
-    assert "FindWindowW($null, $Title) -ne [IntPtr]::Zero) { break }" in ps
+    assert "if ((App-Window) -ne [IntPtr]::Zero) { break }" in ps
     assert "MainWindowHandle" not in ps
 
 
@@ -154,3 +154,11 @@ def test_the_launcher_log_folder_is_ignored():
     """An untracked logs/ made every install look like a modified clone, which stops its own updates."""
     ignored = [l.strip() for l in text(ROOT / ".gitignore").splitlines() if l.strip() and not l.startswith("#")]
     assert "logs/" in ignored  # exactly that, with no trailing comment: .gitignore has no inline comments
+
+
+def test_the_running_app_is_found_by_its_process_and_a_real_null_class():
+    """`$null` is marshalled as an EMPTY class name, so FindWindowW matched nothing and a second engine
+    started on the workstation (2026-08-23). And during model loading there is no window to find at all."""
+    ps = text(SCRIPTS / "launcher.ps1")
+    assert "[NullString]::Value" in ps and "FindWindowW($null" not in ps
+    assert 'Get-Process -Name "camtrap-measure-app"' in ps and "StartsWith($Dir" in ps
