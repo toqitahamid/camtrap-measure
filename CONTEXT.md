@@ -325,8 +325,12 @@ run them (`scripts/install.ps1` from a clone; the `irm | iex` form is the same f
   with the extra present, loaded real models on the GPU (28 failures, 7 GB pulled into the
   data dir). `conftest` sets `HF_HUB_OFFLINE` and an autouse `hermetic` fixture (own data dir,
   no inference extra); the GPU smoke test opts back in. 154 passed, 1 skipped here.
-- **Not verified**: the FlagLabel sign-in with a real mailbox (preflight and window) — no
-  account available to the agent; unit-tested, listed as the first HANDOFF next step.
+- **Sign-in with a real mailbox** (window): verified 2026-08-23 after two fixes — the code
+  form reused the email form's DOM input, so "Sign in" sent the address as the code
+  (`otp_expired` ×3 in the auth log; distinct React keys, 293869d), and Supabase's
+  `otp_disabled` for an address with no account reads as "No FlagLabel account uses this
+  email" (f4aa268). The preflight's code prompt runs the same wrapper calls; not yet typed
+  through by hand.
   The winget-free tool installs were exercised piecewise (MinGit unpack, uv's script) on a
   machine that already had both.
 - Dept hardware fact for open item 3: this workstation = RTX 2060 SUPER 8 GB (VRAM floor

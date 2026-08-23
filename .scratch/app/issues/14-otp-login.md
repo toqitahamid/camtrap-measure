@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Read-only sync and login; 12 — Guided installer.
 
-**Status:** done (2026-08-21) — wrapper/engine/preflight/window switched to email codes; 155 tests green, tsc/oxlint/vite clean; the live code flow still needs one real mailbox run (HANDOFF §6.1)
+**Status:** done (2026-08-23) — real sign-in with an emailed code succeeded in the window on the dept workstation; two fixes on the way: plain-language Supabase errors (f4aa268) and the code field that kept the typed email (293869d)
 
 - [x] Wrapper: `request_code(email)` and `verify_code(email, code)` replace `sign_in`; `tests/test_supabase_ro.py` lists the three auth POSTs as the only non-GETs
 - [x] Engine: `POST /api/login/code {email}` sends the code; `POST /api/login {email, code}` verifies and remembers the session as before

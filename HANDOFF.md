@@ -116,10 +116,9 @@ Both A and B can coexist; they are separate clones and share only `~/.camtrap-me
 
 ## 6. What is next (from `CONTEXT.md` open items)
 
-1. **First real sign-in**: a FlagLabel user runs `install.bat` (or the one-liner) once on the
-   dept machine and completes the email-code login in the preflight and in the window — the
-   only part of the 2026-08-21 Windows acceptance that needed a mailbox (CONTEXT "Windows
-   acceptance", ticket 14).
+1. **First real measurement**: Sync in the window, check the camera verdicts, run one folder
+   of real photos (sign-in by email code verified 2026-08-23). Then tag `v0.1.0` as the first
+   `ref.txt` rollback target.
 2. Collect dept hardware facts at first install (GPU model, photo volume) — open item 3. The
    workstation used for acceptance: RTX 2060 SUPER 8 GB, driver 581.95, Windows 11.
 3. MD-only vs MD+SAM3 comparison on existing labeled data in `distance_estimation` → sets
