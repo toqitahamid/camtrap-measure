@@ -31,13 +31,31 @@ type Summary = {
   histogram: { lo: number; hi: number; n: number }[]
   cameras: { site: string; photos: number; detections: number; deer: number; median_m: number | null; suspicious: number }[]
 }
-type Suspect = {
+type Det = {
+  idx: number
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  species: string
+  confidence: number
+  distance_m: number | null
+  q05_m: number | null
+  q95_m: number | null
+  method: string
+  match_score: number | null
+  reasons: string[]
+}
+type Photo = {
   path: string
   photo: string
   site: string
   captured_at: string | null
+  flag_image: string | null
+  match_score: number | null
+  method: string | null
   reasons: string[]
-  detections: { x1: number; y1: number; x2: number; y2: number; species: string; confidence: number; distance_m: number | null; method: string }[]
+  detections: Det[]
 }
 type Methods = { default: string; methods: Record<string, { label: string; hint: string }> }
 type Run = {
@@ -197,7 +215,166 @@ function RunPanel({ cameras, methods, ready, pollKey, onDone }: { cameras: Camer
 }
 
 
-function ResultsPanel({ sites, focus }: { sites: string[]; focus: { site: string; n: number } }) {
+const VIEWS = {
+  all: { label: 'All', keep: () => true },
+  animals: { label: 'With an animal', keep: (p: Photo) => p.detections.length > 0 },
+  flagged: { label: 'Needs a look', keep: (p: Photo) => p.reasons.length > 0 },
+} satisfies Record<string, { label: string; keep: (p: Photo) => boolean }>
+type View = keyof typeof VIEWS
+
+const metres = (d: Det) => (d.distance_m !== null ? `${d.distance_m.toFixed(1)} m` : 'no distance')
+const band = (d: Det) => (d.q05_m !== null && d.q95_m !== null ? `${d.q05_m.toFixed(1)}–${d.q95_m.toFixed(1)}` : '—')
+
+/** Every measured photo, one at a time: the frame it was measured on, the boxes that were found, and the
+    number read at each. Arrow keys walk the list; the flag photo it was aligned to is one click away. */
+function ReviewPanel({ qs, refreshKey, methods }: { qs: string; refreshKey: unknown; methods: Methods }) {
+  const [photos, setPhotos] = useState<Photo[]>([])
+  const [view, setView] = useState<View>('all')
+  const [path, setPath] = useState<string | null>(null)
+  const [showFlag, setShowFlag] = useState(false)
+  const [hot, setHot] = useState<number | null>(null) // the box the pointer is on, in the frame or in the table
+
+  useEffect(() => {
+    fetch(`/api/photos?${qs}`).then((r) => r.json()).then(setPhotos).catch(() => {})
+  }, [qs, refreshKey])
+
+  const list = photos.filter(VIEWS[view].keep)
+  const at = Math.max(0, list.findIndex((p) => p.path === path))
+  const cur: Photo | undefined = list[at]
+  const step = (d: number) => {
+    // no useCallback: the compiler memoizes `list`, so the key handler below re-binds only when it changes
+    const next = list[Math.min(list.length - 1, Math.max(0, at + d))]
+    if (next) {
+      setPath(next.path)
+      setHot(null)
+    }
+  }
+  useEffect(() => {
+    // arrow keys are how a reviewer walks a folder; typing in a field still wins
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+      const d = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
+      if (!d) return
+      e.preventDefault()
+      step(d)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, at])
+
+  const src = (p: Photo, size: 'thumb' | 'full') => `/api/photo?size=${size}&path=${encodeURIComponent(p.path)}`
+  const flagSrc = (p: Photo) => `/api/flag?size=full&site=${encodeURIComponent(p.site)}&image=${encodeURIComponent(p.flag_image ?? '')}`
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Review</h2>
+        <span className="small muted">{plural(list.length, 'photo')} · arrow keys to move</span>
+        <div className="spacer" />
+        {(Object.keys(VIEWS) as View[]).map((k) => (
+          <button key={k} className={`btn${view === k ? ' btn-primary' : ''}`} onClick={() => setView(k)}>
+            {VIEWS[k].label} ({photos.filter(VIEWS[k].keep).length})
+          </button>
+        ))}
+      </div>
+      {list.length === 0 ? (
+        <p className="muted">No photos here.</p>
+      ) : (
+        <div className="review">
+          <ol className="strip">
+            {list.map((p) => (
+              <li key={p.path}>
+                <button
+                  className={`strip-item${p.path === cur?.path ? ' on' : ''}`}
+                  onClick={() => {
+                    setPath(p.path)
+                    setHot(null)
+                  }}
+                  ref={p.path === cur?.path ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+                >
+                  <img src={src(p, 'thumb')} alt="" loading="lazy" />
+                  <span className="strip-text">
+                    <strong>{p.photo}</strong>
+                    <span className="muted">{p.captured_at ? new Date(p.captured_at).toLocaleString() : 'no date'}</span>
+                    <span>{p.detections.length === 0 ? 'no animal' : p.detections.map(metres).join(' · ')}</span>
+                  </span>
+                  {p.reasons.length > 0 && <span className="dot" title={p.reasons.join('; ')} />}
+                </button>
+              </li>
+            ))}
+          </ol>
+          {cur && (
+            <div className="viewer">
+              <div className="card-head">
+                <strong>{cur.site} · {cur.photo}</strong>
+                <span className="small muted">{cur.captured_at ? new Date(cur.captured_at).toLocaleString() : 'no capture date'}</span>
+                <div className="spacer" />
+                <span className="small muted">{at + 1} / {list.length}</span>
+                <button className="btn" onClick={() => step(-1)} disabled={at === 0} title="Previous (Left arrow)">←</button>
+                <button className="btn" onClick={() => step(1)} disabled={at === list.length - 1} title="Next (Right arrow)">→</button>
+              </div>
+              <div className="frame">
+                <img src={showFlag && cur.flag_image ? flagSrc(cur) : src(cur, 'full')} alt={cur.photo} />
+                {!showFlag &&
+                  cur.detections.map((d, i) => (
+                    <div
+                      key={`${d.method}-${d.idx}`}
+                      className={`bbox ${d.reasons.length ? 'bad' : 'ok'}${hot === i ? ' hot' : ''}${d.y1 < 0.08 ? ' low' : ''}`}
+                      style={{ left: `${d.x1 * 100}%`, top: `${d.y1 * 100}%`, width: `${(d.x2 - d.x1) * 100}%`, height: `${(d.y2 - d.y1) * 100}%` }}
+                      onMouseEnter={() => setHot(i)}
+                      onMouseLeave={() => setHot(null)}
+                    >
+                      <span className="tag">{i + 1} · {d.species} · {metres(d)}</span>
+                    </div>
+                  ))}
+                {showFlag && <span className="flag-tag">Flag photo {cur.flag_image} — every distance is read against this frame</span>}
+              </div>
+              <div className="row small muted">
+                <button className="btn" onClick={() => setShowFlag((f) => !f)} disabled={!cur.flag_image}>
+                  {showFlag ? 'Back to the photo' : 'Show the flag photo'}
+                </button>
+                <span>
+                  aligned to {cur.flag_image ?? '—'} · {cur.match_score === null ? 'no alignment' : plural(cur.match_score, 'match point')} ·{' '}
+                  {cur.method ? methods.methods[cur.method]?.label ?? cur.method : '—'}
+                </span>
+              </div>
+              {cur.detections.length === 0 ? (
+                <p className="muted small">No animal was detected in this photo.</p>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th><th>Species</th><th className="num">Distance</th><th className="num">90% interval, m</th>
+                        <th className="num">Box conf.</th><th>Method</th><th>Why it needs a look</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cur.detections.map((d, i) => (
+                        <tr key={`${d.method}-${d.idx}`} className={hot === i ? 'hot' : undefined} onMouseEnter={() => setHot(i)} onMouseLeave={() => setHot(null)}>
+                          <td>{i + 1}</td>
+                          <td>{d.species}</td>
+                          <td className="num">{metres(d)}</td>
+                          <td className="num">{band(d)}</td>
+                          <td className="num">{d.confidence.toFixed(2)}</td>
+                          <td className="small muted">{methods.methods[d.method]?.label ?? d.method}</td>
+                          <td className="warn small">{d.reasons.join('; ')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ResultsPanel({ sites, focus, methods }: { sites: string[]; focus: { site: string; n: number }; methods: Methods }) {
   const [pick, setPick] = useState<{ site: string; n: number } | null>(null)
   const site = pick && pick.n === focus.n ? pick.site : focus.site // a finished run refocuses on its camera; the user can re-pick after
   const setSite = (s: string) => setPick({ site: s, n: focus.n })
@@ -206,7 +383,6 @@ function ResultsPanel({ sites, focus }: { sites: string[]; focus: { site: string
   const [allSpecies, setAllSpecies] = useState(false)
   const [includeSuspicious, setIncludeSuspicious] = useState(false)
   const [summary, setSummary] = useState<Summary | null>(null)
-  const [suspects, setSuspects] = useState<Suspect[]>([])
 
   const scope = new URLSearchParams()
   if (site) scope.set('site', site)
@@ -216,7 +392,6 @@ function ResultsPanel({ sites, focus }: { sites: string[]; focus: { site: string
 
   useEffect(() => {
     fetch(`/api/summary?${qs}${allSpecies ? '&all_species=true' : ''}`).then((r) => r.json()).then(setSummary).catch(() => {})
-    fetch(`/api/suspicious?${qs}`).then((r) => r.json()).then(setSuspects).catch(() => {})
   }, [qs, allSpecies, focus])
 
   const exportQs = new URLSearchParams(scope)
@@ -285,38 +460,7 @@ function ResultsPanel({ sites, focus }: { sites: string[]; focus: { site: string
 
       {summary && summary.photos > 0 && (
         <>
-          <section className="card">
-            <h2>Needs a look <span className="muted">({suspects.length})</span></h2>
-            {suspects.length === 0 ? (
-              <p className="muted">Nothing suspicious — no review needed.</p>
-            ) : (
-              <div className="gallery">
-                {suspects.map((s) => (
-                  <figure key={s.path}>
-                    <div className="thumb">
-                      <img src={`/api/photo?path=${encodeURIComponent(s.path)}`} alt={s.photo} />
-                      {s.detections.map((d, i) => (
-                        <div
-                          key={i}
-                          className="bbox"
-                          title={`${d.species} ${d.confidence.toFixed(2)}${d.distance_m !== null ? ` · ${d.distance_m.toFixed(1)} m` : ''}`}
-                          style={{ left: `${d.x1 * 100}%`, top: `${d.y1 * 100}%`, width: `${(d.x2 - d.x1) * 100}%`, height: `${(d.y2 - d.y1) * 100}%` }}
-                        />
-                      ))}
-                    </div>
-                    <figcaption>
-                      <strong>{s.site} · {s.photo}</strong> <span className="muted">· {s.captured_at ? new Date(s.captured_at).toLocaleString() : 'no date'}</span>
-                      <ul className="warn">
-                        {s.reasons.map((r) => (
-                          <li key={r}>{r}</li>
-                        ))}
-                      </ul>
-                    </figcaption>
-                  </figure>
-                ))}
-              </div>
-            )}
-          </section>
+          <ReviewPanel qs={qs} refreshKey={focus} methods={methods} />
 
           <section className="card">
             <h2>Export</h2>
@@ -499,7 +643,7 @@ export default function App() {
               <ModelsLine inf={status.inference} />
             </section>
             <RunPanel cameras={cameras} methods={methods} ready={status.inference.status === 'ready'} pollKey={pollKey} onDone={(site) => setFocus((f) => ({ site, n: f.n + 1 }))} />
-            <ResultsPanel sites={cameras.map((c) => c.site)} focus={focus} />
+            <ResultsPanel sites={cameras.map((c) => c.site)} focus={focus} methods={methods} />
           </>
         )}
       </main>

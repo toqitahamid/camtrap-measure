@@ -1,4 +1,4 @@
-"""Post-run summary, suspicious gallery and the gated CSV export — the rules a technician relies on,
+"""Post-run summary, photo-by-photo review and the gated CSV export — the rules a technician relies on,
 asserted through the API over a scripted inference backend."""
 
 import csv
@@ -8,7 +8,7 @@ import pytest
 from camtrap_measure import api, distance, inference, report
 
 from tests.conftest import jpeg
-from tests.test_measure import folder, run
+from tests.test_measure import FLAG, folder, run
 
 D = inference.Detection
 
@@ -44,6 +44,11 @@ def measured(synced, tmp_path, monkeypatch):
     st = run(synced, folder(tmp_path, photos=photos))
     assert st["status"] == "done" and st["unreadable"] == 0
     return synced
+
+
+def measured_order(by, name):
+    """The review's order: camera, then capture time, undated last (they sort as '')."""
+    return (by[name]["site"], by[name]["captured_at"] or "", by[name]["path"])
 
 
 def export(c, **params):
@@ -82,25 +87,50 @@ def test_summary_suspicious_count_matches_what_the_export_leaves_out(measured):
     assert measured.get("/api/summary", params={"all_species": True}).json()["suspicious"] == 4  # + the weak raccoon
 
 
-# --- suspicious gallery -----------------------------------------------------------------
+# --- photo-by-photo review ---------------------------------------------------------------
 
-def test_gallery_shows_only_suspicious_photos_each_with_its_reason(measured):
-    g = measured.get("/api/suspicious").json()
+def test_review_lists_every_measured_photo_with_its_boxes_and_numbers(measured):
+    g = measured.get("/api/photos").json()
     by = {x["photo"]: x for x in g}
-    assert set(by) == {"IMG_0002.JPG", "IMG_0003.JPG", "IMG_0005.JPG", "IMG_0008.JPG"}
+    assert set(by) == set(SCRIPT)  # every photo, not only the suspicious ones: the researcher checks the answers
+    assert [x["photo"] for x in g] == sorted(SCRIPT, key=lambda n: measured_order(by, n))  # camera, then capture time
+    one = by["IMG_0001.JPG"]
+    assert one["site"] == "TON_CAM02" and one["flag_image"] and one["match_score"] == 300 and one["method"] == "md"
+    [d] = one["detections"]
+    assert d["species"] == "white-tailed deer" and d["distance_m"] == 5.0
+    assert (d["q05_m"], d["q95_m"]) == (pytest.approx(4.25), pytest.approx(6.0)) and d["reasons"] == []
+    assert (d["x1"], d["y1"], d["x2"], d["y2"]) == (0.2, 0.3, 0.4, 0.7)  # the overlay's box
+    assert by["IMG_0006.JPG"]["detections"] == [] and by["IMG_0006.JPG"]["reasons"] == []  # an empty frame is still reviewable
+
+
+def test_review_marks_the_suspicious_photos_and_their_boxes(measured):
+    by = {x["photo"]: x for x in measured.get("/api/photos").json()}
+    assert {n for n, x in by.items() if x["reasons"]} == {"IMG_0002.JPG", "IMG_0003.JPG", "IMG_0005.JPG", "IMG_0008.JPG"}
     assert "confidence" in by["IMG_0002.JPG"]["reasons"][0] and "0.30" in by["IMG_0002.JPG"]["reasons"][0]
     assert any("unsure" in r for r in by["IMG_0003.JPG"]["reasons"])
     assert any("flag photo" in r and "9" in r for r in by["IMG_0005.JPG"]["reasons"])
-    assert by["IMG_0003.JPG"]["detections"][0]["species"] == "unsure"  # boxes come along for the overlay
-    g = measured.get("/api/suspicious", params={"date_from": "2026-05-04"}).json()
-    assert {x["photo"] for x in g} == {"IMG_0005.JPG", "IMG_0008.JPG"}
+    unsure, sure = by["IMG_0003.JPG"]["detections"]  # the reason sits on the box it belongs to, not only on the photo
+    assert unsure["species"] == "unsure" and any("unsure" in r for r in unsure["reasons"]) and sure["reasons"] == []
+
+
+def test_review_filters_by_site_and_date(measured):
+    assert measured.get("/api/photos", params={"site": "TON_CAM99"}).json() == []
+    g = measured.get("/api/photos", params={"date_from": "2026-05-04"}).json()
+    assert {x["photo"] for x in g} == {"IMG_0004.JPG", "IMG_0005.JPG", "IMG_0006.JPG", "IMG_0007.JPG", "IMG_0008.JPG"}
 
 
 def test_photo_endpoint_serves_measured_photos_only(measured, tmp_path):
-    path = measured.get("/api/suspicious").json()[0]["path"]
-    r = measured.get("/api/photo", params={"path": path})
-    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    path = measured.get("/api/photos").json()[0]["path"]
+    for size in ("thumb", "full"):
+        r = measured.get("/api/photo", params={"path": path, "size": size})
+        assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
     assert measured.get("/api/photo", params={"path": str(tmp_path / "elsewhere.JPG")}).status_code == 404
+
+
+def test_flag_endpoint_serves_synced_flag_photos_only(measured):
+    r = measured.get("/api/flag", params={"site": "TON_CAM02", "image": FLAG})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert measured.get("/api/flag", params={"site": "TON_CAM02", "image": "nope.JPG"}).status_code == 404
 
 
 # --- export -----------------------------------------------------------------------------

@@ -117,7 +117,7 @@ a {
 }
 
 .page {
-  max-width: 1040px;
+  max-width: 1320px;
   margin: 0 auto;
   padding: var(--sp-6);
   display: grid;
@@ -370,24 +370,89 @@ td.nowrap {
   min-height: 1px;
 }
 
-/* Gallery ----------------------------------------------------------------- */
+/* Review: the photo strip, the frame with its boxes ---------------------- */
 
-.gallery {
+.review {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   gap: var(--sp-4);
+  align-items: start;
 }
-.gallery figure {
+@media (max-width: 900px) {
+  .review {
+    grid-template-columns: 1fr;
+  }
+}
+
+.strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 72vh;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
   background: var(--surface-2);
 }
-.thumb {
-  position: relative;
+.strip-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  background: none;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+}
+.strip-item:hover {
+  background: var(--surface);
+}
+.strip-item.on {
+  background: var(--surface);
+  border-left-color: var(--accent);
+}
+.strip-item img {
+  width: 64px;
+  height: 48px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
   background: #000;
 }
-.thumb img {
+.strip-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+.strip-text > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.viewer {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.frame {
+  position: relative;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.frame img {
   width: 100%;
   display: block;
 }
@@ -396,11 +461,48 @@ td.nowrap {
   border: 2px solid var(--warn);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
-.gallery figcaption {
-  padding: var(--sp-2) var(--sp-3);
-  font-size: var(--fs-sm);
+.bbox.ok {
+  border-color: var(--ok);
 }
-.gallery figcaption ul {
-  margin-top: var(--sp-1);
-  padding-left: 1.1rem;
+.bbox.bad {
+  border-color: var(--danger);
+}
+.bbox.hot {
+  border-width: 3px;
+}
+.bbox .tag {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  padding: 0 0.35rem;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--warn);
+}
+.bbox.ok .tag {
+  background: var(--ok);
+}
+.bbox.bad .tag {
+  background: var(--danger);
+}
+.bbox.low .tag {
+  bottom: auto;
+  top: 100%;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+.flag-tag {
+  position: absolute;
+  left: var(--sp-2);
+  top: var(--sp-2);
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+}
+tr.hot td {
+  background: var(--surface-2);
 }

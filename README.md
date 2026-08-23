@@ -49,7 +49,13 @@ email and the code it emails you, then:
 2. **Measure** — pick the camera, pick one of its labeled flag photos, type the folder that holds
    that camera's photos, press Measure. Every JPEG in the folder is measured against that flag
    photo; the folder's name does not matter. Photos already measured are skipped unless you tick
-   *Re-measure*. Results, the suspicious gallery and the CSV export are below.
+   *Re-measure*.
+3. **Review** — every measured photo, one at a time: the boxes that were found, the distance and its
+   90% interval at each, the detector's confidence, and the flag photo the numbers were read against
+   (one click). Arrow keys walk the list; the *Needs a look* view narrows it to the photos whose
+   numbers should not be used unread. Nothing has to be ticked — it is a look, not a gate.
+
+Summary counts and the CSV export are below the review.
 
 A flag photo is offered once it is labeled in FlagLabel; there is no other check — you choose
 which flag photo a folder belongs to.

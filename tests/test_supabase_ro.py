@@ -10,7 +10,7 @@ import pytest
 from camtrap_measure import supabase_ro as sb
 
 SRC_DIR = Path(sb.__file__).parent
-WRAPPER_SRC = Path(sb.__file__).read_text()
+WRAPPER_SRC = Path(sb.__file__).read_text(encoding="utf-8")
 
 
 def test_public_surface_is_auth_plus_three_reads():
@@ -44,11 +44,11 @@ def test_wrapper_is_the_only_supabase_client():
     for py in SRC_DIR.rglob("*.py"):
         if py == Path(sb.__file__):
             continue
-        text = py.read_text().replace("supabase_ro", "")  # importing the wrapper is the point
+        text = py.read_text(encoding="utf-8").replace("supabase_ro", "")  # importing the wrapper is the point
         for needle in needles:
             assert needle not in text, f"{py.name} talks to Supabase directly ({needle})"
     for ts in (SRC_DIR.parent.parent / "frontend" / "src").rglob("*.ts*"):
-        assert "supabase" not in ts.read_text().lower(), f"{ts.name}: frontend must go through the engine"
+        assert "supabase" not in ts.read_text(encoding="utf-8").lower(), f"{ts.name}: frontend must go through the engine"
 
 
 @pytest.fixture

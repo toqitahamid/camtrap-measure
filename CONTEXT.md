@@ -393,6 +393,30 @@ run them (`scripts/install.ps1` from a clone; the `irm | iex` form is the same f
   version; picking another flag photo re-measures and replaces the rows.
 - Store keeps the `held_reason` column (always NULL now) — no migration for a column nobody reads.
 
+## Check every measured photo, not just the summary (ticket 16, 2026-08-23)
+
+- The researcher, after the first real run, holding the app next to FlagLabel: *"i want a similar or
+  better ui, where i can individually verify and check the animal photo that i gave to get the
+  measure. not just a summary stat."* The Review card lists every measured photo and shows one at a
+  time — the frame with its boxes labelled `species · distance`, each box's 90% interval, detector
+  confidence and method, the alignment score, and the flag photo the numbers were read against.
+- This overrides Q11=b's *suspicious gallery only, no per-detection review*. Reason that beats the
+  recorded one: Q11 was answered before anyone had seen the app's own numbers. A distance in metres
+  is not a label a technician can accept on faith — the only way to trust one is to see where the
+  box sat and what ground was under it, and the same look is what catches a folder measured against
+  the wrong flag photo (which ticket 15 made the operator's responsibility). Showing only the
+  suspicious photos hides exactly the cases the thresholds get wrong: a photo the gate passes and a
+  human would not.
+- Not a review *gate*: nothing must be ticked, no state is written from the Review card. The soft
+  export gate stays the only barrier, and the suspicious rows are marked in the review rather than
+  being the whole of it.
+- `GET /api/photos` (the review) replaces `GET /api/suspicious`; `report.suspicious` is gone since
+  `review` subsumes it. `GET /api/photo` gained `size=thumb|full` (320 / 1600 px, day-cached) and
+  `GET /api/flag?site=&image=` serves the reference frame from the sync's local copy. Both still
+  refuse anything not in the store.
+- A photo with no animal is in the list too: *this frame was looked at and held nothing* is part of
+  the check, and the empty frames are where a missed deer would hide.
+
 ## Auth
 
 Dept's existing FlagLabel accounts, signed in by one-time email code (ticket 14), session cached. RLS
@@ -402,8 +426,9 @@ and the `photos` bucket — no policy changes needed. No service key.
 ## Trust / review UX (Q1=b, Q11=b)
 
 - Post-run summary screen: counts, distance histogram, per-camera stats.
-- Suspicious gallery only (no per-detection review): low RoMa score, low MD
-  confidence, unsure species, held photos.
+- Photo-by-photo review of every measured photo, boxes and numbers on the frame
+  (ticket 16 overrides Q11=b's suspicious-only gallery — see its section above);
+  suspicious rows are marked there: low RoMa score, low MD confidence, unsure species.
 - **Soft export gate**: suspicious rows excluded from CSV by default; one
   explicit checkbox includes them. Silent poisoning impossible; no hard review
   requirement.

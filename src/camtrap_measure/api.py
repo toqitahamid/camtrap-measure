@@ -198,29 +198,45 @@ def summary(site: str | None = None, date_from: date | None = None, date_to: dat
     return report.summary(site, _iso(date_from), _iso(date_to), all_species)
 
 
-@app.get("/api/suspicious")
-def suspicious(site: str | None = None, date_from: date | None = None, date_to: date | None = None):
-    """The photos that need a look, each with its reasons — nothing else requires review."""
-    return report.suspicious(site, _iso(date_from), _iso(date_to))
+@app.get("/api/photos")
+def review(site: str | None = None, date_from: date | None = None, date_to: date | None = None):
+    """Every measured photo in scope with its boxes and numbers — what the photo-by-photo review shows."""
+    return report.review(site, _iso(date_from), _iso(date_to))
+
+
+SIZES = {"thumb": 320, "full": 1600}  # list icon / the viewer; the originals are 20-MP and never reach the page whole
+
+
+def _shrunk(path: Path, px: int) -> Response:
+    from PIL import Image
+
+    try:
+        with Image.open(path) as im:
+            im.draft("RGB", (px, px))  # JPEG decodes at reduced size: a 20-MP frame never lands in memory whole
+            im = im.convert("RGB")
+            im.thumbnail((px, px))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=82)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Photo unreadable or moved")
+    return Response(buf.getvalue(), media_type="image/jpeg", headers={"cache-control": "max-age=86400"})
 
 
 @app.get("/api/photo")
-def photo(path: str):
-    """A measured photo, shrunk for the gallery. Only paths a run has recorded are served."""
-    from PIL import Image
-
+def photo(path: str, size: str = "full"):
+    """A measured photo, shrunk. Only paths a run has recorded are served."""
     if not store.photo_known(path):
         raise HTTPException(404, "Not a measured photo")
-    try:
-        with Image.open(path) as im:
-            im.draft("RGB", (640, 640))  # JPEG decodes at reduced size: a 20-MP frame never lands in memory whole
-            im = im.convert("RGB")
-            im.thumbnail((640, 640))
-            buf = io.BytesIO()
-            im.save(buf, "JPEG", quality=80)
-    except (OSError, ValueError):
-        raise HTTPException(404, "Photo unreadable or moved")
-    return Response(buf.getvalue(), media_type="image/jpeg")
+    return _shrunk(Path(path), SIZES.get(size, SIZES["full"]))
+
+
+@app.get("/api/flag")
+def flag_photo(site: str, image: str, size: str = "full"):
+    """The flag photo a camera's numbers were measured against — the reference the reviewer compares to."""
+    ref = store.ref_path(site, image)
+    if not any(c["site"] == site and c["image_name"] == image for c in store.calibrations()) or not ref.exists():
+        raise HTTPException(404, "Not a synced flag photo")
+    return _shrunk(ref, SIZES.get(size, SIZES["full"]))
 
 
 @app.get("/api/export.csv")

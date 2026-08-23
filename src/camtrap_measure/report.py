@@ -1,9 +1,10 @@
-"""Views over the results store: the post-run summary, the suspicious-only gallery, and the gated CSV export.
+"""Views over the results store: the post-run summary, the photo-by-photo review, and the gated CSV export.
 
-A detection row is *suspicious* when its number should not enter an analysis unread: the photo did
-not match its flag photo well (misfiled / moved camera), the detector was unsure of the box, SpeciesNet
-was unsure of the animal, or no ground could be read under it. Held photos join the gallery with their
-hold reason. The export excludes suspicious rows unless asked, and says how many it left out, in the file.
+`review` lists every measured photo with its boxes and their numbers — the researcher checks an answer on
+the photo itself, not on a summary line. A detection row is *suspicious* when its number should not enter
+an analysis unread: the photo did not match its flag photo well (misfiled / moved camera), the detector was
+unsure of the box, SpeciesNet was unsure of the animal, or no ground could be read under it. Such rows are
+marked in the review and left out of the export unless asked — and the file says how many it left out.
 """
 
 import csv
@@ -97,24 +98,32 @@ def summary(site=None, date_from=None, date_to=None, all_species=False) -> dict:
             "histogram": [{"lo": lo, "hi": lo + BIN_M, "n": hist[lo]} for lo in sorted(hist)], "cameras": cams}
 
 
-def _entry(row: dict, held: bool) -> dict:
-    return {"path": row["path"], "photo": basename(row["path"]), "site": row["site"], "captured_at": row["captured_at"],
-            "held": held, "reasons": [], "detections": []}
+DET_KEYS = ("idx", "x1", "y1", "x2", "y2", "species", "confidence", "distance_m", "q05_m", "q95_m",
+            "method", "match_score")
 
 
-def suspicious(site=None, date_from=None, date_to=None) -> list[dict]:
-    """One entry per photo that needs a look: its reasons and its boxes (for the overlay). Held photos included."""
+def review(site=None, date_from=None, date_to=None) -> list[dict]:
+    """One entry per measured photo - its boxes, their numbers and why any of them is suspicious - so the
+    researcher can check the answer on the photo itself instead of trusting the summary. Photos with no
+    animal are in the list too: seeing that a photo was looked at and held nothing is part of the check."""
+    out = []
     by_path: dict[str, dict] = {}
-    for r in rows(site, date_from, date_to):
-        if not r["flag"]:
-            continue
-        e = by_path.setdefault(r["path"], _entry(r, held=False))
-        e["reasons"] += [x for x in reasons(r) if x not in e["reasons"]]
-        e["detections"].append({k: r[k] for k in ("x1", "y1", "x2", "y2", "species", "confidence", "distance_m", "method")})
     for p in photos(site, date_from, date_to):
-        if p["held_reason"]:
-            by_path[p["path"]] = {**_entry(p, held=True), "reasons": [p["held_reason"]]}
-    return sorted(by_path.values(), key=lambda e: (e["site"], e["captured_at"] or "", e["path"]))
+        by_path[p["path"]] = e = {
+            "path": p["path"], "photo": basename(p["path"]), "site": p["site"], "captured_at": p["captured_at"],
+            "flag_image": p["calibration_image"], "match_score": p["match_score"], "method": p["method"],
+            "reasons": [p["held_reason"]] if p["held_reason"] else [], "detections": []}
+        out.append(e)
+    for r in rows(site, date_from, date_to):
+        e = by_path.get(r["path"])
+        if e is None:  # a detection whose photo row is out of scope: never drop a box silently
+            continue
+        why = reasons(r)
+        e["detections"].append({**{k: r[k] for k in DET_KEYS}, "reasons": why})
+        e["reasons"] += [w for w in why if w not in e["reasons"]]
+    for e in out:
+        e["detections"].sort(key=lambda d: (d["method"], d["idx"]))
+    return sorted(out, key=lambda e: (e["site"], e["captured_at"] or "", e["path"]))
 
 
 def export_csv(site=None, date_from=None, date_to=None, all_species=False, include_suspicious=False) -> str:
