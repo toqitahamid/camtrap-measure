@@ -7,7 +7,9 @@ Verdict rules (a photo is red on the first that trips):
   4. a flag whose leave-one-out prediction is off by > LOO_MAX_REL of its label
 Research QC (monotonicity, LOO) is noisier than that on real data — every one
 of the 122 research photos has some monotonicity violation — so only gross LOO
-outliers (14/122 photos at 0.5) turn a camera red.
+outliers turn a camera red. The fit itself passes through every flag (plane +
+per-transect terrain correction), so LOO is the only consistency check there is;
+it also reads ordinary terrain and click scatter as error, hence the high bar.
 """
 
 import json
@@ -20,7 +22,8 @@ from .calib.data import from_annotation
 from .calib.model_b import MIN_DISTINCT_DISTS, MIN_GROUND_OBS, ModelB
 from .calib.qc import loo_cv
 
-LOO_MAX_REL = 0.5  # |held-out prediction - label| / label; 0.5 flags ~11% of research photos
+LOO_MAX_REL = 0.75  # |held-out prediction - label| / label. 0.5 flagged 20/264 dept photos whose labels the dept confirmed
+# (2026-08-23; p95 of the worst flag per photo was 59%); 0.75 leaves the two that look genuinely wrong.
 TRANSECT = {"L": "left", "C": "centre", "R": "right"}
 _DATE_TIME_ORIGINAL, _EXIF_IFD, _MAKE, _MODEL = 0x9003, 0x8769, 0x010F, 0x0110
 
@@ -83,7 +86,7 @@ def _judge(row: dict, data: dict, image: str) -> dict:
     if suspects:
         worst = max(suspects, key=lambda r: abs(r["err_b"]))
         row["reason"] = (f"In {image} the {worst['dist']:g} m flag on the {TRANSECT[worst['transect']]} transect "
-                         f"measures as {worst['pred_b']:.1f} m from the other flags — check its distance label in FlagLabel.")
+                         f"measures as {worst['pred_b']:.1f} m from the other flags — check its distance label and its mark in FlagLabel.")
         return row
     row["ok"], row["model"] = True, json.dumps(model.to_dict())
     return row

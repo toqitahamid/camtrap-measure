@@ -78,6 +78,24 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
 - Red rows are re-fitted on every sync (a re-upload or storage blip fixes
   itself); green rows refit only when the annotation's `updated_at` changes.
 
+## Calibration QC threshold after the first dept sync (2026-08-23)
+
+- First sync: 264 labeled flag photos, 314 windows. The LOO rule at 0.5 turned 20 photos
+  red; the researcher checked the flagged labels and found them correct. Probe results
+  (scratch, not committed): worst-flag LOO relative error per photo p50 27%, p90 46%,
+  p95 59%; the fit's own residual at every flag is ~0 by construction (plane + per-transect
+  correction interpolated through the flags), so a fitted-residual rule cannot see a
+  mislabel at all — tried and discarded. Six of the 20 were first/last flags on their
+  transect (held-out = extrapolation past the correction's range); the rest are real
+  terrain/click scatter (e.g. MAS_CAM07 left transect: the 8 m mark sits between the
+  12 m and 13 m marks in the image) that the fit absorbs with the flag present.
+- `LOO_MAX_REL` 0.5 → 0.75: clears those 18, keeps MOR_CAM14/IMG_1452 (2 m flag the
+  others put at 5.2 m) and TON_CAM12/IMG_6692 (15 m flag at 28.3 m). Red rows are
+  re-fitted at every sync, so the next sync after the update applies it. Remaining red
+  is then overwhelmingly "not labeled yet" (≈45 windows, 25 of them an `IMG_0001.JPG`).
+- Still open: whether LOO at the ends of a transect should be skipped outright, and a
+  yellow "check this flag" state that would warn without holding photos.
+
 ## Measurement runs (ticket 05, 2026-08-20)
 
 - Inference boundary = `inference.backend(paths, calibration, method)`, one
