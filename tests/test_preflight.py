@@ -67,7 +67,15 @@ def machine(monkeypatch, tmp_path):
 def run_preflight(answers: list[str]) -> tuple[int, str]:
     out = []
     it = iter(answers)
-    code = preflight.run(ask=lambda prompt: next(it), say=out.append)
+    # prompt=True: the console installer's path, where there is a terminal to ask through
+    code = preflight.run(ask=lambda prompt: next(it), say=out.append, prompt=True)
+    return code, "\n".join(out)
+
+
+def run_silent() -> tuple[int, str]:
+    """The installer's window has no console: preflight must read what is stored and ask nothing."""
+    out = []
+    code = preflight.run(ask=None, say=out.append, prompt=False)
     return code, "\n".join(out)
 
 
@@ -163,3 +171,30 @@ def test_cloud_server_error_during_login_is_a_plain_message_not_a_traceback(mach
     monkeypatch.setattr(sb, "request_code", boom)
     code, out = run_preflight(["hf_abc", "tech@dept.gov", "tech@dept.gov", "tech@dept.gov"])
     assert code == 1 and "answered with an error (RuntimeError)" in out and "Traceback" not in out
+
+
+def test_without_a_console_nothing_is_asked_and_nothing_is_a_hard_failure(machine, tmp_path):
+    """The window installer runs preflight with no stdin; asking there raised EOFError before a single
+    check was read (seen 2026-08-23), and the technician got a traceback in a dialog."""
+    code, out = run_silent()
+    assert code == 0
+    assert "no token stored yet" in out and "made-up numbers" in out
+    assert "not signed in on this computer yet" in out and "one-time code" in out
+    assert "Traceback" not in out and not (tmp_path / "config.json").exists()
+
+
+def test_without_a_console_what_is_already_stored_is_checked(machine, tmp_path):
+    store.save_config({"hf_token": "hf_abc"})
+    store.save_session({"refresh_token": "rt0", "email": "tech@dept.gov"})
+    code, out = run_silent()
+    assert code == 0 and "signed in as tech@dept.gov" in out
+    assert "Model weights access" in out and "no token stored yet" not in out
+
+
+def test_a_token_in_the_environment_is_used_when_nobody_can_be_asked(machine, tmp_path, monkeypatch):
+    """How the installer's window hands over a token the technician typed into it."""
+    monkeypatch.setenv("HF_TOKEN", "hf_abc")
+    code, out = run_silent()
+    assert code == 0 and "no token stored yet" not in out
+    assert json.loads((tmp_path / "config.json").read_text()) == {"hf_token": "hf_abc"}
+

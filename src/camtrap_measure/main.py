@@ -74,11 +74,16 @@ def main() -> None:
         action="store_true",
         help="installer checks: GPU, disk, network, weights token, FlagLabel login; exit 1 if any hard check fails",
     )
+    parser.add_argument(
+        "--no-prompt",
+        action="store_true",
+        help="with --preflight: ask nothing, check what is already stored (the installer's window has no console)",
+    )
     args = parser.parse_args()
     if args.preflight:
         from . import preflight  # imports the engine lazily: this runs before the first launch
 
-        raise SystemExit(preflight.run())
+        raise SystemExit(preflight.run(prompt=False if args.no_prompt else None))
     url = start_engine()
     if args.no_window:
         print(f"CamTrap Measure engine at {url}  (Ctrl+C to stop)", flush=True)

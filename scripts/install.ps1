@@ -173,6 +173,43 @@ function Run($exe, $arguments, $where) {
     return $p.ExitCode
 }
 
+function Ask-Token {
+    # Asks for the Hugging Face read token. Never echoed and never written to the details pane: the
+    # installer only hands it to the app, which stores it in config.json.
+    $ask = "Hugging Face read token for the model weights (ask the researcher). Leave it empty to carry " +
+           "on without one: the app then shows made-up numbers until the token is set."
+    if ($Console) {
+        $secure = Read-Host "$ask`nToken" -AsSecureString
+        return [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+    }
+    $box = New-Object System.Windows.Forms.Form
+    $box.Text = "$Name Setup"
+    $box.Size = New-Object System.Drawing.Size(560, 220)
+    $box.StartPosition = "CenterParent"
+    $box.FormBorderStyle = "FixedDialog"
+    $box.MaximizeBox = $false
+    $box.MinimizeBox = $false
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $ask
+    $label.SetBounds(18, 18, 510, 62)
+    $box.Controls.Add($label)
+    $field = New-Object System.Windows.Forms.TextBox
+    $field.UseSystemPasswordChar = $true  # a token is a credential: it does not belong on a screen
+    $field.SetBounds(18, 88, 510, 24)
+    $box.Controls.Add($field)
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Text = "Continue"
+    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $ok.SetBounds(428, 128, 100, 28)
+    $box.Controls.Add($ok)
+    $box.AcceptButton = $ok
+    $box.ShowDialog($Form) | Out-Null
+    $typed = $field.Text
+    $box.Dispose()
+    return $typed
+}
+
 function Shortcut($path, $target, $arguments, $description) {
     $s = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
     $s.TargetPath = $target
@@ -228,9 +265,20 @@ if ((Run "uv" @("sync", "--frozen") $Dir) -ne 0) {
     Fail "The environment could not be built. Check the internet connection and the free disk space, then run this again."
 }
 
-# --- 4. preflight -----------------------------------------------------------------------------------
+# --- 4. the weights token, then the checks ----------------------------------------------------------
+# The checks ask nothing now: they run with no console to ask through, and a bare input() there raised
+# EOFError before a single check was read (2026-08-23). The token is the one thing only a person can
+# supply, so the installer asks for it in its own window and hands it over in the environment; signing in
+# to FlagLabel happens in the app window, which has had its own sign-in since ticket 14.
+$cfg = Join-Path $env:USERPROFILE ".camtrap-measure\config.json"
+$hasToken = (Test-Path $cfg) -and ((Get-Content $cfg -Raw) -match '"hf_token"\s*:\s*"\S')
+if (-not $hasToken) {
+    $token = Ask-Token
+    if ($token) { $env:HF_TOKEN = $token }
+}
+
 Step "Checking this machine (before the big download)"
-if ((Run "uv" @("run", "--frozen", "camtrap-measure", "--preflight") $Dir) -ne 0) {
+if ((Run "uv" @("run", "--frozen", "camtrap-measure", "--preflight", "--no-prompt") $Dir) -ne 0) {
     Fail "This machine is not ready yet. The details pane lists what to fix; fix it and run the installer again."
 }
 

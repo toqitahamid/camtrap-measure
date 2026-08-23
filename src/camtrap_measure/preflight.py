@@ -7,6 +7,7 @@ launch is already set up.
 The logic lives here (not in the PowerShell installer) so it is testable without a Windows machine.
 """
 
+import os
 import re
 import shutil
 import socket
@@ -203,10 +204,22 @@ def check_engine() -> Result:
                   None if ok else "Run the installer again; if this repeats, send this message to the researcher.")
 
 
-def run(ask=input, say=print) -> int:
-    """Interactive preflight. → exit code (0 = ready to launch)."""
+def run(ask=input, say=print, prompt: bool | None = None) -> int:
+    """Preflight. → exit code (0 = ready to launch).
+
+    `prompt=False` asks nothing: the installer's window has no console to ask through, and a bare
+    `input()` there raises EOFError before a single check is read (seen 2026-08-23). What is already
+    stored is checked instead, and what is missing becomes a warning naming where to put it - never a
+    hard failure, because the window itself takes the sign-in and the token can be dropped into
+    config.json afterwards. Left at None it asks when there is a terminal to ask through.
+    """
+    if prompt is None:
+        prompt = bool(getattr(sys.stdin, "isatty", lambda: False)())
     results = [r for r in (check_gpu(), *check_disk(), *check_network(), check_window(), check_engine()) if r]
     say("")
+    if not prompt:
+        results += [_stored_token(), _stored_session()]
+        return _report(results, say)
     for _ in range(ATTEMPTS):
         token = ask("Hugging Face read token for the model weights (Enter to skip for now): ").strip()
         if not token:
@@ -233,6 +246,30 @@ def run(ask=input, say=print) -> int:
             break  # a code went out: that is the outcome, good or bad — another email would mean another code
         say(f"  ✗ {r.detail}\n    → {r.fix}")
     results.append(r)
+    return _report(results, say)
+
+
+def _stored_token() -> Result:
+    """What the weights loader will find, when nobody can be asked for a token."""
+    token = os.environ.get("HF_TOKEN") or store.config().get("hf_token")
+    if not token:
+        return Result("Model weights access", False, "no token stored yet",
+                      "The app will start with made-up numbers until hf_token is set in "
+                      f"{store.DATA_DIR / 'config.json'} (ask the researcher for the token).", hard=False)
+    return check_token(token)
+
+
+def _stored_session() -> Result:
+    """Signing in is the window's job now (ticket 14); this only says where this computer stands."""
+    session = store.session()
+    if session:
+        return Result("FlagLabel login", True, f"signed in as {session['email']}")
+    return Result("FlagLabel login", False, "not signed in on this computer yet",
+                  "Sign in with your FlagLabel email in the app window when it opens - it emails you a "
+                  "one-time code, there is no password.", hard=False)
+
+
+def _report(results: list[Result], say) -> int:
     say("")
     failed = False
     for r in results:

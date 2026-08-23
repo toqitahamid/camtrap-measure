@@ -123,3 +123,12 @@ def test_main_hangs_the_icon_once_the_window_exists():
     main = text(ROOT / "src" / "camtrap_measure" / "main.py")
     assert "win_icon.identify()" in main  # before the window: Windows reads it when making the taskbar button
     assert "webview.start(_wear_icon)" in main
+
+
+def test_the_installer_never_asks_through_a_console_it_does_not_have():
+    """A window has no stdin: `input()` in the checks raised EOFError before one was read (2026-08-23)."""
+    install = text(SCRIPTS / "install.ps1")
+    assert '"--preflight", "--no-prompt"' in install
+    assert "Ask-Token" in install and "UseSystemPasswordChar = $true" in install  # the one thing it must ask
+    main = text(ROOT / "src" / "camtrap_measure" / "main.py")
+    assert '"--no-prompt"' in main and "prompt=False if args.no_prompt else None" in main

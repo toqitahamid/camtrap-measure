@@ -636,3 +636,18 @@ RESULTS answers for the folder in the bar now: `/api/summary` and `/api/export.c
 "Everything measured" is a deliberate choice in the filter row rather than the default. Photos directly
 inside the folder count and nothing below it, because a run only ever reads one folder's JPEGs.
 
+### The checks stopped asking (same day, running the new installer)
+
+The first real run of the windowed installer failed on the preflight step: `preflight.run` asked for the
+Hugging Face token with `input()`, the window has no console, and the answer was an `EOFError` traceback
+in the details pane before a single check had been read. `run(prompt=...)` now decides whether anything
+may be asked - by default from `sys.stdin.isatty()`, and forced off by `camtrap-measure --preflight
+--no-prompt`, which is what the installer runs. With nothing to ask, it reports what is stored: the token
+from `HF_TOKEN` or `config.json`, and whether this computer has a FlagLabel session. Neither absence is a
+hard failure any more, because neither has to be settled at install time - the window signs in by emailed
+code (ticket 14) and the token can be dropped into `config.json` later.
+
+The installer keeps the one question only a person can answer: a masked box for the token, asked only
+when none is stored, handed to the checks through `HF_TOKEN` so it is written where the app reads it. The
+FlagLabel sign-in was dropped from the installer altogether - it belongs to the window.
+
