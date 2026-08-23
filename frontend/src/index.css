@@ -1,13 +1,20 @@
 /* The window's design system — "field instrument": graphite chrome, one amber accent for anything you can
    act on, status colours that never compete with it, tabular numerals wherever a measurement appears.
    Dark only: this is a full-window instrument, and the frame under review reads wrong on a light ground.
-   ponytail: --grot names Space Grotesk first, but only Inter is bundled — drop SpaceGrotesk.woff2 into
-   fonts/ with an @font-face and every heading, rail label and big number picks it up. */
+   Two faces: Space Grotesk carries the headings, rail labels and every measurement, Inter the reading
+   text. Both are bundled by Vite — the app runs offline and fetches no font at runtime. */
 
 @font-face {
   font-family: 'Inter';
-  src: url('./fonts/InterVariable.woff2') format('woff2'); /* bundled by Vite; nothing fetched at runtime */
+  src: url('./fonts/InterVariable.woff2') format('woff2');
   font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  /* latin subset (22 kB); anything outside it — the warning triangle, say — falls back to Inter */
+  font-family: 'Space Grotesk';
+  src: url('./fonts/SpaceGrotesk.woff2') format('woff2');
+  font-weight: 300 700;
   font-display: swap;
 }
 
