@@ -1,6 +1,7 @@
 scripts/slurm-*.out
 ref.txt
-logs/          # what the launcher writes on this computer
+# what the launcher writes on this computer
+logs/
 __pycache__/
 *.pyc
 

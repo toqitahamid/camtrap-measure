@@ -132,3 +132,25 @@ def test_the_installer_never_asks_through_a_console_it_does_not_have():
     assert "Ask-Token" in install and "UseSystemPasswordChar = $true" in install  # the one thing it must ask
     main = text(ROOT / "src" / "camtrap_measure" / "main.py")
     assert '"--no-prompt"' in main and "prompt=False if args.no_prompt else None" in main
+
+
+def test_the_splash_is_not_mistaken_for_the_app():
+    """Both windows carried the title "CamTrap Measure", so the splash answered "is it already running?"
+    - and the icon code would have dressed the splash instead of the app (2026-08-23)."""
+    ps = text(SCRIPTS / "launcher.ps1")
+    assert '$Splash = "Starting CamTrap Measure"' in ps
+    assert "$Form.Text = $Splash" in ps
+    assert win_icon.TITLE == "CamTrap Measure"
+
+
+def test_the_launcher_waits_for_the_window_not_the_process_it_started():
+    """The generated entry point re-runs itself as pythonw: the window belongs to a child process."""
+    ps = text(SCRIPTS / "launcher.ps1")
+    assert "FindWindowW($null, $Title) -ne [IntPtr]::Zero) { break }" in ps
+    assert "MainWindowHandle" not in ps
+
+
+def test_the_launcher_log_folder_is_ignored():
+    """An untracked logs/ made every install look like a modified clone, which stops its own updates."""
+    ignored = [l.strip() for l in text(ROOT / ".gitignore").splitlines() if l.strip() and not l.startswith("#")]
+    assert "logs/" in ignored  # exactly that, with no trailing comment: .gitignore has no inline comments

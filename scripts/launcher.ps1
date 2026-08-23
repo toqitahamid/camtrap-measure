@@ -29,7 +29,8 @@ $Icon = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 $Exe = Join-Path $Dir ".venv\Scripts\camtrap-measure-app.exe"  # the pythonw entry point: it owns no console
 $LogDir = Join-Path $Dir "logs"
 $Log = Join-Path $LogDir "launcher.log"
-$Title = "CamTrap Measure"
+$Title = "CamTrap Measure"        # the app window's title: what "is it already running?" looks for
+$Splash = "Starting CamTrap Measure"  # never the same as $Title, or the splash answers that question
 Set-Location $Dir
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 if ((Test-Path $Log) -and (Get-Item $Log).Length -gt 512KB) { Move-Item $Log "$Log.old" -Force }
@@ -55,7 +56,7 @@ if (-not $Console) {
     $Form.Size = New-Object System.Drawing.Size(420, 150)
     $Form.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#14171B")
     $Form.TopMost = $true
-    $Form.Text = $Title
+    $Form.Text = $Splash
     if (Test-Path $Icon) { $Form.Icon = New-Object System.Drawing.Icon($Icon) }
     $edge = [System.Drawing.ColorTranslator]::FromHtml("#2E343C")
     $Form.add_Paint({
@@ -217,6 +218,8 @@ Say "Starting CamTrap Measure..."
 if (-not (Test-Path $Exe)) {
     Stop-With "CamTrap Measure is not installed properly on this computer: $Exe is missing. Run the installer again."
 }
+# The generated entry point re-runs itself as pythonw, so the window belongs to a CHILD process and the
+# handle on the one started here stays empty. The window is found by its title instead.
 $app = Start-Process -FilePath $Exe -WorkingDirectory $Dir -PassThru `
                      -RedirectStandardOutput (Join-Path $LogDir "app.out") `
                      -RedirectStandardError (Join-Path $LogDir "app.err")
@@ -229,8 +232,7 @@ while ((Get-Date) -lt $deadline) {
     Pump
     Start-Sleep -Milliseconds 200
     if ($app.HasExited) { break }
-    $app.Refresh()
-    if ($app.MainWindowHandle -ne [IntPtr]::Zero) { break }
+    if ([CamTrap.Win]::FindWindowW($null, $Title) -ne [IntPtr]::Zero) { break }
 }
 if ($app.HasExited -and $app.ExitCode -ne 0) {
     foreach ($f in @((Join-Path $LogDir "app.out"), (Join-Path $LogDir "app.err"))) {
