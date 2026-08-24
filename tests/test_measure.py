@@ -51,7 +51,7 @@ def spying():
     """A fake backend that also records which photos it was asked for → (backend, seen)."""
     seen: list[Path] = []
 
-    def spy(paths, calibration, method):
+    def spy(paths, calibration, method, **_):
         seen.extend(paths)
         yield from inference.fake(paths, calibration, method)
     return spy, seen
@@ -99,7 +99,7 @@ def test_folder_name_does_not_matter(synced, tmp_path):
 
 
 def test_a_failure_that_is_not_out_of_memory_keeps_its_own_words(synced, tmp_path, monkeypatch):
-    def boom(paths, calibration, method):
+    def boom(paths, calibration, method, **_):
         raise ValueError("the flag photo has no ground plane")
         yield
 
@@ -144,7 +144,7 @@ def test_run_writes_one_row_per_detection_with_exif_make_model(synced, tmp_path)
 def test_progress_reports_counts_and_time_estimate(synced, tmp_path, monkeypatch):
     gate = threading.Event()
 
-    def slow(paths, calibration, method):
+    def slow(paths, calibration, method, **_):
         for p in paths:
             gate.wait(5)
             yield from inference.fake([p], calibration, method)
@@ -186,7 +186,7 @@ def test_inference_crash_is_an_error_and_keeps_earlier_answers(synced, tmp_path,
     before = results(synced)
     assert before
 
-    def boom(paths, calibration, method):
+    def boom(paths, calibration, method, **_):
         raise RuntimeError("CUDA out of memory")
         yield
 
@@ -232,7 +232,7 @@ def test_the_chosen_flag_photo_is_used_even_when_a_newer_one_exists(cloud, synce
 def test_backend_gets_the_calibration_row_and_its_flag_photo(synced, tmp_path, monkeypatch):
     seen = {}
 
-    def spy(paths, calibration, method):
+    def spy(paths, calibration, method, **_):
         seen.update(calibration)
         yield from inference.fake(paths, calibration, method)
 
@@ -258,9 +258,9 @@ def test_run_without_a_method_uses_the_default(synced, tmp_path):
 
 
 def test_each_methods_rows_keep_the_alignment_score_they_were_read_under(synced, tmp_path, monkeypatch):
-    def realign(paths, calibration, method):  # RoMa samples matches: every run aligns a little differently
+    def realign(paths, calibration, method, **_):  # RoMa samples matches: every run aligns a little differently
         for res in inference.fake(paths, calibration, method):
-            yield inference.PhotoResult(res.detections, {"md": 300, "sam3": 120}[method])
+            yield inference.PhotoResult(res.detections, {"md": 300, "sam3": 120}[method], res.path)
 
     monkeypatch.setattr(api.inference, "backend", realign)
     d = folder(tmp_path)
@@ -273,7 +273,7 @@ def test_each_methods_rows_keep_the_alignment_score_they_were_read_under(synced,
 
 def gated_backend(gate: threading.Semaphore, seen: list):
     """A backend that needs one gate release per photo and records which photos it was asked for."""
-    def slow(paths, calibration, method):
+    def slow(paths, calibration, method, **_):
         seen.extend(paths)
         for p in paths:
             assert gate.acquire(timeout=5), "test never released the gate"
@@ -308,7 +308,7 @@ def test_crash_midway_keeps_finished_photos_and_the_next_run_measures_only_the_r
     d = folder(tmp_path, photos={n: jpeg(IN_WINDOW) for n in names})
     seen = []
 
-    def dies_after_one(paths, calibration, method):
+    def dies_after_one(paths, calibration, method, **_):
         seen.extend(paths)
         yield from inference.fake(paths[:1], calibration, method)
         raise RuntimeError("CUDA error: device-side assert")  # or the power went out

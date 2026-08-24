@@ -16,6 +16,7 @@ stay interpretable and a rerun with the other method adds rows instead of replac
 """
 
 import json
+import gc
 import logging
 import os
 import random
@@ -83,11 +84,14 @@ class Detection:
 class PhotoResult:
     detections: list[Detection]
     match_score: int | None  # homography inliers against the flag photo; < distance.MIN_INLIERS = misfiled / moved camera
+    path: Path | None = None  # which photo this answers; the stages finish photos out of order, so results say so
 
 
-def fake(paths: list[Path], calibration: dict, method: str) -> Iterator[PhotoResult]:
+def fake(paths: list[Path], calibration: dict, method: str, *, progress=None) -> Iterator[PhotoResult]:
     """Deterministic per file name, so tests and demos get stable numbers."""
-    for p in paths:
+    if progress:
+        progress("finding animals", 0, len(paths))
+    for i, p in enumerate(paths, 1):
         rng = random.Random(p.name)
         dets = []
         for _ in range(rng.choice([0, 1, 1, 2])):
@@ -97,7 +101,9 @@ def fake(paths: list[Path], calibration: dict, method: str) -> Iterator[PhotoRes
                                   round(d, 2), round(d * 0.85, 2), round(d * 1.2, 2)))
         if FAKE_DELAY_S:
             time.sleep(FAKE_DELAY_S)
-        yield PhotoResult(dets, rng.choice([9, 60, 180, 320]) if dets else None)  # 9 < MIN_INLIERS: a few photos look misfiled
+        yield PhotoResult(dets, rng.choice([9, 60, 180, 320]) if dets else None, p)  # 9 < MIN_INLIERS: some look misfiled
+        if progress:
+            progress("measuring distances", i, len(paths))
 
 
 def species_label(cls: str, score: float) -> str:
@@ -150,46 +156,98 @@ def is_oom(e: Exception) -> bool:
 
 class Real:
     """MegaDetector animal boxes, SpeciesNet species per box, RoMa-aligned unified-net distance at each
-    box's ground contact. Loaded once, kept resident. FP16 via autocast on CUDA; SpeciesNet batch size
-    probed against the VRAM actually free, then halved on any out-of-memory during a run."""
+    box's ground contact.
+
+    The models load in two stages and are dropped again, because they never have to be resident at the
+    same moment, and on an 8 GB card shared with the desktop that is the difference between fitting and
+    spilling into system memory. Stage one — MegaDetector and SpeciesNet — answers *which photos hold an
+    animal, and what it is*. Stage two — RoMa and the unified net — answers *how far away*, and only for
+    the photos stage one found something in. A folder of empty frames never loads stage two at all, and
+    when a run ends both stages go and the card goes back to whatever else the technician is running.
+
+    Constructing this loads nothing: the window opens without waiting for 6 GB of weights, and an idle
+    app holds no VRAM. The first run pays the loading, and the run's own status says so while it happens.
+    """
 
     def __init__(self, weights_dir: Path, fidelity_: str | None = None):
         import numpy as np
         import torch
-        from megadetector.detection.run_detector import load_detector
-        from speciesnet.classifier import SpeciesNetClassifier
         from speciesnet.utils import BBox
 
         self.np, self.torch, self.BBox = np, torch, BBox
         self.fidelity = fidelity_ or fidelity()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.gpu = self._gpu_name()
-        self.warning = None
         self.weights_dir = weights_dir
         self.manifest = json.loads((weights_dir / "manifest.json").read_text())
-        self.md = load_detector(str(weights_dir / self.manifest["megadetector"]), force_cpu=self.device == "cpu")
-        self.sn = SpeciesNetClassifier(str(weights_dir / self.manifest["speciesnet"]), device=self.device)
-        self.dist = distance.Distance(weights_dir, self.device, self.fidelity)
-        self.sam3 = None  # (model, processor) once the precise method has been asked for
+        self.precision = str(distance.autocast_dtype(torch, self.device, self.fidelity)).replace("torch.", "")
+        self.warning = self._card_warning()
+        self.batch = None if self.device == "cuda" else 4  # probed when SpeciesNet arrives, not before
+        self._detect = None  # (MegaDetector, SpeciesNet) while stage one is loaded
+        self._dist = None    # distance.Distance while stage two is loaded
+        self.sam3 = None     # (model, processor) once the precise method has been asked for
+
+    def _card_warning(self) -> str | None:
+        """Whether this card can hold a run — asked of the driver alone, with no model loaded yet."""
+        if self.device != "cuda":
+            return None
+        free, total = self.torch.cuda.mem_get_info()
+        gb, free_gb = total / 2**30, free / 2**30
+        if round(gb) < VRAM_FLOOR_GB:  # an "8 GB" card reports ~7.99 GiB usable (seen on the dept RTX 2060 SUPER)
+            return (f"This GPU has {gb:.1f} GB of memory, below the {VRAM_FLOOR_GB} GB the app is designed for "
+                    "— runs will be slow.")
+        if free_gb < RUN_VRAM_GB[self.fidelity]:
+            # The dept machine shares its card with the desktop, Chrome and Teams. Short of memory the
+            # run does not usually fail — Windows quietly serves the overflow from system memory over
+            # PCIe, and the same photo takes ten times as long (33 s against 3 s, measured 2026-08-23).
+            return (f"Only {free_gb:.1f} GB of the GPU's {gb:.1f} GB is free, and a run needs about "
+                    f"{RUN_VRAM_GB[self.fidelity]:.1f} GB — other programs are using the card. Measuring "
+                    "will be several times slower until Chrome, Teams or other heavy windows are closed.")
+        return None
+
+    def detecting(self) -> tuple:
+        """Stage one, loaded on first use: MegaDetector and SpeciesNet."""
+        if self._detect is None:
+            from megadetector.detection.run_detector import load_detector
+            from speciesnet.classifier import SpeciesNetClassifier
+
+            md = load_detector(str(self.weights_dir / self.manifest["megadetector"]), force_cpu=self.device == "cpu")
+            sn = SpeciesNetClassifier(str(self.weights_dir / self.manifest["speciesnet"]), device=self.device)
+            self._detect = (md, sn)
+            if self.device == "cuda":
+                self.batch = self._probe_batch(sn)
+                # The probe's largest successful trial stays in the allocator's cache — 2.9 GB of this
+                # card, held but unused (measured 2026-08-23). Nothing else can have it, and on a card
+                # this size the run then overflows into system memory.
+                self.torch.cuda.empty_cache()
+        return self._detect
+
+    def measuring(self):
+        """Stage two, loaded on first use: RoMa, DINOv2 and the unified distance net."""
+        if self._dist is None:
+            self._dist = distance.Distance(self.weights_dir, self.device, self.fidelity)
+        return self._dist
+
+    def release(self, detect: bool = True, measure: bool = True) -> None:
+        """Drop what is loaded and hand the memory back.
+
+        Dropping the reference is not enough by itself: Python may still hold the graph in a reference
+        cycle, and torch keeps freed blocks in a cache of its own where no other program can reach them.
+        Both are asked explicitly. Called between the stages of a run, and again when the run ends."""
+        if detect:
+            self._detect = None
+        if measure:
+            self._dist, self.sam3 = None, None
+        gc.collect()
         if self.device == "cuda":
-            free, total = torch.cuda.mem_get_info()
-            gb, free_gb = total / 2**30, free / 2**30
-            if round(gb) < VRAM_FLOOR_GB:  # an "8 GB" card reports ~7.99 GiB usable (seen on the dept RTX 2060 SUPER)
-                self.warning = f"This GPU has {gb:.1f} GB of memory, below the {VRAM_FLOOR_GB} GB the app is designed for — runs will be slow."
-            elif free_gb < RUN_VRAM_GB[self.fidelity]:
-                # The dept machine shares its card with the desktop, Chrome and Teams. Short of memory the
-                # run does not usually fail — Windows quietly serves the overflow from system memory over
-                # PCIe, and the same photo takes ten times as long (33 s against 3 s, measured 2026-08-23).
-                self.warning = (f"Only {free_gb:.1f} GB of the GPU's {gb:.1f} GB is free, and a run needs about "
-                                f"{RUN_VRAM_GB[self.fidelity]:.1f} GB — other programs are using the card. Measuring "
-                                "will be several times slower until Chrome, Teams or other heavy windows are closed.")
-            self.batch = self._probe_batch()
-            # The probe's largest successful trial stays in the allocator's cache — 2.9 GB of this card,
-            # held but unused (measured 2026-08-23). Nothing else can have it, and on a card this size the
-            # run then overflows into system memory, where a photo takes ten times as long.
-            torch.cuda.empty_cache()
-        else:
-            self.batch = 4
+            self.torch.cuda.empty_cache()
+
+    @property
+    def loaded(self) -> list[str]:
+        """Which stages are on the card right now, so an idle app holding nothing is visible on the
+        status line rather than merely claimed."""
+        return ([] if self._detect is None else ["finding animals"]) + \
+               ([] if self._dist is None else ["measuring distances"])
 
     def _gpu_name(self) -> str:
         """What the status line shows, so "is it really using the GPU?" has an answer on screen: the card's
@@ -203,14 +261,14 @@ class Real:
         """Mixed precision on CUDA (fp16 unless told otherwise), nothing on the CPU."""
         return self.torch.autocast("cuda", dtype=dtype or self.torch.float16) if self.device == "cuda" else nullcontext()
 
-    def _probe_batch(self) -> int:
+    def _probe_batch(self, sn) -> int:
         """Half the largest SpeciesNet batch (≤64) whose forward pass fits right now — the other half
-        is headroom for MegaDetector's activations, which are not allocated yet at startup."""
-        size = self.sn.IMG_SIZE
+        is headroom for MegaDetector's activations, which are not allocated yet when this runs."""
+        size = sn.IMG_SIZE
         for b in (64, 32, 16, 8, 4, 2, 1):
             try:
                 with self.torch.no_grad(), self._autocast():
-                    self.sn.model(self.torch.zeros(b, size, size, 3, device=self.device))
+                    sn.model(self.torch.zeros(b, size, size, 3, device=self.device))
                 return max(1, b // 2)
             except (self.torch.cuda.OutOfMemoryError, RuntimeError) as e:
                 if not is_oom(e):
@@ -218,32 +276,64 @@ class Real:
                 self.torch.cuda.empty_cache()
         return 1
 
-    def __call__(self, paths: list[Path], calibration: dict, method: str) -> Iterator[PhotoResult]:
+    @staticmethod
+    def _open(p: Path):
         from PIL import Image
 
-        # ponytail: serial decode + one MegaDetector call per photo; thread-prefetch JPEG decode and
-        # batch MD if the dept's photo volume makes a run span days.
-        for p in paths:
-            with Image.open(p) as im:
-                im = im.convert("RGB")
+        with Image.open(p) as im:
+            return im.convert("RGB")
+
+    def __call__(self, paths: list[Path], calibration: dict, method: str, *, progress=None) -> Iterator[PhotoResult]:
+        """Every photo through stage one, then only the photos with an animal through stage two.
+
+        Results come back as each photo gets its final answer, which is not the order they were given
+        in: an empty frame is finished in stage one and says so at once, while a photo with a deer in it
+        is not finished until stage two has aligned it. Each result names its own photo for that reason.
+
+        Photos are decoded twice, once per stage — 47 ms against the seconds a stage costs, and the
+        alternative is holding a whole SD card of 6 MB frames in RAM.
+        """
+        def tick(phase, done, total):
+            if progress:
+                progress(phase, done, total)
+
+        md, _ = self.detecting()
+        tick("finding animals", 0, len(paths))
+        found = []  # (path, animals, species names) — only the photos worth measuring
+        for i, p in enumerate(paths, 1):
+            im = self._open(p)
             with self.torch.no_grad(), self._autocast():
-                out = self.md.generate_detections_one_image(self.np.array(im), image_id=p.name, detection_threshold=MD_CONF)
+                out = md.generate_detections_one_image(self.np.array(im), image_id=p.name, detection_threshold=MD_CONF)
             animals = [d for d in out.get("detections", []) if str(d["category"]) == "1"]  # 1 = animal
             if not animals:
-                # ponytail: empty frames skip alignment (most of a season); align them too if the
-                # moved-camera alarm should fire before the first animal shows up.
-                yield PhotoResult([], None)
-                continue
+                # An empty frame is done here: no species to name, nothing to align, and its answer is
+                # written now rather than held until the end of the run. Most of a season is this photo.
+                # ponytail: they are never aligned, so a camera that moved is only noticed once something
+                # walks past it. Align a sample of empty frames if the alarm should fire sooner.
+                yield PhotoResult([], None, p)
+            else:
+                found.append((p, animals, self._species(im, [d["bbox"] for d in animals])))
+            tick("finding animals", i, len(paths))
+
+        # MegaDetector and SpeciesNet leave the card before RoMa arrives; they are not needed again.
+        self.release(detect=True, measure=False)
+        if not found:
+            return  # a folder with nothing in it never loads the measuring models at all
+
+        dist = self.measuring()
+        tick("measuring distances", 0, len(found))
+        for i, (p, animals, names) in enumerate(found, 1):
+            im = self._open(p)
             boxes = [d["bbox"] for d in animals]
-            names = self._species(im, boxes)
             points = self._precise(im, boxes) if method == "sam3" else [(x + w / 2, y + h) for x, y, w, h in boxes]
-            quantiles, inliers = self.dist.read(im, calibration, points)
+            quantiles, inliers = dist.read(im, calibration, points)
             dets = []
             for d, name, q in zip(animals, names, quantiles):
                 x, y, w, h = d["bbox"]
                 q05, q50, q95 = q if q else (None, None, None)
                 dets.append(Detection(x, y, x + w, y + h, name, float(d["conf"]), q50, q05, q95))
-            yield PhotoResult(dets, inliers)
+            yield PhotoResult(dets, inliers, p)
+            tick("measuring distances", i, len(found))
 
     def _sam3(self):
         """SAM3 (transformers port of facebook/sam3), loaded on first use so the fast method never pays its VRAM."""
@@ -267,7 +357,7 @@ class Real:
         px = [[x * W, y * H, (x + w) * W, (y + h) * H] for x, y, w, h in boxes]
         # SAM3 must run in bf16 (fp16 overflows in its ViTDet backbone — research sam3_wrap.py); a card without bf16
         # runs it in fp32, slower but right.
-        ctx = self._autocast(torch.bfloat16) if self.dist.dtype == torch.bfloat16 else nullcontext()
+        ctx = self._autocast(torch.bfloat16) if self.measuring().dtype == torch.bfloat16 else nullcontext()
         with torch.no_grad(), ctx:
             enc = proc(images=im, return_tensors="pt").to(self.device)
             vision = model.get_vision_features(pixel_values=enc.pixel_values)
@@ -281,13 +371,14 @@ class Real:
 
     def _species(self, im, boxes: list[list[float]]) -> list[str]:
         """One SpeciesNet crop per box (relative xywh), classified in VRAM-sized batches."""
-        crops = [self.sn.preprocess(im, bboxes=[self.BBox(*b)]) for b in boxes]
+        _, sn = self.detecting()
+        crops = [sn.preprocess(im, bboxes=[self.BBox(*b)]) for b in boxes]
         names: list[str] = []
         while len(names) < len(crops):
             chunk = crops[len(names):len(names) + self.batch]
             try:
                 with self.torch.no_grad(), self._autocast():
-                    preds = self.sn.batch_predict([str(j) for j in range(len(chunk))], chunk)
+                    preds = sn.batch_predict([str(j) for j in range(len(chunk))], chunk)
             except (self.torch.cuda.OutOfMemoryError, RuntimeError) as e:
                 if not is_oom(e) or self.batch == 1:
                     raise
@@ -337,7 +428,7 @@ def warmup() -> None:
         state["weights"] = w["version"] + (" (offline — cached copy)" if w["offline"] else "")
         if w["problem"]:
             warnings.append(f"Weights could not be checked for updates: {w['problem']}. Using the cached copy.")
-        real = Real(w["dir"])
+        real = Real(w["dir"])  # constructing it loads nothing: the first run pays for the weights
     except Exception as e:
         state["download"] = None
         state.update(status="error", error=str(e) if isinstance(e, weights.WeightsMissing)
@@ -350,5 +441,21 @@ def warmup() -> None:
     if real.warning:
         warnings.append(real.warning)
     state.update(status="ready", backend="real", device=real.device, gpu=real.gpu, batch=real.batch,
-                 precision=str(real.dist.dtype).replace("torch.", ""), fidelity=real.fidelity,
+                 precision=real.precision, fidelity=real.fidelity,
                  warning=" · ".join(warnings) or None)
+
+
+def live() -> dict:
+    """What is true now rather than at warmup: which stages are holding VRAM, and the SpeciesNet batch
+    size, which is not known until SpeciesNet has been loaded and probed for the first time."""
+    b = backend
+    # asked of the object, not of its class: the fake is a plain function and tests put their own
+    # stand-ins here, and neither is a Real
+    return {"loaded": list(getattr(b, "loaded", [])), "batch": getattr(b, "batch", None)}
+
+
+def release() -> None:
+    """Hand the card back. Called when a run ends: an app sitting idle should hold no VRAM."""
+    free = getattr(backend, "release", None)
+    if free:
+        free()

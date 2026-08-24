@@ -131,6 +131,18 @@ def native_bf16(torch) -> bool:
         return torch.cuda.get_device_properties(0).major >= 8
 
 
+def autocast_dtype(torch, device: str, fidelity: str):
+    """The precision a run will use, answerable before a single weight is loaded — the status line has
+    to name it while the models are still on disk.
+
+    The research ran bfloat16 (29_testsplit_revision/eval_intervals_rollfix.py), so research fidelity
+    asks for bfloat16 and takes the emulation on a card with no hardware for it. Only fast fidelity is
+    allowed to swap in the fp16 the card actually implements.
+    """
+    return (torch.bfloat16 if device == "cuda" and (fidelity == RESEARCH or native_bf16(torch))
+            else torch.float16)
+
+
 def load_unified(ckdir: Path, device: str):
     """Rebuild the wrapped architecture from the saved config (num_channels=7 ⇒ 7-ch patch embed)
     and load the state dict strictly. QuantileHead is verbatim from 10_cv4e_pipeline/model.py."""
@@ -186,11 +198,7 @@ class Distance:
 
         self.torch, self.device, self.fidelity = torch, device, fidelity
         use_chunked_kde()
-        # The research ran bfloat16 (29_testsplit_revision/eval_intervals_rollfix.py), so research fidelity
-        # asks for bfloat16 and takes the emulation on a card that has no hardware for it. Only fast
-        # fidelity is allowed to swap in the fp16 the card actually implements.
-        self.dtype = (torch.bfloat16 if device == "cuda" and (fidelity == RESEARCH or native_bf16(torch))
-                      else torch.float16)
+        self.dtype = autocast_dtype(torch, device, fidelity)
         manifest = json.loads((weights_dir / "manifest.json").read_text())
         self.upsample_res = self._upsample_res()
         # custom local_corr CUDA kernel is not built anywhere we run; pure-torch fallback as in the research runs

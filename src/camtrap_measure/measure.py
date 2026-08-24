@@ -4,7 +4,11 @@ streamed through the inference boundary.
 One run at a time (one GPU machine); progress lives in `current` and is polled by the UI. Results are
 written per photo, so a cancel, a crash or a power cut loses at most the photo in flight: the next run
 of the same folder skips every photo that already has a current answer (same method, same flag photo,
-same annotation version) unless asked to `rerun`.
+same fidelity, same annotation version) unless asked to `rerun`.
+
+A run happens in stages, and `phase` says which one it is in: the detector looks at every photo first,
+then the distance models measure only the photos it found an animal in. The photos with nothing in them
+are finished and written during the first stage, which on a real card-dump is most of them.
 """
 
 import threading
@@ -78,6 +82,9 @@ def start(folder: str, site: str, flag: str, method: str, rerun: bool = False, p
         current = {"folder": str(d), "site": site, "flag": flag, "method": method,
                    "fidelity": inference.state["fidelity"] or inference.fidelity(), "status": "running",
                    "total": len(chosen), "done": 0, "skipped": 0, "unreadable": 0, "detections": 0, "error": None, "cancel": False,
+                   # the run happens in stages, and which one it is in is the difference between "nothing is
+                   # happening" and "it is looking through 400 photos for animals before it measures any"
+                   "phase": "loading the models", "phase_done": 0, "phase_total": 0,
                    "started": time.monotonic(), "elapsed_s": 0.0, "eta_s": None}
         # picking photos by hand IS the intent to measure them: only a whole-folder run skips what already has an answer
         threading.Thread(target=_work, args=(current, chosen, cal, rerun or photos is not None), daemon=True).start()
@@ -154,8 +161,16 @@ def _work(run: dict, photos: list[Path], cal: dict, rerun: bool) -> None:
                               "fidelity": fidelity}))
         if batch and not run["cancel"]:
             ref = {**cal, "ref_path": str(store.ref_path(cal["site"], cal["image_name"]))}
-            results = inference.backend([p for p, _ in batch], ref, method)  # one call: real models batch
-            for (_, photo), res in zip(batch, results, strict=True):  # a photo's old rows go only once its new ones exist
+            rows = {str(p): photo for p, photo in batch}
+
+            def progress(phase: str, done: int, total: int) -> None:
+                run["phase"], run["phase_done"], run["phase_total"] = phase, done, total
+
+            # The backend finishes photos out of order - an empty frame is done as soon as the detector
+            # has looked at it, one with a deer in it not until the distance stage - so each result names
+            # its own photo instead of arriving in the order the photos were handed over.
+            for res in inference.backend([p for p, _ in batch], ref, method, progress=progress):
+                photo = rows[str(res.path)]
                 store.record({**photo, "match_score": res.match_score}, method, [asdict(d) for d in res.detections])
                 run["detections"] += len(res.detections)
                 run["done"] += 1
@@ -164,5 +179,13 @@ def _work(run: dict, photos: list[Path], cal: dict, rerun: bool) -> None:
         outcome = ("cancelled", None) if run["cancel"] else ("done", None)
     except Exception as e:
         outcome = ("error", _plain(e))
+    finally:
+        # The run is over: the models go and the card goes back to whatever else is running on this
+        # machine. The next run loads them again, which is the price of not sitting on 4 GB while idle.
+        run["phase"], run["phase_done"], run["phase_total"] = "finished", 0, 0
+        try:
+            inference.release()
+        except Exception:  # freeing memory must never be what turns a finished run into a failed one
+            pass
     run["elapsed_s"] = round(time.monotonic() - run["started"], 1)
     run["status"], run["error"] = outcome

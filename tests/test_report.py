@@ -34,10 +34,10 @@ SCRIPT = {
 
 @pytest.fixture
 def measured(synced, tmp_path, monkeypatch):
-    def scripted(paths, calibration, method):
+    def scripted(paths, calibration, method, **_):
         for p in paths:
             dets, score = SCRIPT[p.name]
-            yield inference.PhotoResult(dets, score)
+            yield inference.PhotoResult(dets, score, p)
 
     monkeypatch.setattr(api.inference, "backend", scripted)
     photos = {n: jpeg(f"2026:05:{i + 1:02d} 08:00:00") for i, n in enumerate(SCRIPT) if n != "IMG_0007.JPG"}

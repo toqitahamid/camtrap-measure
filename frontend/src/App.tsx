@@ -431,13 +431,19 @@ export default function App() {
 
         {running && run ? (
           <div className="runbar">
-            <div className="track"><div style={{ width: `${(100 * run.done) / Math.max(1, run.total)}%` }} /></div>
+            <div className="track">
+              <div style={{ width: `${(100 * (run.phase_total ? run.phase_done / run.phase_total : run.done / Math.max(1, run.total)))}%` }} />
+            </div>
             <div className="line">
               <span className="spin" style={{ color: 'var(--amber)', display: 'flex' }}>
                 <Icon name="spinner" size={14} width={2.2} />
               </span>
-              <span style={{ fontWeight: 500 }}>Measuring</span>
-              <span className="mono" style={{ color: 'var(--text-2)' }}>{run.done} / {run.total} photos</span>
+              {/* the stage, not just "measuring": the detector looks at every photo before a single
+                  distance is read, and on a full card that first pass is most of the wait */}
+              <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>{run.phase || 'Measuring'}</span>
+              <span className="mono" style={{ color: 'var(--text-2)' }}>
+                {run.phase_total ? `${run.phase_done} / ${run.phase_total}` : `${run.done} / ${run.total}`} photos
+              </span>
               <span style={{ color: 'var(--line)' }}>·</span>
               <span className="mono dim">{plural(run.detections, 'animal')}</span>
               {run.eta_s !== null && (
@@ -482,9 +488,16 @@ export default function App() {
                 <span style={{ color: 'var(--line)' }}>·</span>
                 <span className="mono">
                   {inf.backend === 'real'
-                    ? `MegaDetector + SpeciesNet ${inf.weights} · ${inf.gpu ?? inf.device} · ${inf.precision} · batch ${inf.batch}`
+                    ? `MegaDetector + SpeciesNet ${inf.weights} · ${inf.gpu ?? inf.device} · ${inf.precision}`
                     : 'made-up numbers (no models installed)'}
                 </span>
+                {inf.backend === 'real' && (
+                  /* the models are loaded per run and dropped after it, so an idle app really is
+                     holding nothing - say which, rather than leaving the technician to guess */
+                  <span className="mono dim">
+                    {inf.loaded?.length ? `${inf.loaded.join(' + ')} loaded` : 'models unloaded — no GPU memory held'}
+                  </span>
+                )}
                 {/* the published settings are the default; when they are not in use it must be on screen */}
                 {inf.fidelity === 'fast' && (
                   <span className="warn">⚠ fast settings — not the published pipeline</span>

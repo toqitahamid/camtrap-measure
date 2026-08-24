@@ -8,6 +8,7 @@ export type Inference = {
   gpu: string | null        // the card's own name, so "is it really using the GPU" is answered on screen
   precision: string | null  // float16 / bfloat16: what the distance net actually runs in
   fidelity: 'research' | 'fast' | null  // which settings made the numbers; research = the published pipeline
+  loaded: string[]          // which model stages hold VRAM right now; empty when the app is idle
   batch: number | null
   weights: string | null
   warning: string | null
@@ -62,6 +63,9 @@ export type Run = {
   flag: string
   method: string
   status: 'running' | 'done' | 'cancelled' | 'error'
+  phase: string           // which stage the run is in: loading, finding animals, measuring distances
+  phase_done: number      // progress inside that stage - the detector sees every photo, the distance
+  phase_total: number     // models only the ones it found an animal in, so the two counts differ
   total: number
   done: number
   skipped: number

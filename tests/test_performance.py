@@ -73,7 +73,7 @@ def test_the_batch_probe_gives_its_memory_back():
     """The probe's largest successful trial stayed in the allocator's cache — 2.9 GB held and unused,
     which is exactly the headroom the run then lacked."""
     src = (ROOT / "src" / "camtrap_measure" / "inference.py").read_text(encoding="utf-8")
-    after_probe = src.split("self.batch = self._probe_batch()")[1].split("else:")[0]
+    after_probe = src.split("self.batch = self._probe_batch(sn)")[1].split("return self._detect")[0]
     assert "torch.cuda.empty_cache()" in after_probe
 
 

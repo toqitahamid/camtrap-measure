@@ -16,20 +16,21 @@ from camtrap_measure import api, distance, inference, weights
 from tests.test_measure import folder, run
 
 
-class StubDist:
-    """Only what warmup reads off the real one: the precision the status line reports."""
-    dtype = "torch.float16"
-
-
 class StubReal:
+    """Stands where a real two-stage backend would: warmup reads all of this off it, and none of it
+    costs a model load — which is the point of the refactor it is standing in for."""
+
     def __init__(self, weights_dir, device="cuda"):
         self.dir, self.device, self.batch, self.warning = weights_dir, device, 16, None
-        self.fidelity = distance.RESEARCH
+        self.fidelity, self.precision = distance.RESEARCH, "float16"
         self.gpu = "NVIDIA GeForce RTX 4070 (12.0 GB)" if device == "cuda" else "CPU only - no GPU in use"
-        self.dist = StubDist()
+        self.loaded = []
 
-    def __call__(self, paths, calibration, method):
+    def __call__(self, paths, calibration, method, **_):
         yield from inference.fake(paths, calibration, method)
+
+    def release(self, detect=True, measure=True):
+        self.loaded = []
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +107,7 @@ def test_first_start_downloads_weights_and_loads_real_models(cloud, hub, models_
     assert hub["n"] == 1 and (tmp_path / "weights" / "manifest.json").exists()
     assert s == {"status": "ready", "backend": "real", "device": "cuda", "batch": 16, "weights": "2026.08.20",
                  "gpu": "NVIDIA GeForce RTX 4070 (12.0 GB)", "precision": "float16", "fidelity": "research",
-                 "warning": None, "error": None, "download": None}
+                 "loaded": [], "warning": None, "error": None, "download": None}
 
 
 def test_token_comes_from_env_or_installer_config(cloud, hub, models_installed, start, monkeypatch, tmp_path):
@@ -208,9 +209,9 @@ def test_real_backend_is_used_by_runs(cloud, hub, models_installed, start, monke
     seen = []
 
     class Recording(StubReal):
-        def __call__(self, paths, calibration, method):
+        def __call__(self, paths, calibration, method, **kw):
             seen.extend(paths)
-            yield from super().__call__(paths, calibration, method)
+            yield from super().__call__(paths, calibration, method, **kw)
     monkeypatch.setattr(inference, "Real", Recording)
     c, s = start()
     run(c, folder(tmp_path))

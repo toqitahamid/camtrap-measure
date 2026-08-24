@@ -51,7 +51,10 @@ def health():
 @app.get("/api/status")
 def status():
     s = store.session()
-    return {"signed_in": s is not None, "email": s["email"] if s else None, **store.summary(), "inference": inference.state}
+    # `live` over `state`: which models hold VRAM changes during a run, and the batch size is not known
+    # until SpeciesNet has been loaded once — neither is settled at warmup any more.
+    return {"signed_in": s is not None, "email": s["email"] if s else None, **store.summary(),
+            "inference": {**inference.state, **inference.live()}}
 
 
 def _remember(sess: dict) -> None:

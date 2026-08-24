@@ -770,3 +770,47 @@ What is still **not** established: the drift between fidelities is not the same 
 truth, and it was measured on 11 photos of one deer at ~8 m from one camera. Both fidelities should be
 scored against the research repo's labelled test split before fast is recommended for real work — the
 same run that settles the MD vs MD+SAM3 open item.
+
+## Models load in stages and the card is handed back (2026-08-23, ticket 20)
+
+The five models never had to be resident together, and on an 8 GB card shared with a Windows desktop
+that was costing exactly the headroom that decides whether a run executes on the GPU or out of system
+memory. A run now happens in two stages, and holds nothing between runs.
+
+**Stage one** is MegaDetector and SpeciesNet — which photos hold an animal, and what it is. They then
+leave the card. **Stage two** is RoMa and the unified net, over only the photos stage one found
+something in. Measured: peak allocation during the measuring stage is **6.26 GB with the detector
+released against 6.99 GB with it resident**. **A folder with no animals never loads stage two at all** —
+not "skips the alignment" as before, the weights are never read off disk, which on a real card-dump is
+the common case.
+
+**Nothing loads until a run needs it, and everything goes when the run ends.** The window opens without
+waiting for 6 GB of weights, and an idle app holds no VRAM: verified on the workstation at 473 MiB idle
+(the desktop's own), 1.4–3.3 GB while finding animals, up to 7.8 GB while measuring, and back to
+559 MiB the moment the run finished. 11 photos in 92 s against 117 s before.
+
+The cost, and it is a real one: each run reloads what it needs — MegaDetector 14.4 s, SpeciesNet 3.1 s,
+RoMa + DINOv2 9.5 s, the unified net ~6.6 s warm — so roughly 20–35 s before a run measures anything,
+where before it was paid once at startup. For a folder off an SD card that is nothing; for someone
+re-measuring one photo repeatedly it is the worse deal. That is the trade the request asked for, and it
+is the right one for a machine whose card is also running the desktop. Unloading itself is free (~80 ms,
+reclaiming ~2.8 GB).
+
+Two consequences worth knowing. **Results now name their photo**: the stages finish photos out of order,
+so `PhotoResult` carries its `path` and the store files each answer by it — zipping results against the
+photo list, as the code did before, would now file every number under the wrong photo. And **the run
+says which stage it is in**, because "finding animals 240/400" and "measuring distances 3/12" are very
+different waits and an unlabelled first pass looks like a hang.
+
+### Measured and deliberately not taken: RoMa's own empty_cache
+
+`romatch/models/matcher.py` calls `torch.cuda.empty_cache()` once per photo inside `match()`, before the
+upsample pass. It cannot change a number. Removing it measured **~11–13% faster** (4.13 / 4.23 s per
+photo with it against 3.72 / 3.75 without, two alternated repeats of four photos), about half of which
+is the call itself at ~0.22 s per photo.
+
+Left in place. The measurement was taken with the card fully saturated — `mem_get_info` reported exactly
+zero free bytes on every run — which is the regime RoMa put that call there to survive, and it is also
+the regime the app's own notes call a lottery. Eleven percent is not worth an out-of-memory on the
+tightest machine in the department. **ponytail:** revisit on a card with headroom, or once stage two's
+peak fits inside what Windows leaves free.
