@@ -4,6 +4,9 @@
       powershell -ExecutionPolicy Bypass -File scripts\make_bundle.ps1
       powershell -ExecutionPolicy Bypass -File scripts\make_bundle.ps1 -Out E:\CamTrapMeasure
 
+  It will not build into OneDrive without being told twice: the dept's Desktop is redirected there, and
+  6.5 GB of weights would upload to the university's cloud the moment they were written.
+
   Why this exists: the weights live in a private Hugging Face repo, and the only way for a team machine
   to download them is a read token. Handing that token to twelve people is handing out a credential that
   cannot be taken back from any one of them. So the models travel with the installer instead, on a USB
@@ -16,8 +19,11 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Out = (Join-Path ([Environment]::GetFolderPath("Desktop")) "CamTrapMeasure-Installer"),
-    [string]$WeightsDir = (Join-Path $env:USERPROFILE ".camtrap-measure\weights")
+    [string]$Out,
+    [string]$WeightsDir = (Join-Path $env:USERPROFILE ".camtrap-measure\weights"),
+    # Build into a cloud-synced folder anyway. There is one honest reason to: the share IS how the team
+    # gets it, and you have the quota and the patience for a 6.5 GB upload.
+    [switch]$AllowCloudFolder
 )
 
 # Deliberately no -Zip. Windows PowerShell 5.1's Compress-Archive fails above 2 GB, and this folder is
@@ -28,6 +34,29 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path $PSCommandPath -Parent
 
 function Say($msg) { Write-Host $msg }
+
+# The department's Desktop is redirected into OneDrive (SIU, seen 2026-08-24), so the obvious place to
+# put the bundle is the one place it must not go: 6.5 GB of model weights would start uploading to the
+# university's cloud the moment they landed. Somewhere local by default, and a refusal if asked for a
+# synced folder explicitly.
+function Is-Cloud($path) {
+    $full = [IO.Path]::GetFullPath($path)
+    foreach ($root in @($env:OneDrive, $env:OneDriveCommercial, $env:OneDriveConsumer)) {
+        if ($root -and $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $full -match "\\(OneDrive|Dropbox|Google Drive|Box)[^\\]*\\"
+}
+
+if (-not $Out) {
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    $Out = if (Is-Cloud $desktop) { Join-Path $env:USERPROFILE "CamTrapMeasure-Installer" }
+           else { Join-Path $desktop "CamTrapMeasure-Installer" }
+}
+if ((Is-Cloud $Out) -and -not $AllowCloudFolder) {
+    throw ("$Out is inside a cloud-synced folder, and 6.5 GB of model weights would start uploading as " +
+           "soon as they are written. Pass -Out somewhere local (D:\CamTrapMeasure-Installer), or " +
+           "-AllowCloudFolder if you mean it.")
+}
 
 if (-not (Test-Path (Join-Path $WeightsDir "manifest.json"))) {
     throw "No weights in $WeightsDir. Start the app once on this machine so it downloads them, or pass -WeightsDir."

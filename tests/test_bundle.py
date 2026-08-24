@@ -105,6 +105,14 @@ def test_the_bundle_is_never_zipped():
     assert not [l for l in code if "Compress-Archive" in l or "$Zip" in l]
 
 
+def test_the_bundle_refuses_to_build_into_a_synced_folder():
+    """The dept's Desktop is redirected into OneDrive, so the obvious place to put the bundle is the one
+    place it must not go — 6.5 GB of weights would upload to the university's cloud on the spot."""
+    assert "Is-Cloud" in BUNDLE and "$env:OneDrive" in BUNDLE
+    assert "-AllowCloudFolder" in BUNDLE  # deliberate is allowed; accidental is not
+    assert "GetFolderPath(\"Desktop\")" in BUNDLE and "$env:USERPROFILE \"CamTrapMeasure-Installer\"" in BUNDLE
+
+
 def test_the_bundle_carries_the_installer_and_a_way_to_start_it():
     for want in ("install.ps1", "setup.vbs", "INSTALL.bat", "README.txt"):
         assert want in BUNDLE, want
