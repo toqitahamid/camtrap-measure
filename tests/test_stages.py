@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from camtrap_measure import inference, measure
+from camtrap_measure import inference
 
-from tests.test_measure import folder, jpeg, results, run  # noqa: F401
+from tests.test_measure import folder, jpeg, results, run
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = (ROOT / "src" / "camtrap_measure" / "inference.py").read_text(encoding="utf-8")

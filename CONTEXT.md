@@ -814,3 +814,34 @@ zero free bytes on every run — which is the regime RoMa put that call there to
 the regime the app's own notes call a lottery. Eleven percent is not worth an out-of-memory on the
 tightest machine in the department. **ponytail:** revisit on a card with headroom, or once stage two's
 peak fits inside what Windows leaves free.
+
+## The models ship with the installer; nobody gets a token (2026-08-24, ticket 21)
+
+The weights live in a private Hugging Face repo and the only way to download them is a read token.
+Handing that token to a dozen people hands out a credential that cannot be taken back from any one of
+them, and that then lives on in a dozen `config.json` files. So the department is given the **models**
+instead of the means to fetch them: `scripts/make_bundle.ps1` builds a ~6.5 GB folder holding the
+installer and the weights, the installer copies them in, and no team machine ever has a token.
+
+The app itself still comes from GitHub at install time — that repo is public (checked 2026-08-24; the
+HANDOFF note calling it private is stale) — so a team machine needs the internet but no credentials.
+Chosen over a fully offline bundle, which would also have to carry the 5.4 GB CUDA environment and a
+seeded uv cache: half the size, and far less new machinery to fail on a machine nobody can reach.
+
+**The quiet failure this avoids.** A machine with no token that asks the private repo anyway gets a
+401, which the code reports as "the weights repo rejected the access token — check hf_token in
+config.json". On a bundled machine that warning would be permanent, wrong, and on screen for ever. The
+installer therefore writes `"weights_from": "bundle"` into `config.json` and `weights.ensure` skips the
+hub when it sees it — **said, never guessed**. Inferring it from the absence of a token also silences a
+developer machine, which has no token either but reaches the hub through a cached `huggingface-cli`
+login and must go on seeing new weights versions. The existing tests caught exactly that.
+
+Deliberately not zipped: PowerShell 5.1's `Compress-Archive` fails above 2 GB and the folder is over 6,
+and model weights are already compressed — a zip would spend twenty minutes saving nothing and then
+break at the end. The folder is copied as it is.
+
+**Not established:** nobody has run the bundled install on a machine that did not already have Git, uv
+and the weights. The builder is verified end to end and the app-side logic is unit-tested, but the
+6.5 GB copy, the skipped token box and the first start with `weights_from` set have never happened on a
+cold machine. That is the next real test, and it is the same second-machine run the installer has been
+waiting for since ticket 18.

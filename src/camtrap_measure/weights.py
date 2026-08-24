@@ -57,12 +57,25 @@ def _watch(local: Path, total: int, progress: Callable[[int, int], None], stop: 
 
 def ensure(progress: Callable[[int, int], None] | None = None) -> dict:
     """Check the manifest against the hub and fetch what changed, calling progress(done_bytes, total_bytes) along
-    the way. → {dir, version, offline: bool, problem: str | None}. Raises WeightsMissing when nothing is on disk."""
+    the way. → {dir, version, offline, problem, bundled}. Raises WeightsMissing when nothing is on disk.
+
+    `bundled` is the no-token install: the weights arrived with the installer, the hub is never asked,
+    and the copy on disk is simply what this machine runs."""
     pinned = os.environ.get("CAMTRAP_WEIGHTS_DIR")
     local = Path(pinned) if pinned else store.DATA_DIR / "weights"
-    offline, problem = False, None
-    if not pinned:
-        token = os.environ.get("HF_TOKEN") or store.config().get("hf_token")
+    offline, problem, bundled = False, None, False
+    token = os.environ.get("HF_TOKEN") or store.config().get("hf_token")
+    if not pinned and not token and store.config().get("weights_from") == "bundle" and (local / "manifest.json").exists():
+        # Weights the installer copied in from its own bundle. The department is given the models, not a
+        # credential to fetch them, so asking the hub could only fail — the repo is private and its 401
+        # reads as "your token is wrong", which would put a permanent false warning on every team
+        # machine. The version on disk is what this machine runs until someone installs a newer bundle.
+        #
+        # The installer says so in config.json rather than this being guessed from the absence of a
+        # token: a developer machine has no token either, and reaches the hub through the cached
+        # huggingface-cli login, and must go on picking up new weights versions (HANDOFF, gotchas).
+        bundled = True
+    if not pinned and not bundled:
         stop, watcher = threading.Event(), None
         try:
             total = hub_check(token) or 0
@@ -89,4 +102,5 @@ def ensure(progress: Callable[[int, int], None] | None = None) -> dict:
         manifest = json.loads((local / "manifest.json").read_text())
     except (OSError, ValueError) as e:
         raise WeightsMissing(f"No usable weights manifest in {local} ({e}).") from e
-    return {"dir": local, "version": manifest["version"], "offline": offline, "problem": problem}
+    return {"dir": local, "version": manifest["version"], "offline": offline, "problem": problem,
+            "bundled": bundled}

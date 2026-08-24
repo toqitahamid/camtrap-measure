@@ -13,7 +13,14 @@
   Safe to run again: every step is a no-op when it is already done, so this is also the repair path.
 #>
 [CmdletBinding()]
-param([switch]$Console)
+param(
+    [switch]$Console,
+    # A folder of model weights to install instead of downloading them. Given this, the installer never
+    # asks for a Hugging Face token and the app never contacts the hub: the department is handed the
+    # models, not a credential. Defaults to a "weights" folder sitting beside this script, which is what
+    # scripts\make_bundle.ps1 builds, so the bundle installs by double-click with no arguments.
+    [string]$WeightsFrom
+)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest's progress bar slows downloads badly on PowerShell 5
@@ -271,10 +278,50 @@ if ((Run "uv" @("sync", "--frozen") $Dir) -ne 0) {
 # supply, so the installer asks for it in its own window and hands it over in the environment; signing in
 # to FlagLabel happens in the app window, which has had its own sign-in since ticket 14.
 $cfg = Join-Path $env:USERPROFILE ".camtrap-measure\config.json"
-$hasToken = $env:HF_TOKEN -or ((Test-Path $cfg) -and ((Get-Content $cfg -Raw) -match '"hf_token"\s*:\s*"\S'))  # already answered: do not ask again
-if (-not $hasToken) {
-    $token = Ask-Token
-    if ($token) { $env:HF_TOKEN = $token }
+$dataDir = Split-Path $cfg -Parent
+
+# Weights that came with the installer: copy them in and the token question never arises.
+if (-not $WeightsFrom) {
+    $beside = Join-Path $PSScriptRoot "weights"
+    if (Test-Path (Join-Path $beside "manifest.json")) { $WeightsFrom = $beside }
+}
+$bundled = $false
+if ($WeightsFrom) {
+    if (-not (Test-Path (Join-Path $WeightsFrom "manifest.json"))) {
+        Fail "No model weights in $WeightsFrom - it should hold manifest.json and the model files."
+    }
+    $target = Join-Path $dataDir "weights"
+    $have = Join-Path $target "manifest.json"
+    $same = (Test-Path $have) -and ((Get-Content $have -Raw) -eq (Get-Content (Join-Path $WeightsFrom "manifest.json") -Raw))
+    if ($same) {
+        Detail "The model weights on this machine are already the ones in this installer."
+    } else {
+        Step "Copying the models onto this machine (about 6.5 GB - please wait)"
+        New-Item -ItemType Directory -Force -Path $target | Out-Null
+        # robocopy: the only thing on a stock Windows that copies 6.5 GB reliably and restarts a part-
+        # copied file. Its exit codes below 8 are all success (0 = nothing to do, 1 = files copied).
+        $null = & robocopy $WeightsFrom $target /E /NFL /NDL /NJH /NJS /NP /R:2 /W:2
+        if ($LASTEXITCODE -ge 8) { Fail "The models could not be copied to $target (robocopy $LASTEXITCODE). Check the free disk space." }
+        Detail "Models installed in $target."
+    }
+    $bundled = $true
+} else {
+    $hasToken = $env:HF_TOKEN -or ((Test-Path $cfg) -and ((Get-Content $cfg -Raw) -match '"hf_token"\s*:\s*"\S'))  # already answered: do not ask again
+    if (-not $hasToken) {
+        $token = Ask-Token
+        if ($token) { $env:HF_TOKEN = $token }
+    }
+}
+
+if ($bundled) {
+    # Said in config.json rather than guessed from the absence of a token: a developer machine has no
+    # token either and still reaches the hub through a cached huggingface-cli login, and must go on
+    # picking up new weights versions.
+    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+    $conf = if (Test-Path $cfg) { Get-Content $cfg -Raw | ConvertFrom-Json } else { New-Object PSObject }
+    $conf | Add-Member -NotePropertyName "weights_from" -NotePropertyValue "bundle" -Force
+    $conf | ConvertTo-Json | Set-Content $cfg -Encoding utf8
+    Detail "This machine uses the models that came with the installer; no Hugging Face token is needed."
 }
 
 Step "Checking this machine (before the big download)"
@@ -321,7 +368,7 @@ New-ItemProperty -Path $Key -Name "NoRepair" -Value 1 -PropertyType DWord -Force
 Detail "Listed in Settings > Apps as $Name $version."
 
 # --- 7. first start ---------------------------------------------------------------------------------
-Step "Starting $Name (the first start downloads the models; the window shows the progress)"
+Step $(if ($bundled) { "Starting $Name" } else { "Starting $Name (the first start downloads the models; the window shows the progress)" })
 Start-Process -FilePath $Wscript -ArgumentList (Join-Path $Dir "scripts\launch.vbs") -WorkingDirectory $Dir
 if ($Form) {
     $StepLabel.Text = "$Name is installed. From now on, double-click its icon on the desktop."

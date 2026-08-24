@@ -425,7 +425,8 @@ def warmup() -> None:
         w = weights.ensure(progress=lambda done, total: state.update(download={"done_gb": round(done / 2**30, 2),
                                                                                "total_gb": round(total / 2**30, 2)}))
         state["download"] = None
-        state["weights"] = w["version"] + (" (offline — cached copy)" if w["offline"] else "")
+        state["weights"] = w["version"] + (" (installed with the app)" if w.get("bundled")
+                                           else " (offline — cached copy)" if w["offline"] else "")
         if w["problem"]:
             warnings.append(f"Weights could not be checked for updates: {w['problem']}. Using the cached copy.")
         real = Real(w["dir"])  # constructing it loads nothing: the first run pays for the weights
