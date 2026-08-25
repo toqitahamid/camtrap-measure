@@ -8,6 +8,7 @@ from collections import namedtuple
 import pytest
 
 from camtrap_measure import preflight, store, weights
+from camtrap_measure.api import __version__
 from camtrap_measure import supabase_ro as sb
 
 Usage = namedtuple("Usage", "total used free")
@@ -83,7 +84,7 @@ def test_healthy_machine_passes_and_stores_token_and_session(machine, tmp_path):
     code, out = run_preflight(["hf_abc", "tech@dept.gov", "123456"])
     assert code == 0 and "All checks passed" in out
     assert "RTX 4070" in out and "12.0 GB" in out and "200 GB free" in out
-    assert "Engine: health check passed, version 0.1.0" in out
+    assert f"Engine: health check passed, version {__version__}" in out
     assert json.loads((tmp_path / "config.json").read_text()) == {"hf_token": "hf_abc"}
     assert store.session() == {"refresh_token": "rt0", "email": "tech@dept.gov"}
     assert machine["tokens"] == ["hf_abc"] and machine["codes_sent"] == ["tech@dept.gov"]

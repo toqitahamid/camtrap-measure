@@ -1,6 +1,6 @@
 [project]
 name = "camtrap-measure"
-version = "0.1.0"
+version = "0.2.0"
 description = "Distance measurement for camera-trap deer photos"
 requires-python = ">=3.12"
 dependencies = [
