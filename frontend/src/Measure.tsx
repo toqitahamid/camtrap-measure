@@ -2,6 +2,7 @@
    The shell owns the bars, the run and the folder listing; this section only renders what
    /api/folder returned and asks for the photos the user picked to be measured. */
 
+import Help from './Help'
 import Icon from './Icon'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -359,7 +360,7 @@ export default function Measure({
               <span>{scope.site || '—'}</span>
               <span className="cap">Will measure against</span>
               <span>{against || '—'}</span>
-              <span className="cap">Read at</span>
+              <span className="cap">Read at <Help topic="method" /></span>
               <span>{methodLabel(scope.method)}</span>
             </div>
           </div>
@@ -378,9 +379,10 @@ export default function Measure({
                     <div className="row" style={{ alignItems: 'baseline', gap: 7 }}>
                       <span className="hero">{best.distance_m.toFixed(1)}</span>
                       <span className="grot dim" style={{ fontSize: 17 }}>m</span>
+                      <Help topic="distance" />
                       <div className="spacer" />
                       <div style={{ textAlign: 'right' }}>
-                        <div className="cap">90% between</div>
+                        <div className="cap">90% between <Help topic="interval" align="right" /></div>
                         <div className="mono small" style={{ color: 'var(--text-2)' }}>{interval(best)}</div>
                       </div>
                     </div>
@@ -435,9 +437,9 @@ export default function Measure({
               <div className="kv" style={{ padding: '14px 16px', borderTop: '1px solid var(--hair)' }}>
                 <span className="cap">Camera</span>
                 <span>{againstSite || '—'}</span>
-                <span className="cap">Measured against</span>
+                <span className="cap">Measured against <Help topic="flag" /></span>
                 <span>{cur.flag_image ?? '—'}</span>
-                <span className="cap">Alignment</span>
+                <span className="cap">Alignment <Help topic="alignment" /></span>
                 <span className={cur.match_score === null ? 'warn' : undefined}>
                   {cur.match_score === null ? 'no alignment' : plural(cur.match_score, 'point')}
                 </span>
@@ -467,6 +469,11 @@ export default function Measure({
                   <Icon name="trash" />
                   {confirmClear ? `Clear it — click again to confirm` : `Clear this photo's measurement`}
                 </button>
+              )}
+              {cur.measured && (
+                <span className="tiny faint" style={{ textAlign: 'center' }}>
+                  The photo itself is never deleted <Help topic="clearPhoto" align="right" />
+                </span>
               )}
             </div>
           </>

@@ -2,6 +2,7 @@
    screen are the export's filters — one query string feeds both, so the file can never disagree with the
    numbers above it. Nothing here writes: the engine is asked, the answer is drawn. */
 
+import Help from './Help'
 import Icon from './Icon'
 import { useEffect, useState, type ReactNode } from 'react'
 import { plural, thousands, type Summary } from './ui'
@@ -443,6 +444,9 @@ export default function Results({ site, sites, folder, onClear }: {
                     ? 'Clear EVERY measurement on this computer — click again'
                     : 'Clear all measurements'}
                 </button>
+                <span className="tiny faint" style={{ textAlign: 'center' }}>
+                  Your photos and everything synced are kept <Help topic="clearCamera" align="right" />
+                </span>
               </>
             ) : (
               <p className="small faint" style={{ textAlign: 'center' }}>

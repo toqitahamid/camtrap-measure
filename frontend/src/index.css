@@ -610,6 +610,63 @@ option:disabled {
   color: var(--amber);
 }
 
+/* The question mark beside a field, and the panel it opens. Deliberately quiet until wanted: the icon
+   is faint, and only brightens when the pointer is on it or the panel is open. */
+.help {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+.help-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--faint);
+  cursor: help;
+}
+.help-btn:hover,
+.help-btn[aria-expanded='true'] {
+  color: var(--amber);
+  background: var(--amber-bg);
+}
+.help-pop {
+  position: absolute;
+  top: 22px;
+  z-index: 60;
+  display: grid;
+  gap: 7px;
+  width: 300px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 55%);
+  cursor: default;
+}
+.help-pop-left {
+  left: -6px;
+}
+.help-pop-right {
+  right: -6px;
+}
+.help-pop b {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
 /* A notification, not a header: it says what just happened, sits above the status bar out of the way of
    the work, and takes itself away after a few seconds. Click to dismiss it sooner. */
 .toast {

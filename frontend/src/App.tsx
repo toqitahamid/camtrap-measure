@@ -2,6 +2,7 @@
    which flag photo, which folder, which method. The sections render what the engine returns; the shell
    owns nothing but the scope, the folder listing and the run. */
 
+import Help from './Help'
 import Icon from './Icon'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
@@ -345,6 +346,7 @@ export default function App() {
             <Icon name="sync" size={13} />
             {busy ? 'Syncing…' : 'Sync'}
           </button>
+          <Help topic="sync" align="right" />
           <div className="sep" style={{ margin: '12px 2px' }} />
           <button className="rail-foot" title={`${status.email} — sign out`}
                   onClick={() => post('/api/logout').then(refresh)}>
@@ -355,7 +357,7 @@ export default function App() {
         {section !== 'results' && (
           <div className="ctxbar">
             <label className="field" style={{ width: 152 }}>
-              <span className="cap">Camera</span>
+              <span className="cap">Camera <Help topic="camera" /></span>
               <span className="field-val">
                 <select className="bare" value={scope.site} onChange={(e) => setPicked((s) => ({ ...s, site: e.target.value }))}
                         disabled={usable.length === 0}>
@@ -368,7 +370,7 @@ export default function App() {
             <div className="sep" />
 
             <label className="field" style={{ width: 216 }}>
-              <span className="cap">Flag photo</span>
+              <span className="cap">Flag photo <Help topic="flag" /></span>
               <span className="field-val">
                 <span style={{ color: 'var(--amber)', display: 'flex' }}><Icon name="flag" size={13} width={1.8} /></span>
                 <select className="bare mono" style={{ fontSize: 12 }} value={scope.flag}
@@ -387,7 +389,7 @@ export default function App() {
             <div className="sep" />
 
             <div className="field" style={{ flex: 1, maxWidth: 380 }}>
-              <span className="cap">Photo folder</span>
+              <span className="cap">Photo folder <Help topic="folder" /></span>
               <span className="field-val">
                 {/* picked, never typed — except where there is no native dialog to pick with, which is
                     the browser and `--no-window`; `pickable` only goes false once a pick has said so. */}
@@ -408,7 +410,7 @@ export default function App() {
             <div className="sep" />
 
             <label className="field" style={{ width: 200 }}>
-              <span className="cap">Distance read at</span>
+              <span className="cap">Distance read at <Help topic="method" /></span>
               <span className="field-val">
                 <select className="bare" value={scope.method} title={methods.methods[scope.method]?.hint}
                         onChange={(e) => setPicked((s) => ({ ...s, method: e.target.value }))}>
@@ -422,6 +424,7 @@ export default function App() {
             <label className="check tiny" style={{ alignItems: 'center' }}>
               <input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />
               Re-measure photos that already have a number
+              <Help topic="rerun" align="right" />
             </label>
             {running ? (
               <button className="btn btn-danger" onClick={() => post('/api/run/cancel')}>
@@ -520,6 +523,7 @@ export default function App() {
               <>
                 <span className="dot" style={{ color: 'var(--ok)' }} />
                 <span>Models ready</span>
+                <Help topic="models" />
                 <span style={{ color: 'var(--line)' }}>·</span>
                 <span className="mono">
                   {inf.backend === 'real'
