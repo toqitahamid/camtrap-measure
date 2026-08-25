@@ -284,21 +284,52 @@ option:disabled {
   font-weight: 700;
   letter-spacing: 0.1em;
 }
+/* The header stays one line at any width: the name, the version and the tabs keep their size, and the
+   sync note is the single piece allowed to be cut short - it carries the whole text in its tooltip.
+   Without this the spans broke mid-word inside a 46px bar (reported 2026-08-25). */
+.topbar .wordmark,
+.topbar .mono {
+  white-space: nowrap;
+}
+.topbar .tabs {
+  flex: none;
+}
+.topbar .sync {
+  min-width: 0; /* .ellipsis can only bite once the flex item is allowed below its text width */
+}
 
 .ctxbar {
-  height: 58px;
+  min-height: 58px;
   flex: none;
   display: flex;
+  flex-wrap: wrap; /* more fields than window: take a second row rather than pile them on top of each other */
   align-items: center;
-  gap: 6px;
-  padding: 0 14px;
+  gap: 10px 6px;
+  padding: 6px 14px; /* one row still measures exactly the 58px it always did; a second row adds to it */
   background: var(--pane);
   border-bottom: 1px solid var(--line);
+}
+/* the separators keep the length they had when the bar was one fixed 58px row */
+.ctxbar > .sep {
+  align-self: center;
+  height: 38px;
+  margin: 0 4px;
+}
+/* neither can be usefully narrowed, so they move to the next row whole rather than shrink */
+.ctxbar .check,
+.ctxbar .btn {
+  flex: none;
+  white-space: nowrap;
 }
 .field {
   display: grid;
   gap: 3px;
-  min-width: 0;
+  /* No `min-width: 0` here. That let a field shrink past its own contents, and the contents - the
+     folder's Browse… button above all - then painted over the next field (reported 2026-08-25).
+     The automatic minimum keeps every field at least as wide as its label and its controls. */
+}
+.field > .cap {
+  white-space: nowrap; /* "PHOTO FOLDER" on two lines was the other half of that report */
 }
 .field-val {
   position: relative; /* the chevron sits over the select's right end, so clicking it opens the list */

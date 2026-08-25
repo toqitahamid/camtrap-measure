@@ -25,21 +25,20 @@ function medianBin(bins: Bin[]): Bin | null {
 const spanDays = (from: string, to: string) =>
   Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1)
 
-/** A sheet with nothing to draw: one card, one honest line, and a way out where there is one. */
+/** Nothing to draw: one card, one honest line, and a way out where there is one. The card only — the caller
+    owns the sheet, because a sheet with nothing measured in it may still carry the clear panel beside it. */
 function Message({ icon, title, line, action }: { icon: 'warn' | 'results'; title: string; line: string; action?: ReactNode }) {
   return (
-    <div className="sheet">
-      <div className="card" style={{ flex: 1 }}>
-        <div className="empty">
-          <span className={icon === 'warn' ? 'warn' : 'faint'}>
-            <Icon name={icon} size={22} />
-          </span>
-          <div className="stack" style={{ justifyItems: 'center' }}>
-            <b className="grot">{title}</b>
-            <span className="small dim">{line}</span>
-          </div>
-          {action}
+    <div className="card" style={{ flex: 1 }}>
+      <div className="empty">
+        <span className={icon === 'warn' ? 'warn' : 'faint'}>
+          <Icon name={icon} size={22} />
+        </span>
+        <div className="stack" style={{ justifyItems: 'center' }}>
+          <b className="grot">{title}</b>
+          <span className="small dim">{line}</span>
         </div>
+        {action}
       </div>
     </div>
   )
@@ -49,7 +48,7 @@ export default function Results({ site, sites, folder, onClear }: {
   site: string
   sites: string[]
   folder: string
-  onClear: (what: { path?: string; site?: string; everything?: boolean }) => void
+  onClear: (what: { path?: string; site?: string; everything?: boolean }) => void | Promise<void>
 }) {
   // The screen answers for the folder in the bar, not for everything this computer has ever measured:
   // otherwise a fresh window shows the last run's numbers over photos the researcher has not opened.
@@ -65,6 +64,10 @@ export default function Results({ site, sites, folder, onClear }: {
   const [allSpecies, setAllSpecies] = useState(false)
   const [includeSuspicious, setIncludeSuspicious] = useState(false)
   const [summary, setSummary] = useState<Summary | null>(null)
+  // Measured photos on this computer, filters ignored. The clear buttons hang off this and not off the
+  // summary: someone who has measured something and then narrowed the screen down to nothing still has
+  // measurements to throw away, and still needs the button that throws them away.
+  const [stored, setStored] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   // Clearing throws away work, so it asks once. Two clicks rather than a modal: the window has no dialog
@@ -99,12 +102,34 @@ export default function Results({ site, sites, folder, onClear }: {
     }
   }, [query, attempt])
 
+  // The same endpoint asked with no filters at all: the whole store, counted once per visit to this screen
+  // and again after anything is cleared.
+  useEffect(() => {
+    let live = true
+    fetch('/api/summary')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('unreadable'))))
+      .then((s: Summary) => {
+        if (live) setStored(s.photos)
+      })
+      .catch(() => {
+        if (live) setStored(0)
+      })
+    return () => {
+      live = false
+    }
+  }, [attempt])
+
+  /** Clear, then re-read: the numbers on this screen described rows that no longer exist. */
+  const clear = (what: { site?: string; everything?: boolean }) => {
+    void Promise.resolve(onClear(what)).then(() => setAttempt((n) => n + 1))
+  }
+
   // A camera the shell points at but /api/cameras has not listed would otherwise render as a blank select.
   const cameraOptions = camera && !sites.includes(camera) ? [camera, ...sites] : sites
 
   const filters = (
-    <div className="row" style={{ flex: 'none', gap: 6, padding: '9px 14px', borderBottom: '1px solid var(--line)' }}>
-      <div className="field" style={{ width: 186 }}>
+    <div className="row" style={{ flex: 'none', gap: 6, padding: '9px 14px', borderBottom: '1px solid var(--line)', flexWrap: 'wrap', rowGap: 10 }}>
+      <div className="field" style={{ width: 186, minWidth: 149 }}>
         <span className="cap">Photos</span>
         <div className="field-val">
           <select className="bare" value={where} onChange={(e) => setWhere(e.target.value === 'all' ? 'all' : 'folder')}>
@@ -117,7 +142,7 @@ export default function Results({ site, sites, folder, onClear }: {
         </div>
       </div>
       <div className="sep" />
-      <div className="field" style={{ width: 168 }}>
+      <div className="field" style={{ width: 168, minWidth: 134 }}>
         <span className="cap">Camera</span>
         <div className="field-val">
           <select className="bare" value={camera} onChange={(e) => chooseCamera(e.target.value)}>
@@ -134,21 +159,21 @@ export default function Results({ site, sites, folder, onClear }: {
         </div>
       </div>
       <div className="sep" />
-      <div className="field" style={{ width: 132 }}>
+      <div className="field" style={{ width: 132, minWidth: 106 }}>
         <span className="cap">Captured from</span>
         <div className="field-val">
           <input className="bare mono" style={{ fontSize: 12 }} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </div>
       </div>
       <div className="sep" />
-      <div className="field" style={{ width: 132 }}>
+      <div className="field" style={{ width: 132, minWidth: 106 }}>
         <span className="cap">To</span>
         <div className="field-val">
           <input className="bare mono" style={{ fontSize: 12 }} type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
       </div>
       <div className="sep" />
-      <div className="field" style={{ width: 232 }}>
+      <div className="field" style={{ width: 232, minWidth: 186 }}>
         <span className="cap">Species</span>
         <div className="field-val">
           <select className="bare" value={allSpecies ? 'all' : 'deer'} onChange={(e) => setAllSpecies(e.target.value === 'all')}>
@@ -163,54 +188,128 @@ export default function Results({ site, sites, folder, onClear }: {
     </div>
   )
 
+  /* Clearing is the one thing on this screen that writes. It clears the CAMERA, never the filters above
+     it: a date range or a species tick is a way of looking, not a way of choosing what to delete, and a
+     button that quietly meant "the 43 rows currently on screen" would be the wrong button. By the same
+     reasoning these buttons do not hide when the filters show nothing — they answer for the store. */
+  const clearBox = stored > 0 && (
+    <div className="stack" style={{ gap: 8 }}>
+      {camera && (
+        <button
+          className="btn"
+          style={{ height: 32, fontSize: 12,
+                   ...(confirmClear ? { color: 'var(--warn)', borderColor: 'var(--warn)' } : {}) }}
+          onBlur={() => setConfirmClear(false)}
+          onClick={() => {
+            if (!confirmClear) return setConfirmClear(true)
+            setConfirmClear(false)
+            clear({ site: camera })
+          }}
+        >
+          <Icon name="trash" size={14} width={2} />
+          {confirmClear
+            ? `Clear every measurement for ${camera} — click again`
+            : `Clear ${camera}'s measurements`}
+        </button>
+      )}
+      {/* Every camera, every folder, everything this computer has measured. Asked for by name rather than
+          by leaving the camera blank, because the difference between a mistake and this button is the
+          whole database. */}
+      <button
+        className="btn"
+        style={{ height: 32, fontSize: 12,
+                 ...(confirmAll ? { color: 'var(--bad)', borderColor: 'var(--bad-line)' } : {}) }}
+        onBlur={() => setConfirmAll(false)}
+        onClick={() => {
+          if (!confirmAll) return setConfirmAll(true)
+          setConfirmAll(false)
+          clear({ everything: true })
+        }}
+      >
+        <Icon name="trash" size={14} width={2} />
+        {confirmAll
+          ? 'Clear EVERY measurement on this computer — click again'
+          : 'Clear all measurements'}
+      </button>
+      <span className="tiny faint" style={{ textAlign: 'center' }}>
+        Your photos and everything synced are kept <Help topic="clearCamera" align="right" />
+      </span>
+    </div>
+  )
+
+  // The same buttons as a panel of their own, for the screens that have no export to hang them off.
+  const clearCard = clearBox && (
+    <div className="card" style={{ width: 336, flex: 'none' }}>
+      <div className="pane-head">
+        <span className="cap">Stored measurements</span>
+      </div>
+      <div className="scroll" style={{ padding: 16, display: 'grid', gap: 14, alignContent: 'start' }}>
+        <p className="small dim" style={{ lineHeight: 1.6 }}>
+          {plural(stored, 'photo')} measured on this computer, whatever the filters above are showing.
+        </p>
+        {clearBox}
+      </div>
+    </div>
+  )
+
   if (error !== null)
     return (
       <>
         {filters}
-        <Message
-          icon="warn"
-          title="The engine is not answering"
-          line={`These numbers come from the engine, and it could not be reached — ${error}.`}
-          action={
-            <button className="btn" onClick={() => setAttempt(attempt + 1)}>
-              <Icon name="sync" size={13} />
-              Try again
-            </button>
-          }
-        />
+        <div className="sheet">
+          <Message
+            icon="warn"
+            title="The engine is not answering"
+            line={`These numbers come from the engine, and it could not be reached — ${error}.`}
+            action={
+              <button className="btn" onClick={() => setAttempt(attempt + 1)}>
+                <Icon name="sync" size={13} />
+                Try again
+              </button>
+            }
+          />
+        </div>
       </>
     )
   if (onlyFolder && !folder)
     return (
       <>
         {filters}
-        <Message
-          icon="results"
-          title="No photo folder chosen"
-          line="These are the results for one folder of photos. Pick a folder in MEASURE, or set Photos to everything measured to see every result on this computer."
-        />
+        <div className="sheet">
+          <Message
+            icon="results"
+            title="No photo folder chosen"
+            line="These are the results for one folder of photos. Pick a folder in MEASURE, or set Photos to everything measured to see every result on this computer."
+          />
+          {clearCard}
+        </div>
       </>
     )
   if (summary === null)
     return (
       <>
         {filters}
-        <Message icon="results" title="Reading the results…" line="Counting what has been measured in this selection." />
+        <div className="sheet">
+          <Message icon="results" title="Reading the results…" line="Counting what has been measured in this selection." />
+        </div>
       </>
     )
   if (summary.photos === 0)
     return (
       <>
         {filters}
-        <Message
-          icon="results"
-          title={onlyFolder ? 'Nothing measured in this folder yet' : 'Nothing measured in this selection'}
-          line={
-            onlyFolder
-              ? 'Measure this folder in MEASURE, or set Photos to everything measured.'
-              : 'Measure a folder in MEASURE, or widen the camera and dates above.'
-          }
-        />
+        <div className="sheet">
+          <Message
+            icon="results"
+            title={onlyFolder ? 'Nothing measured in this folder yet' : 'Nothing measured in this selection'}
+            line={
+              onlyFolder
+                ? 'Measure this folder in MEASURE, or set Photos to everything measured.'
+                : 'Measure a folder in MEASURE, or widen the camera and dates above.'
+            }
+          />
+          {clearCard}
+        </div>
       </>
     )
 
@@ -359,7 +458,9 @@ export default function Results({ site, sites, folder, onClear }: {
           <div className="pane-head">
             <span className="cap">Export</span>
           </div>
-          <div style={{ padding: 16, display: 'grid', gap: 14 }}>
+          {/* Scrolls rather than clips: on a short window the panel is taller than the card, and what fell
+              off the bottom used to be the clear buttons. */}
+          <div className="scroll" style={{ padding: 16, display: 'grid', gap: 14, alignContent: 'start' }}>
             <p className="small dim" style={{ lineHeight: 1.6 }}>
               One row per animal, with its distance, the 90% interval and the flag photo it was measured against. Columns and
               units are written into the file's header lines.
@@ -403,61 +504,19 @@ export default function Results({ site, sites, folder, onClear }: {
                 <span className="mono tiny faint" style={{ textAlign: 'center' }}>
                   {fileName}
                 </span>
-                {/* Clearing is the one thing on this screen that writes. It clears the CAMERA, never the
-                    filters above it: a date range or a species tick is a way of looking, not a way of
-                    choosing what to delete, and a button that quietly meant "the 43 rows currently on
-                    screen" would be the wrong button. */}
-                {camera && (
-                  <button
-                    className="btn"
-                    style={{ height: 32, fontSize: 12, marginTop: 4,
-                             ...(confirmClear ? { color: 'var(--warn)', borderColor: 'var(--warn)' } : {}) }}
-                    onBlur={() => setConfirmClear(false)}
-                    onClick={() => {
-                      if (!confirmClear) return setConfirmClear(true)
-                      setConfirmClear(false)
-                      onClear({ site: camera })
-                    }}
-                  >
-                    <Icon name="trash" size={14} width={2} />
-                    {confirmClear
-                      ? `Clear every measurement for ${camera} \u2014 click again`
-                      : `Clear ${camera}'s measurements`}
-                  </button>
-                )}
-                {/* Every camera, every folder, everything this computer has measured. Asked for by name
-                    rather than by leaving the camera blank, because the difference between a mistake and
-                    this button is the whole database. */}
-                <button
-                  className="btn"
-                  style={{ height: 32, fontSize: 12,
-                           ...(confirmAll ? { color: 'var(--bad)', borderColor: 'var(--bad-line)' } : {}) }}
-                  onBlur={() => setConfirmAll(false)}
-                  onClick={() => {
-                    if (!confirmAll) return setConfirmAll(true)
-                    setConfirmAll(false)
-                    onClear({ everything: true })
-                  }}
-                >
-                  <Icon name="trash" size={14} width={2} />
-                  {confirmAll
-                    ? 'Clear EVERY measurement on this computer — click again'
-                    : 'Clear all measurements'}
-                </button>
-                <span className="tiny faint" style={{ textAlign: 'center' }}>
-                  Your photos and everything synced are kept <Help topic="clearCamera" align="right" />
-                </span>
               </>
             ) : (
               <p className="small faint" style={{ textAlign: 'center' }}>
                 No rows to write: everything in this selection is filtered out.
               </p>
             )}
+
+            {/* Outside the export gate on purpose: the file is what the filters say, the store is not. */}
+            {clearBox}
           </div>
 
-          <div className="spacer" />
-
-          <div style={{ padding: '14px 16px', borderTop: '1px solid var(--hair)' }}>
+          {/* No spacer above: the scrolling body takes the slack, so the footer sits at the bottom anyway. */}
+          <div style={{ flex: 'none', padding: '14px 16px', borderTop: '1px solid var(--hair)' }}>
             <div className="cap" style={{ marginBottom: 9 }}>
               In this selection
             </div>

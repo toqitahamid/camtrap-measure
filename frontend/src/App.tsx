@@ -307,6 +307,13 @@ export default function App() {
   const measured = folder ? folder.rows.filter((r) => r.measured).length : 0
   const flagged = folder ? folder.rows.filter((r) => r.reasons.length > 0).length : 0
   const ready = inf.status === 'ready'
+  // one string, so the header can both show it and keep it whole in the tooltip when the window
+  // is too narrow to draw all of it
+  const syncNote =
+    (status.last_sync
+      ? `synced ${new Date(status.last_sync).toLocaleTimeString(undefined, { hour12: false })}`
+      : 'never synced') +
+    ` · ${status.annotations} flag photos · ${usable.length}/${cameras.length} cameras labelled`
 
   return (
     <div className="app">
@@ -336,11 +343,8 @@ export default function App() {
           </div>
 
           <div className="spacer" />
-          <span className="mono tiny" style={{ color: 'var(--faint)' }}>
-            {status.last_sync
-              ? `synced ${new Date(status.last_sync).toLocaleTimeString(undefined, { hour12: false })}`
-              : 'never synced'}
-            {` · ${status.annotations} flag photos · ${usable.length}/${cameras.length} cameras labelled`}
+          <span className="mono tiny sync ellipsis" style={{ color: 'var(--faint)' }} title={syncNote}>
+            {syncNote}
           </span>
           <button className="btn" onClick={sync} disabled={busy}>
             <Icon name="sync" size={13} />
@@ -356,7 +360,9 @@ export default function App() {
 
         {section !== 'results' && (
           <div className="ctxbar">
-            <label className="field" style={{ width: 152 }}>
+            {/* width is what each field would like; minWidth is what it must keep to stay readable —
+                the bar wraps to a second row before anything is squeezed past it */}
+            <label className="field" style={{ width: 152, minWidth: 116 }}>
               <span className="cap">Camera <Help topic="camera" /></span>
               <span className="field-val">
                 <select className="bare" value={scope.site} onChange={(e) => setPicked((s) => ({ ...s, site: e.target.value }))}
@@ -369,7 +375,7 @@ export default function App() {
             </label>
             <div className="sep" />
 
-            <label className="field" style={{ width: 216 }}>
+            <label className="field" style={{ width: 216, minWidth: 150 }}>
               <span className="cap">Flag photo <Help topic="flag" /></span>
               <span className="field-val">
                 <span style={{ color: 'var(--amber)', display: 'flex' }}><Icon name="flag" size={13} width={1.8} /></span>
@@ -388,7 +394,7 @@ export default function App() {
             </label>
             <div className="sep" />
 
-            <div className="field" style={{ flex: 1, maxWidth: 380 }}>
+            <div className="field" style={{ flex: 1, minWidth: 210, maxWidth: 380 }}>
               <span className="cap">Photo folder <Help topic="folder" /></span>
               <span className="field-val">
                 {/* picked, never typed — except where there is no native dialog to pick with, which is
@@ -409,7 +415,7 @@ export default function App() {
             </div>
             <div className="sep" />
 
-            <label className="field" style={{ width: 200 }}>
+            <label className="field" style={{ width: 200, minWidth: 176 }}>
               <span className="cap">Distance read at <Help topic="method" /></span>
               <span className="field-val">
                 <select className="bare" value={scope.method} title={methods.methods[scope.method]?.hint}
