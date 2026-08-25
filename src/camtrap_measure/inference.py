@@ -42,6 +42,8 @@ METHODS = {
 DEFAULT_METHOD = "md"
 SPECIES = ["white-tailed deer", "white-tailed deer", "white-tailed deer", "raccoon", "unsure"]
 FAKE_DELAY_S = float(os.environ.get("CAMTRAP_FAKE_DELAY", "0"))  # per photo, to demo the progress display
+DETECT_MODELS = ["MegaDetector", "SpeciesNet"]  # stage one, by the names the status bar shows
+SAM3_MODEL = "SAM 3"                            # stage two's optional extra: only the precise method loads it
 MD_CONF = 0.15  # deliberately low: weak boxes are kept and land in the suspicious gallery (ticket 09), never silently binned
 MIN_SPECIES_SCORE = 0.2  # below this SpeciesNet is guessing → "unsure" (research knob, detect/speciesnet_wrap.py)
 VRAM_FLOOR_GB = 8  # CONTEXT "Performance envelope": the design floor; smaller cards run, with a warning
@@ -244,10 +246,15 @@ class Real:
 
     @property
     def loaded(self) -> list[str]:
-        """Which stages are on the card right now, so an idle app holding nothing is visible on the
-        status line rather than merely claimed."""
-        return ([] if self._detect is None else ["finding animals"]) + \
-               ([] if self._dist is None else ["measuring distances"])
+        """Which models are on the card right now, by the name the status bar shows, so an idle app
+        holding nothing is visible there rather than merely claimed.
+
+        Names, not stage labels: the bar already says what the app is doing ("finding animals"), and the
+        question this answers is the other one — which models that takes. SAM 3 is listed only once it is
+        really loaded, which is on the first photo of a precise run and never in a fast one."""
+        return ([] if self._detect is None else list(DETECT_MODELS)) + \
+               ([] if self._dist is None else list(distance.MODELS)) + \
+               ([] if self.sam3 is None else [SAM3_MODEL])
 
     def _gpu_name(self) -> str:
         """What the status line shows, so "is it really using the GPU?" has an answer on screen: the card's

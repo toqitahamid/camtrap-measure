@@ -184,7 +184,7 @@ export default function Measure({
           </div>
         ) : list.length === 0 ? (
           <div className="empty">
-            <p className="dim small">No photo is {view === 'new' ? 'still unmeasured' : 'flagged for a look'} — every one of the {rows.length} is fine.</p>
+            <p className="dim small">No photo is {view === 'new' ? 'still unmeasured' : 'flagged for a look'}. Every one of the {rows.length} is fine.</p>
             <button className="btn btn-sm" onClick={() => setView('all')}>Show all {rows.length}</button>
           </div>
         ) : (
@@ -303,7 +303,7 @@ export default function Measure({
                     <span className="foot" />
                   </div>
                 ))}
-                {showFlag && <span className="frame-note">Flag photo {against} — every distance is read against this frame</span>}
+                {showFlag && <span className="frame-note">Flag photo {against}. Every distance is read against this frame</span>}
               </div>
             </div>
           </>
@@ -407,7 +407,7 @@ export default function Measure({
 
               {cur.detections.length > 0 && (
                 <div style={{ padding: '0 16px 14px' }}>
-                  <div className="cap" style={{ marginBottom: 9 }}>Animals found — {cur.detections.length}</div>
+                  <div className="cap" style={{ marginBottom: 9 }}>Animals found: {cur.detections.length}</div>
                   <div className="stack">
                     {cur.detections.map((d, i) => (
                       <button
@@ -467,7 +467,7 @@ export default function Measure({
                   onBlur={() => setConfirmClear(false)}
                 >
                   <Icon name="trash" />
-                  {confirmClear ? `Clear it — click again to confirm` : `Clear this photo's measurement`}
+                  {confirmClear ? `Clear it. Click again to confirm` : `Clear this photo's measurement`}
                 </button>
               )}
               {cur.measured && (

@@ -18,9 +18,33 @@ import {
   type Folder,
   type Methods,
   type Run,
+  type Inference,
   type Scope,
   type Status,
 } from './ui'
+
+/* The two bottom bars say two things and no more: what the app is doing right now, and which models are
+   doing it. Precision, batch size and the rest moved into the "What the app is doing" popover — a
+   technician reads this bar to know the run is alive, not to debug it. */
+
+/** The plain sentence for a run's current stage, naming the models the engine says are loaded. */
+const doing = (phase: string, loaded: string[]): string => {
+  const names = loaded.join(' + ')
+  if (phase === 'loading the models') return names ? `Loading ${names}…` : 'Loading models…'
+  if (phase === 'finding animals') return names ? `Finding animals with ${names}` : 'Finding animals'
+  if (phase === 'measuring distances') return names ? `Measuring distances with ${names}` : 'Measuring distances'
+  if (phase === 'finished') return 'Finishing up…'
+  return 'Measuring'
+}
+
+/** The card's own name — the answer to "is it really using the GPU". '' when the engine named neither. */
+const card = (inf: Inference): string => inf.gpu ?? inf.device ?? ''
+
+/** The same name as a phrase for the running bar; the no-GPU wording is already a sentence of its own. */
+const runningOn = (inf: Inference): string => {
+  const name = card(inf)
+  return !name || name.toLowerCase().startsWith('cpu') ? name : `on ${name}`
+}
 
 type Section = 'measure' | 'table' | 'results'
 const SECTIONS: { id: Section; label: string; icon: 'measure' | 'table' | 'results' }[] = [
@@ -204,7 +228,7 @@ export default function App() {
       return
     }
     const body = await r.json()
-    if (!body.ok) setNotice({ text: `Offline — using the flag photos from ${when(body.last_sync)}.`, kind: 'warn' })
+    if (!body.ok) setNotice({ text: `Offline. Using the flag photos from ${when(body.last_sync)}.`, kind: 'warn' })
     setStale((n) => n + 1)
     await refresh()
   }
@@ -254,7 +278,7 @@ export default function App() {
             <h1>How far away<br />was that deer?</h1>
             <p className="dim" style={{ marginTop: 20, fontSize: 15, lineHeight: 1.65 }}>
               Point it at a folder of camera-trap photos. It finds each animal, reads the ground distance against the
-              flag photo you labelled in FlagLabel, and gives you a distance and its 90% interval — photo by photo,
+              flag photo you labelled in FlagLabel, and gives you a distance and its 90% interval, photo by photo,
               with the numbers on the picture where you can check them.
             </p>
           </div>
@@ -269,7 +293,7 @@ export default function App() {
               <div className="cap">Step 1 of 2</div>
               <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Sign in</h2>
               <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
-                Use the FlagLabel account you label with. There is no password — a one-time code is emailed to you.
+                Use the FlagLabel account you label with. There is no password: a one-time code is emailed to you.
               </p>
               {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
               <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Email</label>
@@ -283,7 +307,7 @@ export default function App() {
               <div className="cap">Step 2 of 2</div>
               <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Enter the code</h2>
               <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
-                Sent to {codeSentTo} — check the spam folder if it takes a minute.
+                Sent to {codeSentTo}. Check the spam folder if it takes a minute.
               </p>
               {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
               <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Code from the email</label>
@@ -352,7 +376,7 @@ export default function App() {
           </button>
           <Help topic="sync" align="right" />
           <div className="sep" style={{ margin: '12px 2px' }} />
-          <button className="rail-foot" title={`${status.email} — sign out`}
+          <button className="rail-foot" title={`${status.email}. Sign out`}
                   onClick={() => post('/api/logout').then(refresh)}>
             {initials(status.email)}
           </button>
@@ -385,7 +409,7 @@ export default function App() {
                   {flags.map((f) => (
                     <option key={f.image_name} value={f.image_name} disabled={!f.ok} title={f.reason ?? undefined}>
                       {f.image_name}{f.captured_at ? ` · ${new Date(f.captured_at).toLocaleDateString()}` : ''}
-                      {f.ok ? '' : ' — not usable'}
+                      {f.ok ? '' : ', not usable'}
                     </option>
                   ))}
                 </select>
@@ -482,9 +506,12 @@ export default function App() {
               <span className="spin" style={{ color: 'var(--amber)', display: 'flex' }}>
                 <Icon name="spinner" size={14} width={2.2} />
               </span>
-              {/* the stage, not just "measuring": the detector looks at every photo before a single
-                  distance is read, and on a full card that first pass is most of the wait */}
-              <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>{run.phase || 'Measuring'}</span>
+              {/* the stage and the models doing it, not just "measuring": the detector looks at every
+                  photo before a single distance is read, and on a full card that first pass is most of
+                  the wait */}
+              <span style={{ fontWeight: 500 }}>
+                {doing(run.phase, (inf.backend === 'real' && inf.loaded) || [])}
+              </span>
               <span className="mono" style={{ color: 'var(--text-2)' }}>
                 {run.phase_total ? `${run.phase_done} / ${run.phase_total}` : `${run.done} / ${run.total}`} photos
               </span>
@@ -497,13 +524,13 @@ export default function App() {
                 </>
               )}
               <div className="spacer" />
+              {/* the card by name, once: "is it really using the GPU" is the one technical question
+                  worth answering while a run is on screen */}
               <span className="mono tiny" style={{ color: 'var(--faint)' }}>
-                {inf.backend === 'real'
-                  ? `MegaDetector + SpeciesNet · ${inf.gpu ?? inf.device} · ${inf.precision} · batch ${inf.batch}`
-                  : 'made-up numbers (no models installed)'}
+                {inf.backend !== 'real' ? 'made-up numbers (no models installed)' : runningOn(inf)}
               </span>
               {inf.fidelity === 'fast' && (
-                <span className="warn tiny">⚠ fast settings — not the published pipeline</span>
+                <span className="warn tiny">⚠ fast settings, not the published pipeline</span>
               )}
             </div>
           </div>
@@ -516,7 +543,7 @@ export default function App() {
                 </span>
                 <span>
                   {inf.download
-                    ? `Downloading model weights ${inf.download.done_gb.toFixed(1)} / ${inf.download.total_gb.toFixed(1)} GB — one time only`
+                    ? `Downloading model weights ${inf.download.done_gb.toFixed(1)} / ${inf.download.total_gb.toFixed(1)} GB, one time only`
                     : 'Loading models…'}
                 </span>
               </>
@@ -528,24 +555,34 @@ export default function App() {
             ) : (
               <>
                 <span className="dot" style={{ color: 'var(--ok)' }} />
-                <span>Models ready</span>
+                <span>Ready</span>
                 <Help topic="models" />
-                <span style={{ color: 'var(--line)' }}>·</span>
-                <span className="mono">
-                  {inf.backend === 'real'
-                    ? `MegaDetector + SpeciesNet ${inf.weights} · ${inf.gpu ?? inf.device} · ${inf.precision}`
-                    : 'made-up numbers (no models installed)'}
-                </span>
-                {inf.backend === 'real' && (
-                  /* the models are loaded per run and dropped after it, so an idle app really is
-                     holding nothing - say which, rather than leaving the technician to guess */
-                  <span className="mono dim">
-                    {inf.loaded?.length ? `${inf.loaded.join(' + ')} loaded` : 'models unloaded — no GPU memory held'}
-                  </span>
+                {inf.backend === 'real' ? (
+                  <>
+                    {card(inf) && (
+                      <>
+                        <span style={{ color: 'var(--line)' }}>·</span>
+                        <span className="mono">{card(inf)}</span>
+                      </>
+                    )}
+                    {inf.weights && <span className="mono dim">{inf.weights}</span>}
+                    {/* the models are loaded per run and dropped after it, so an idle app really is
+                        holding nothing - say so, rather than leaving the technician to guess */}
+                    <span className="mono dim">
+                      {inf.loaded?.length
+                        ? `${inf.loaded.join(' + ')} still loaded`
+                        : 'models load when you press Measure'}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ color: 'var(--line)' }}>·</span>
+                    <span className="mono">made-up numbers (no models installed)</span>
+                  </>
                 )}
                 {/* the published settings are the default; when they are not in use it must be on screen */}
                 {inf.fidelity === 'fast' && (
-                  <span className="warn">⚠ fast settings — not the published pipeline</span>
+                  <span className="warn">⚠ fast settings, not the published pipeline</span>
                 )}
                 {inf.warning && <span className="warn">⚠ {inf.warning}</span>}
               </>

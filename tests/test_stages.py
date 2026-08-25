@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from camtrap_measure import inference
+from camtrap_measure import distance, inference
 
 from tests.test_measure import folder, jpeg, results, run
 
@@ -55,7 +55,7 @@ def test_a_finished_run_hands_the_card_back(synced, tmp_path, monkeypatch):
     freed = []
 
     class Backend:
-        loaded, batch = ["finding animals"], 16
+        loaded, batch = ["MegaDetector", "SpeciesNet"], 16
 
         def __call__(self, paths, calibration, method, **_):
             yield from inference.fake(paths, calibration, method)
@@ -122,12 +122,46 @@ def test_the_run_says_which_stage_it_is_in(synced, tmp_path, monkeypatch):
 def test_the_status_line_reports_what_is_actually_resident(monkeypatch):
     """`state` is written once at warmup; what holds VRAM changes with every run."""
     class Backend:
-        loaded, batch = ["measuring distances"], 32
+        loaded, batch = ["RoMa", "distance model"], 32
 
     monkeypatch.setattr(inference, "backend", Backend())
-    assert inference.live() == {"loaded": ["measuring distances"], "batch": 32}
+    assert inference.live() == {"loaded": ["RoMa", "distance model"], "batch": 32}
     monkeypatch.setattr(inference, "backend", inference.fake)
     assert inference.live() == {"loaded": [], "batch": None}  # the fake holds nothing
+
+
+class Bare:
+    """A `Real` without its torch imports: `loaded` reads these three attributes and nothing else."""
+
+    _detect = _dist = sam3 = None
+
+
+def test_loaded_names_the_models_rather_than_the_stages():
+    """The bar says what the app is doing on its own; what the technician cannot see is which models
+    that takes, and "is anything still holding my graphics card"."""
+    b = Bare()
+    assert inference.Real.loaded.fget(b) == []
+    b._detect = object()
+    assert inference.Real.loaded.fget(b) == ["MegaDetector", "SpeciesNet"]
+    b._detect, b._dist = None, object()
+    assert inference.Real.loaded.fget(b) == ["RoMa", "distance model"]
+
+
+def test_sam3_is_named_only_once_it_is_really_on_the_card():
+    """It loads on the first photo of a precise run and never in a fast one, so naming it with the rest
+    of the measuring stage would claim VRAM that most runs never take."""
+    b = Bare()
+    b._dist = object()
+    assert "SAM 3" not in inference.Real.loaded.fget(b)
+    b.sam3 = object()
+    assert inference.Real.loaded.fget(b) == ["RoMa", "distance model", "SAM 3"]
+
+
+def test_the_names_on_the_bar_are_names_and_not_settings():
+    """The bottom bar is read by a technician: model names only. Batch sizes and float widths belong in
+    the help popover, which is where they went."""
+    for name in inference.DETECT_MODELS + distance.MODELS + [inference.SAM3_MODEL]:
+        assert "batch" not in name.lower() and "float" not in name.lower()
 
 
 def test_skip_and_measure_agree_about_which_photos_need_work(synced, tmp_path, monkeypatch):

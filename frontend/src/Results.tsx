@@ -208,7 +208,7 @@ export default function Results({ site, sites, folder, onClear }: {
         >
           <Icon name="trash" size={14} width={2} />
           {confirmClear
-            ? `Clear every measurement for ${camera} — click again`
+            ? `Clear every measurement for ${camera}. Click again`
             : `Clear ${camera}'s measurements`}
         </button>
       )}
@@ -228,7 +228,7 @@ export default function Results({ site, sites, folder, onClear }: {
       >
         <Icon name="trash" size={14} width={2} />
         {confirmAll
-          ? 'Clear EVERY measurement on this computer — click again'
+          ? 'Clear EVERY measurement on this computer. Click again'
           : 'Clear all measurements'}
       </button>
       <span className="tiny faint" style={{ textAlign: 'center' }}>
@@ -260,7 +260,7 @@ export default function Results({ site, sites, folder, onClear }: {
           <Message
             icon="warn"
             title="The engine is not answering"
-            line={`These numbers come from the engine, and it could not be reached — ${error}.`}
+            line={`These numbers come from the engine, and it could not be reached: ${error}.`}
             action={
               <button className="btn" onClick={() => setAttempt(attempt + 1)}>
                 <Icon name="sync" size={13} />
@@ -378,7 +378,7 @@ export default function Results({ site, sites, folder, onClear }: {
             <div style={{ padding: '16px 16px 10px' }}>
               {bins.length === 0 ? (
                 <p className="small dim">
-                  No distances in this selection. An animal enters the histogram once the ground could be read under it — the
+                  No distances in this selection. An animal enters the histogram once the ground could be read under it. The
                   rows that need a look say why it could not.
                 </p>
               ) : (

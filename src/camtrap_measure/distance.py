@@ -40,6 +40,11 @@ TIGHT_CARD_GB = 10        # below this much VRAM in total, the 864 warp does not
 # the speed on a card too small for the published settings; every difference is listed in CONTEXT.md.
 RESEARCH, FAST = "research", "fast"
 FIDELITIES = (RESEARCH, FAST)
+# What the status line calls the two models this stage puts on the card. RoMa's DINOv2 backbone is not
+# named separately: it is part of RoMa, and the bar answers "what is running", not "what is imported".
+# The unified net is "the distance model" on screen, not "Depth Anything V2": the technician needs to know
+# which of the app's steps is running, and the architecture it was fine-tuned from tells them nothing.
+MODELS = ["RoMa", "distance model"]
 MIN_INLIERS = 15  # published gate (reports/gate_57cam.md): fewer homography inliers = misfiled or moved camera
 HALF = 2  # 5×5 readout window
 
