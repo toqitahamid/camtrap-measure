@@ -610,6 +610,41 @@ option:disabled {
   color: var(--amber);
 }
 
+/* A notification, not a header: it says what just happened, sits above the status bar out of the way of
+   the work, and takes itself away after a few seconds. Click to dismiss it sooner. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 46px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border: 1px solid var(--ok-line, var(--line));
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--text);
+  font-size: 12.5px;
+  box-shadow: 0 6px 22px rgb(0 0 0 / 45%);
+  cursor: pointer;
+  animation: toast-in 140ms ease-out;
+}
+.toast svg {
+  color: var(--ok);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 progress {
   width: 100%;
   height: 4px;

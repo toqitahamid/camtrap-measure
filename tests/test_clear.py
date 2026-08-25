@@ -114,3 +114,19 @@ def test_the_folder_listing_says_which_camera_each_flag_photo_belongs_to(synced,
 
     unmeasured = [r for r in listing["rows"] if not r["measured"]]
     assert all(r["flag_site"] is None for r in unmeasured)  # nothing measured it, so no pair to report
+
+
+def test_clearing_everything_has_to_be_asked_for_by_name(synced, tmp_path):
+    """An empty call is a mistake, not an instruction to empty the store, and the difference between the
+    two is every measurement on the machine."""
+    measured(synced, tmp_path)
+    assert results(synced)
+
+    assert synced.post("/api/results/clear").status_code == 400          # says nothing: still refused
+    assert synced.post("/api/results/clear", params={"everything": "true", "site": "X"}).status_code == 400
+
+    r = synced.post("/api/results/clear", params={"everything": "true"})
+    assert r.status_code == 200 and r.json()["photos"] == 3
+    assert results(synced) == [] and synced.get("/api/summary").json()["photos"] == 0
+    # and still only the answers: the cameras and their flag photos are all there
+    assert synced.get("/api/cameras").json()

@@ -79,7 +79,7 @@ export default function Measure({
   busy: boolean
   running: boolean // a run is actually in flight; `busy` is also true while the models load
   onMeasure: (paths: string[]) => void
-  onClear: (what: { path?: string; site?: string }) => void
+  onClear: (what: { path?: string; site?: string; everything?: boolean }) => void
   // ponytail: optional because the ticket's signature stops above — the shell hands these over when the table
   // opens a row here, and when the folder listing itself failed. Omitting them changes nothing.
   focus?: string | null

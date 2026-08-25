@@ -42,7 +42,9 @@ export default function App() {
   const [cameras, setCameras] = useState<Camera[]>([])
   const [methods, setMethods] = useState<Methods>({ default: '', methods: {} })
   const [build, setBuild] = useState<{ version: string; commit: string | null } | null>(null)
-  const [notice, setNotice] = useState<{ text: string; kind: 'warn' | 'error' } | null>(null)
+  // 'done' is a notification: something finished, here is what it did, and it takes itself away again.
+  // 'warn' and 'error' stay until something replaces them - they are things to read and act on.
+  const [notice, setNotice] = useState<{ text: string; kind: 'warn' | 'error' | 'done' } | null>(null)
   const [busy, setBusy] = useState(false)
   const [codeSentTo, setCodeSentTo] = useState<string | null>(null)
 
@@ -125,6 +127,14 @@ export default function App() {
     }
   }, [path, site, flag, method, stale])
 
+  // A report of something already finished should not sit on screen until the next click clears it
+  // (reported 2026-08-25). Anything still worth reading - a warning, an error - stays.
+  useEffect(() => {
+    if (notice?.kind !== 'done') return
+    const id = setTimeout(() => setNotice(null), 6000)
+    return () => clearTimeout(id)
+  }, [notice])
+
   const running = run?.status === 'running'
   useEffect(() => {
     if (!running) return
@@ -155,16 +165,18 @@ export default function App() {
   }
 
   /** Forget measurements: one photo, or every photo of one camera. Nothing on disk is touched. */
-  async function clearResults(what: { path?: string; site?: string }) {
+  async function clearResults(what: { path?: string; site?: string; everything?: boolean }) {
     setNotice(null)
-    const q = new URLSearchParams(what as Record<string, string>)
+    const q = new URLSearchParams(
+      Object.entries(what).map(([k, v]) => [k, String(v)]) as [string, string][],
+    )
     const r = await post(`/api/results/clear?${q}`)
     if (!r.ok) {
       setNotice({ text: (await r.json()).detail ?? `Could not clear (${r.status})`, kind: 'error' })
       return
     }
     const done: { photos: number; detections: number } = await r.json()
-    setNotice({ text: `Cleared ${plural(done.photos, 'photo')} (${plural(done.detections, 'measurement')}).`, kind: 'warn' })
+    setNotice({ text: `Cleared ${plural(done.photos, 'photo')} \u00b7 ${plural(done.detections, 'measurement')}`, kind: 'done' })
     setStale((n) => n + 1) // the listing and the results on screen are now out of date
   }
 
@@ -425,7 +437,7 @@ export default function App() {
           </div>
         )}
 
-        {notice && section !== 'results' && (
+        {notice && notice.kind !== 'done' && section !== 'results' && (
           <p className={`notice notice-${notice.kind}`} style={{ margin: '10px 14px 0' }}>{notice.text}</p>
         )}
 
@@ -444,6 +456,13 @@ export default function App() {
               onClear={clearResults} />
           )}
         </div>
+
+        {notice?.kind === 'done' && (
+          <div className="toast" role="status" onClick={() => setNotice(null)} title="Dismiss">
+            <Icon name="check" size={13} width={2.4} />
+            {notice.text}
+          </div>
+        )}
 
         {running && run ? (
           <div className="runbar">

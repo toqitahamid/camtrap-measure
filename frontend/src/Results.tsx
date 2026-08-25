@@ -48,7 +48,7 @@ export default function Results({ site, sites, folder, onClear }: {
   site: string
   sites: string[]
   folder: string
-  onClear: (what: { path?: string; site?: string }) => void
+  onClear: (what: { path?: string; site?: string; everything?: boolean }) => void
 }) {
   // The screen answers for the folder in the bar, not for everything this computer has ever measured:
   // otherwise a fresh window shows the last run's numbers over photos the researcher has not opened.
@@ -69,6 +69,7 @@ export default function Results({ site, sites, folder, onClear }: {
   // Clearing throws away work, so it asks once. Two clicks rather than a modal: the window has no dialog
   // of its own, and a browser confirm() blocks the whole WebView until it is answered.
   const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmAll, setConfirmAll] = useState(false)
 
   // The one place the filters become a query: the summary reads it, the export link appends to it.
   const params = new URLSearchParams()
@@ -423,6 +424,25 @@ export default function Results({ site, sites, folder, onClear }: {
                       : `Clear ${camera}'s measurements`}
                   </button>
                 )}
+                {/* Every camera, every folder, everything this computer has measured. Asked for by name
+                    rather than by leaving the camera blank, because the difference between a mistake and
+                    this button is the whole database. */}
+                <button
+                  className="btn"
+                  style={{ height: 32, fontSize: 12,
+                           ...(confirmAll ? { color: 'var(--bad)', borderColor: 'var(--bad-line)' } : {}) }}
+                  onBlur={() => setConfirmAll(false)}
+                  onClick={() => {
+                    if (!confirmAll) return setConfirmAll(true)
+                    setConfirmAll(false)
+                    onClear({ everything: true })
+                  }}
+                >
+                  <Icon name="trash" size={14} width={2} />
+                  {confirmAll
+                    ? 'Clear EVERY measurement on this computer — click again'
+                    : 'Clear all measurements'}
+                </button>
               </>
             ) : (
               <p className="small faint" style={{ textAlign: 'center' }}>

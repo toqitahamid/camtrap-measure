@@ -215,13 +215,13 @@ def _iso(d: date | None) -> str | None:
 
 
 @app.post("/api/results/clear")
-def clear_results(site: str | None = None, path: str | None = None):
-    """Forget the measurements of one camera, or of one photo. The photos themselves are not touched,
-    and neither is anything synced from FlagLabel — only the numbers this app recorded."""
+def clear_results(site: str | None = None, path: str | None = None, everything: bool = False):
+    """Forget measurements: one photo, one camera's worth, or all of them. The photos themselves are not
+    touched, and neither is anything synced from FlagLabel — only the numbers this app recorded."""
     if measure.current and measure.current["status"] == "running":
         raise HTTPException(409, "A run is in progress — stop it before clearing measurements.")
     try:
-        return store.clear_measurements(site=site, path=path)
+        return store.clear_measurements(site=site, path=path, everything=everything)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

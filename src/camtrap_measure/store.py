@@ -196,27 +196,30 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
         )
 
 
-def clear_measurements(site: str | None = None, path: str | None = None) -> dict:
-    """Forget what a run recorded: one photo, or every photo of one camera. → {photos, detections} removed.
+def clear_measurements(site: str | None = None, path: str | None = None, everything: bool = False) -> dict:
+    """Forget what a run recorded: one photo, one camera's worth, or all of it.
+    → {photos, detections} removed.
 
     Only the local answers go. The photos on disk are untouched, and so is everything synced from
     FlagLabel — cameras, annotations, calibrations and the cached flag photos all stay, because they are
     not this app's to delete and re-measuring needs them.
 
-    Exactly one of `site` and `path` is expected; without either this would empty the whole store, which
-    no button in the window asks for and which nobody would mean by "clear this camera".
+    Exactly one of `site`, `path` and `everything` is expected. "Everything" has to be asked for by name:
+    an empty call is a mistake, not an instruction to empty the store, and the difference between the two
+    is every measurement on the machine.
     """
-    if (site is None) == (path is None):
-        raise ValueError("Say which to clear: one camera (site) or one photo (path), not both and not neither.")
-    where, arg = ("path = ?", path) if path else ("site = ?", site)
+    asked = [site is not None, path is not None, bool(everything)]
+    if sum(asked) != 1:
+        raise ValueError("Say what to clear: one photo (path), one camera (site), or everything — exactly one.")
+    where, args = ("1 = 1", ()) if everything else (("path = ?", (path,)) if path else ("site = ?", (site,)))
     with closing(_db()) as con, con:
-        gone = [r["path"] for r in con.execute(f"select path from photos where {where}", (arg,))]
+        gone = [r["path"] for r in con.execute(f"select path from photos where {where}", args)]
         if not gone:
             return {"photos": 0, "detections": 0}
         marks = ",".join("?" * len(gone))
         dets = con.execute(f"select count(*) from detections where path in ({marks})", gone).fetchone()[0]
         con.execute(f"delete from detections where path in ({marks})", gone)
-        con.execute(f"delete from photos where {where}", (arg,))
+        con.execute(f"delete from photos where {where}", args)
     return {"photos": len(gone), "detections": dets}
 
 
