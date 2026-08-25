@@ -52,6 +52,7 @@ export type Row = {
   match_score: number | null
   method: string | null
   flag_image: string | null
+  flag_site: string | null   // the camera it was measured under - travels with flag_image or the pair is a 404
   reasons: string[]
   detections: Det[]
 }

@@ -158,10 +158,13 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
         if seen and seen["method"] != method:
             seen = None  # measured, but not under the method being asked about: no answer to this question
         row = {"name": p.name, "path": str(p), "captured_at": None, "measured": seen is not None, "stale": False,
-               "match_score": None, "method": None, "flag_image": None, "reasons": [], "detections": []}
+               "match_score": None, "method": None, "flag_image": None, "flag_site": None, "reasons": [], "detections": []}
         if seen:
+            # flag_site travels with flag_image or the pair is meaningless: the window shows the flag photo a
+            # number was read against, and a camera chosen in the meantime is not the camera that produced it.
+            # Asking for one camera's flag under another camera's name is a 404 and a blank frame (2026-08-25).
             row.update(captured_at=seen["captured_at"], match_score=seen["match_score"], method=seen["method"],
-                       flag_image=seen["calibration_image"],
+                       flag_image=seen["calibration_image"], flag_site=seen["site"],
                        stale=cal is not None and not measure.current_answer(seen, cal, method, inference.fidelity()),
                        reasons=[seen["held_reason"]] if seen["held_reason"] else [])
             for r in sorted(dets.get(str(p), []), key=lambda r: r["idx"]):

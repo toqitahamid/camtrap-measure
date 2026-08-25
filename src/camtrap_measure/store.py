@@ -196,6 +196,30 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
         )
 
 
+def clear_measurements(site: str | None = None, path: str | None = None) -> dict:
+    """Forget what a run recorded: one photo, or every photo of one camera. → {photos, detections} removed.
+
+    Only the local answers go. The photos on disk are untouched, and so is everything synced from
+    FlagLabel — cameras, annotations, calibrations and the cached flag photos all stay, because they are
+    not this app's to delete and re-measuring needs them.
+
+    Exactly one of `site` and `path` is expected; without either this would empty the whole store, which
+    no button in the window asks for and which nobody would mean by "clear this camera".
+    """
+    if (site is None) == (path is None):
+        raise ValueError("Say which to clear: one camera (site) or one photo (path), not both and not neither.")
+    where, arg = ("path = ?", path) if path else ("site = ?", site)
+    with closing(_db()) as con, con:
+        gone = [r["path"] for r in con.execute(f"select path from photos where {where}", (arg,))]
+        if not gone:
+            return {"photos": 0, "detections": 0}
+        marks = ",".join("?" * len(gone))
+        dets = con.execute(f"select count(*) from detections where path in ({marks})", gone).fetchone()[0]
+        con.execute(f"delete from detections where path in ({marks})", gone)
+        con.execute(f"delete from photos where {where}", (arg,))
+    return {"photos": len(gone), "detections": dets}
+
+
 def photos() -> list[dict]:
     """Every photo a run has seen — measured or held — with its hold reason and latest alignment score."""
     with closing(_db()) as con:

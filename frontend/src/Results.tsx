@@ -44,7 +44,12 @@ function Message({ icon, title, line, action }: { icon: 'warn' | 'results'; titl
   )
 }
 
-export default function Results({ site, sites, folder }: { site: string; sites: string[]; folder: string }) {
+export default function Results({ site, sites, folder, onClear }: {
+  site: string
+  sites: string[]
+  folder: string
+  onClear: (what: { path?: string; site?: string }) => void
+}) {
   // The screen answers for the folder in the bar, not for everything this computer has ever measured:
   // otherwise a fresh window shows the last run's numbers over photos the researcher has not opened.
   const [where, setWhere] = useState<'folder' | 'all'>('folder')
@@ -61,6 +66,9 @@ export default function Results({ site, sites, folder }: { site: string; sites: 
   const [summary, setSummary] = useState<Summary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
+  // Clearing throws away work, so it asks once. Two clicks rather than a modal: the window has no dialog
+  // of its own, and a browser confirm() blocks the whole WebView until it is answered.
+  const [confirmClear, setConfirmClear] = useState(false)
 
   // The one place the filters become a query: the summary reads it, the export link appends to it.
   const params = new URLSearchParams()
@@ -393,6 +401,28 @@ export default function Results({ site, sites, folder }: { site: string; sites: 
                 <span className="mono tiny faint" style={{ textAlign: 'center' }}>
                   {fileName}
                 </span>
+                {/* Clearing is the one thing on this screen that writes. It clears the CAMERA, never the
+                    filters above it: a date range or a species tick is a way of looking, not a way of
+                    choosing what to delete, and a button that quietly meant "the 43 rows currently on
+                    screen" would be the wrong button. */}
+                {camera && (
+                  <button
+                    className="btn"
+                    style={{ height: 32, fontSize: 12, marginTop: 4,
+                             ...(confirmClear ? { color: 'var(--warn)', borderColor: 'var(--warn)' } : {}) }}
+                    onBlur={() => setConfirmClear(false)}
+                    onClick={() => {
+                      if (!confirmClear) return setConfirmClear(true)
+                      setConfirmClear(false)
+                      onClear({ site: camera })
+                    }}
+                  >
+                    <Icon name="trash" size={14} width={2} />
+                    {confirmClear
+                      ? `Clear every measurement for ${camera} \u2014 click again`
+                      : `Clear ${camera}'s measurements`}
+                  </button>
+                )}
               </>
             ) : (
               <p className="small faint" style={{ textAlign: 'center' }}>

@@ -154,6 +154,20 @@ export default function App() {
     setRun(await r.json())
   }
 
+  /** Forget measurements: one photo, or every photo of one camera. Nothing on disk is touched. */
+  async function clearResults(what: { path?: string; site?: string }) {
+    setNotice(null)
+    const q = new URLSearchParams(what as Record<string, string>)
+    const r = await post(`/api/results/clear?${q}`)
+    if (!r.ok) {
+      setNotice({ text: (await r.json()).detail ?? `Could not clear (${r.status})`, kind: 'error' })
+      return
+    }
+    const done: { photos: number; detections: number } = await r.json()
+    setNotice({ text: `Cleared ${plural(done.photos, 'photo')} (${plural(done.detections, 'measurement')}).`, kind: 'warn' })
+    setStale((n) => n + 1) // the listing and the results on screen are now out of date
+  }
+
   async function browse() {
     setNotice(null)
     const r = await post('/api/folder/pick')
@@ -418,6 +432,7 @@ export default function App() {
         <div className={section === 'results' ? 'body' : 'work'}>
           {section === 'measure' && (
             <Measure scope={scope} folder={folder} methods={methods} busy={running || !ready} running={running}
+              onClear={clearResults}
                      onMeasure={measure} focus={focus} error={shownError} />
           )}
           {section === 'table' && (
@@ -425,7 +440,8 @@ export default function App() {
                        error={shownError} onOpen={(p) => { setFocus(p); setSection('measure') }} />
           )}
           {section === 'results' && (
-            <Results site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder} />
+            <Results site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder}
+              onClear={clearResults} />
           )}
         </div>
 

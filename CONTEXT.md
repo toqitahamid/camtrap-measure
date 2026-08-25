@@ -845,3 +845,40 @@ and the weights. The builder is verified end to end and the app-side logic is un
 6.5 GB copy, the skipped token box and the first start with `weights_from` set have never happened on a
 cold machine. That is the next real test, and it is the same second-machine run the installer has been
 waiting for since ticket 18.
+
+## The flag photo of the camera you are looking at, and clearing a measurement (2026-08-25, ticket 22)
+
+**The fault.** The window shows the flag photo a number was read against. It built that request out of
+two different sources — the camera from the dropdown, the flag photo's name from the displayed photo's
+own record — which agree only while the selected camera happens to be the one that measured it. Choose
+another camera and the window asked for one camera's flag under another camera's name. Reproduced before
+touching anything: `site=MAS_CAM01&image=IMG_2868.JPG` → 200, `site=MAS_CAM02&image=IMG_2868.JPG` → 404.
+The engine is right to refuse it; an `<img>` whose request 404s simply renders nothing, so the fault
+arrived as silence rather than as an error.
+
+The listing had no way to fix it: `report.folder` reported `flag_image` and never which camera it
+belonged to. **`flag_site` now travels beside it** and the window asks for the pair that was actually
+measured, whatever the dropdown says. The panel's *Camera* row had the same bug one line down — it read
+the dropdown, so a measured photo could be labelled with a camera that had nothing to do with it.
+
+**Clearing.** A re-measure could replace an answer but nothing could take one away, so a wrong flag
+photo or a folder measured under the wrong camera left numbers on record with no remedy but editing the
+database by hand. `store.clear_measurements(site=... | path=...)` removes the photo rows and their
+detections and reports what went.
+
+Only the app's own answers go. The photos on disk are untouched, and so is everything synced from
+FlagLabel — cameras, annotations, calibrations, cached flag photos — because they are not this app's to
+delete and re-measuring needs every one of them. There is a test for exactly that, because it is the
+kind of promise a later refactor breaks quietly.
+
+Refusing is part of the feature: **neither argument** is a 400 rather than "everything" (that would empty
+the store, which no button asks for and nobody means by "clear this camera"), both together is a 400,
+and **a run in progress** is a 409 — deleting rows a running job is still writing is a race with the
+store as the loser. Clearing a camera that has nothing measured answers 0 and is not an error.
+
+In the window: one button under *Measure … again* for a single photo, one at the foot of the Export card
+for a whole camera. Both ask twice rather than opening a modal — the window has no dialog of its own and
+a browser `confirm()` blocks the whole WebView until answered. The camera button clears the **camera**,
+never the filters above it: a date range or a species tick is a way of looking, not a way of choosing
+what to delete, and a button that quietly meant "the 43 rows currently on screen" would be the wrong
+button.

@@ -214,6 +214,18 @@ def _iso(d: date | None) -> str | None:
     return d.isoformat() if d else None
 
 
+@app.post("/api/results/clear")
+def clear_results(site: str | None = None, path: str | None = None):
+    """Forget the measurements of one camera, or of one photo. The photos themselves are not touched,
+    and neither is anything synced from FlagLabel — only the numbers this app recorded."""
+    if measure.current and measure.current["status"] == "running":
+        raise HTTPException(409, "A run is in progress — stop it before clearing measurements.")
+    try:
+        return store.clear_measurements(site=site, path=path)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/summary")
 def summary(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
             all_species: bool = False, folder: str | None = None):

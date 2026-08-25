@@ -69,6 +69,7 @@ export default function Measure({
   busy,
   running,
   onMeasure,
+  onClear,
   focus,
   error,
 }: {
@@ -78,6 +79,7 @@ export default function Measure({
   busy: boolean
   running: boolean // a run is actually in flight; `busy` is also true while the models load
   onMeasure: (paths: string[]) => void
+  onClear: (what: { path?: string; site?: string }) => void
   // ponytail: optional because the ticket's signature stops above — the shell hands these over when the table
   // opens a row here, and when the folder listing itself failed. Omitting them changes nothing.
   focus?: string | null
@@ -88,6 +90,9 @@ export default function Measure({
   const [showFlag, setShowFlag] = useState(false)
   const [showBoxes, setShowBoxes] = useState(true)
   const [hot, setHot] = useState<number | null>(null) // the animal the pointer is on, in the frame or the panel
+  // Clearing throws away work, so it asks once. Two clicks rather than a modal: the window has no dialog
+  // of its own, and a browser confirm() blocks the whole WebView until it is answered.
+  const [confirmClear, setConfirmClear] = useState(false)
 
   // scroll the selected row into view when the SELECTION moves, not on every render: a run polls once a
   // second, and re-scrolling then would drag a reviewer who is reading ahead back up the list
@@ -137,6 +142,10 @@ export default function Measure({
   const st = cur ? state(cur) : null
   const best = cur ? lead(cur) : null
   const against = cur ? (cur.flag_image ?? scope.flag) : scope.flag
+  // The camera comes from the photo's own record, not from the dropdown. Choosing another camera while
+  // looking at a measured photo used to ask for one camera's flag under another camera's name, which the
+  // engine refuses and the frame renders blank (reported 2026-08-25).
+  const againstSite = cur?.flag_site ?? scope.site
   const boxes = cur && !showFlag && showBoxes ? cur.detections : []
   const pos = (n: number) => String(n).padStart(String(list.length).length, '0')
 
@@ -274,7 +283,7 @@ export default function Measure({
             </div>
             <div className="stage">
               <div className="frame">
-                <img src={showFlag ? flagSrc(scope.site, against) : photoSrc(cur.path, 'full')} alt={cur.name} />
+                <img src={showFlag ? flagSrc(againstSite, against) : photoSrc(cur.path, 'full')} alt={cur.name} />
                 {boxes.map((d, i) => (
                   <div
                     key={`${d.method}-${d.idx}`}
@@ -425,7 +434,7 @@ export default function Measure({
                   timestamp — left out rather than faked from the capture time. */}
               <div className="kv" style={{ padding: '14px 16px', borderTop: '1px solid var(--hair)' }}>
                 <span className="cap">Camera</span>
-                <span>{scope.site || '—'}</span>
+                <span>{againstSite || '—'}</span>
                 <span className="cap">Measured against</span>
                 <span>{cur.flag_image ?? '—'}</span>
                 <span className="cap">Alignment</span>
@@ -443,6 +452,22 @@ export default function Measure({
                 Measure {cur.name} again
               </button>
               <span className="tiny faint" style={{ textAlign: 'center' }}>Uses the flag photo and method set in the bar above</span>
+              {cur.measured && (
+                <button
+                  className="btn btn-wide"
+                  disabled={busy}
+                  style={confirmClear ? { color: 'var(--warn)', borderColor: 'var(--warn)' } : undefined}
+                  onClick={() => {
+                    if (!confirmClear) return setConfirmClear(true)
+                    setConfirmClear(false)
+                    onClear({ path: cur.path })
+                  }}
+                  onBlur={() => setConfirmClear(false)}
+                >
+                  <Icon name="trash" />
+                  {confirmClear ? `Clear it — click again to confirm` : `Clear this photo's measurement`}
+                </button>
+              )}
             </div>
           </>
         )}
