@@ -148,14 +148,14 @@ def test_a_mislabeled_flag_still_fits_the_user_chooses(cloud, synced):
     assert flags(synced)[0]["ok"] is True
 
 
-def test_missing_exif_date_is_usable_and_listed_last(cloud, synced):
+def test_missing_exif_date_is_still_usable(cloud, synced):
     cloud["photos"]["TON_CAM02/IMG_5304.JPG"] = jpeg(date=None)
     cloud["annotations"] = [{**ANN, "updated_at": "2026-07-01T00:00:00+00:00"},
                             {**ANN, "image_name": "IMG_7000.JPG", "storage_path": "TON_CAM02/IMG_7000.JPG", "data": flag_photo_data(image="IMG_7000.JPG")}]
     cloud["photos"]["TON_CAM02/IMG_7000.JPG"] = jpeg("2026:07:04 09:00:00")
     synced.post("/api/sync")
     assert [(f["image_name"], f["captured_at"], f["ok"]) for f in flags(synced)] == [
-        ("IMG_7000.JPG", "2026-07-04T09:00:00", True), ("IMG_5304.JPG", None, True)]
+        ("IMG_5304.JPG", None, True), ("IMG_7000.JPG", "2026-07-04T09:00:00", True)]
 
 
 def test_photo_missing_from_storage_is_unusable_not_a_crash(cloud, synced):
@@ -165,13 +165,27 @@ def test_photo_missing_from_storage_is_unusable_not_a_crash(cloud, synced):
     assert f["ok"] is False and "storage" in f["reason"]
 
 
-def test_flag_photos_are_listed_newest_first(cloud, synced):
+def test_flag_photos_are_listed_by_name_ascending(cloud, synced):
     cloud["annotations"].append({**ANN, "image_name": "IMG_7000.JPG", "storage_path": "TON_CAM02/IMG_7000.JPG",
                                  "data": flag_photo_data(image="IMG_7000.JPG")})
     cloud["photos"]["TON_CAM02/IMG_7000.JPG"] = jpeg("2026:07:04 09:00:00")
     synced.post("/api/sync")
     assert [(f["image_name"], f["captured_at"]) for f in flags(synced)] == [
-        ("IMG_7000.JPG", "2026-07-04T09:00:00"), ("IMG_5304.JPG", "2026-03-13T12:37:33")]
+        ("IMG_5304.JPG", "2026-03-13T12:37:33"), ("IMG_7000.JPG", "2026-07-04T09:00:00")]
+
+
+def test_flag_photos_sort_naturally_not_lexically(cloud, synced):
+    # a plain string sort would put IMG_0010 before IMG_0004 ("0010" < "0004" is false, but "00104" < "0004..."
+    # style traps are the point here): IMG_0004 < IMG_0010 < IMG_1999 must hold under natural, numeric order.
+    cloud["annotations"] = [
+        {**ANN, "image_name": "IMG_1999.JPG", "storage_path": "TON_CAM02/IMG_1999.JPG", "data": flag_photo_data(image="IMG_1999.JPG")},
+        {**ANN, "image_name": "IMG_0004.JPG", "storage_path": "TON_CAM02/IMG_0004.JPG", "data": flag_photo_data(image="IMG_0004.JPG")},
+        {**ANN, "image_name": "IMG_0010.JPG", "storage_path": "TON_CAM02/IMG_0010.JPG", "data": flag_photo_data(image="IMG_0010.JPG")},
+    ]
+    for name in ("IMG_1999.JPG", "IMG_0004.JPG", "IMG_0010.JPG"):
+        cloud["photos"][f"TON_CAM02/{name}"] = jpeg()
+    synced.post("/api/sync")
+    assert [f["image_name"] for f in flags(synced)] == ["IMG_0004.JPG", "IMG_0010.JPG", "IMG_1999.JPG"]
 
 
 def test_resync_refits_only_new_or_changed_annotations(cloud, synced):
@@ -200,7 +214,7 @@ def test_an_unlabeled_newer_flag_photo_leaves_the_older_one_usable(cloud, synced
                                  "status": "empty", "data": None})
     cloud["photos"]["TON_CAM02/IMG_7000.JPG"] = jpeg("2026:07:04 09:00:00")
     synced.post("/api/sync")
-    assert [(f["image_name"], f["ok"]) for f in flags(synced)] == [("IMG_7000.JPG", False), ("IMG_5304.JPG", True)]
+    assert [(f["image_name"], f["ok"]) for f in flags(synced)] == [("IMG_5304.JPG", True), ("IMG_7000.JPG", False)]
 
 
 def test_malformed_annotation_is_unusable_not_a_failed_sync(cloud, synced):

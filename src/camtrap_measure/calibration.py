@@ -7,6 +7,7 @@ photo to measure against. Research QC (monotonicity, LOO in `calib/qc.py`) stays
 """
 
 import json
+import re
 from datetime import datetime
 from io import BytesIO
 
@@ -69,15 +70,21 @@ def _judge(row: dict, data: dict, image: str) -> dict:
     return row
 
 
+def _name_key(name: str) -> list:
+    """Case-insensitive natural sort key: IMG_4.JPG < IMG_10.JPG < IMG_1999.JPG, not a plain string sort."""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name)]
+
+
 def cameras(sites: list[str], rows: list[dict]) -> list[dict]:
-    """Every camera with its flag photos, newest first (undated last); usable ones carry ok=True."""
+    """Every camera with its flag photos, sorted by image name (natural order); usable ones carry ok=True.
+    The frontend defaults to the first usable flag in this list, so the sort order is the default-selection
+    order (ticket, 2026-08-25) — see CONTEXT.md for why this replaced the newest-first order of ticket 15."""
     by_site: dict[str, list[dict]] = {s: [] for s in sites}
     for r in rows:
         by_site.setdefault(r["site"], []).append(r)
     out = []
-    for site, cals in sorted(by_site.items()):
-        cals.sort(key=lambda r: (r["captured_at"] is None, r["captured_at"] or ""), reverse=True)
-        cals.sort(key=lambda r: r["captured_at"] is None)  # dated first (newest first), undated after
+    for site, cals in sorted(by_site.items(), key=lambda kv: _name_key(kv[0])):
+        cals.sort(key=lambda r: _name_key(r["image_name"]))
         out.append({"site": site, "flags": [{"image_name": c["image_name"], "captured_at": c["captured_at"],
                                              "ok": c["ok"], "reason": c["reason"]} for c in cals]})
     return out

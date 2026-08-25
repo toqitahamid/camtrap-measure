@@ -882,3 +882,25 @@ a browser `confirm()` blocks the whole WebView until answered. The camera button
 never the filters above it: a date range or a species tick is a way of looking, not a way of choosing
 what to delete, and a button that quietly meant "the 43 rows currently on screen" would be the wrong
 button.
+
+### Correction: `/api/cameras` flags are sorted by name, not newest-first (2026-08-25)
+
+Ticket 15 set the flag list order as "newest first (undated last)" (`calibration.cameras`, `docs/CONTEXT.md`
+line 388-389 at the time). That reads naturally for a person scanning dates, but the frontend's default
+selection is `flags.find(f => f.ok)` — the first *usable* entry in whatever order the backend sends — so
+the default flag photo silently changed with every new sync. A dept user reported it directly: two flags
+`IMG_0004.JPG` and `IMG_1999.JPG` on one camera, and the app defaulted to whichever was captured more
+recently rather than the one they expected.
+
+**New contract**: `calibration.cameras()` sorts each camera's flags by `image_name` ascending, natural
+order (`IMG_0004.JPG` < `IMG_0010.JPG` < `IMG_1999.JPG`, not a plain string sort), dated and undated alike,
+usable and unusable alike. Cameras are sorted by site name the same way. This makes the default selection
+deterministic and independent of capture date or sync order — the lowest-numbered flag photo is always
+first and always the default, which is what "always show IMG_0004.JPG" means in practice. The frontend was
+not touched: `flags.find(f => f.ok)` already picks "first usable in list order"; only what "list order"
+means changed, in the backend, so the API contract itself is now "flags come sorted by name."
+
+This beats the ticket-15 order because the *default* is the thing users actually rely on day to day — the
+newest-first order was a display nicety, the default was a silent bug. `tests/test_sync.py` covers the new
+order (`test_flag_photos_are_listed_by_name_ascending`, `test_flag_photos_sort_naturally_not_lexically`)
+and the three tests that encoded the old order were updated in place, not deleted.
