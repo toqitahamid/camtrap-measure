@@ -10,6 +10,10 @@
   none (2026-08-21): a portable Git in the user profile, uv's user-scope installer, the app under
   %LOCALAPPDATA%, shortcuts and the Settings > Apps entry all per-user.
 
+  Every run writes the same lines to %LOCALAPPDATA%\CamTrapMeasure-setup.log, last run only, starting with
+  a short description of the machine. A failure names that file and leaves the window open, so there is
+  always something to read and something to send.
+
   Safe to run again: every step is a no-op when it is already done, so this is also the repair path.
 #>
 [CmdletBinding()]
@@ -36,6 +40,8 @@ $Name = "CamTrap Measure"
 $Key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CamTrapMeasure"
 $Ico = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 $Wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
+# The details pane goes with the window; this file is what a person can send afterwards.
+$LogFile = Join-Path $env:LOCALAPPDATA "CamTrapMeasure-setup.log"
 
 # --- the window -------------------------------------------------------------------------------------
 $Form = $null
@@ -114,12 +120,14 @@ function Detail($text) {
         } else {
             Write-Host "   $line"
         }
+        Log $line
     }
     Pump
 }
 
 function Step($msg) {
     $script:Done += 1
+    Log "== $msg"
     if ($StepLabel) {
         $StepLabel.Text = $msg
         $script:Bar.Value = [Math]::Min($script:Done, $script:Bar.Maximum)
@@ -132,19 +140,80 @@ function Step($msg) {
 }
 
 function Fail($msg) {
+    $send = "The full record is in $LogFile - send that file to the researcher if the fix is not clear."
+    Log "STOPPED: $msg"
+    Log $send
     if ($Form) {
         $StepLabel.Text = "Stopped."
         $Details.AppendText("STOPPED: $msg`r`n")
-        [System.Windows.Forms.MessageBox]::Show($msg, "$Name Setup",
+        $Details.AppendText("$send`r`n")
+        [System.Windows.Forms.MessageBox]::Show("$msg`r`n`r`n$send", "$Name Setup",
             [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-        $Form.Close()
+        # The window stays after OK, with a message loop of its own, until the user closes it. Closing it
+        # here took the pane off the screen at the one moment somebody needed to read it: a dept user hit
+        # the preflight failure on 2026-09-03 and could send nothing but a photograph of this message box.
+        try { [System.Windows.Forms.Application]::Run($Form) } catch { Write-Host $_.Exception.Message }
     } else {
         Write-Host ""
         Write-Host "STOPPED: $msg" -ForegroundColor Red
+        Write-Host $send -ForegroundColor Yellow
         Read-Host "Press Enter to close" | Out-Null
     }
     exit 1
 }
+
+# --- the log ----------------------------------------------------------------------------------------
+# The details pane disappears with the window, and the person running the installer is usually not the
+# person who can fix what it says. So every run - window or -Console - writes the same lines to $LogFile,
+# overwriting it, so the file is always the last run and nothing else. The Hugging Face token never
+# reaches the pane (see Ask-Token), which is why it never reaches this file either.
+$script:LogOff = $false
+function Log($line) {
+    if ($script:LogOff) { return }
+    try {
+        Add-Content -Path $LogFile -Value $line -Encoding utf8 -ErrorAction Stop
+    } catch {
+        $script:LogOff = $true  # set first: Detail calls Log, and this must not turn into a loop
+        Detail "Could not write the setup log to $LogFile ($($_.Exception.Message)). The install carries on."
+    }
+}
+
+$here = "the app is not on this machine yet"
+$pyproject0 = Join-Path $Dir "pyproject.toml"
+if (Test-Path $pyproject0) {
+    $v0 = Select-String -Path $pyproject0 -Pattern '^version = "(.+)"' | Select-Object -First 1
+    if ($v0) { $here = "app version " + $v0.Matches[0].Groups[1].Value + " already installed" }
+}
+try {
+    Set-Content -Path $LogFile -Encoding utf8 -ErrorAction Stop `
+                -Value "$Name setup - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $here"
+} catch {
+    $script:LogOff = $true
+}
+
+# What this machine is. Whoever reads the log has never seen the computer it came from, and nobody has
+# written the department's hardware down at all. Each fact is asked for on its own: a query that fails
+# says "unknown" and the install carries on, because none of this is needed to install anything. Parts
+# and disk sizes only - no user names beyond the ones already in the paths above.
+function Fact($name, $get) {
+    $value = $null
+    try { $value = & $get } catch { $value = $null }
+    if (-not $value) { $value = "unknown" }
+    Detail "$name`: $value"
+}
+Detail "--- this machine ---"
+Fact "Computer" { $env:COMPUTERNAME }
+Fact "Windows" { $o = Get-CimInstance Win32_OperatingSystem; "$($o.Caption) build $($o.Version)" }
+Fact "Processor" { (Get-CimInstance Win32_Processor | ForEach-Object { $_.Name.Trim() }) -join ", " }
+Fact "Memory" { "{0:N1} GB" -f ((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB) }
+Fact "Graphics" { (Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }) -join ", " }
+Fact "Disks" {
+    (Get-PSDrive -PSProvider FileSystem | Where-Object { $null -ne $_.Free } | ForEach-Object {
+        "{0}: {1:N0} GB free of {2:N0} GB" -f $_.Name, ($_.Free / 1GB), (($_.Used + $_.Free) / 1GB)
+    }) -join "; "
+}
+Detail "Log: $LogFile (this run only; every run overwrites it)"
+Detail "--------------------"
 
 function AddPath($p) { if ((Test-Path $p) -and (($env:Path -split ";") -notcontains $p)) { $env:Path = "$p;" + $env:Path } }
 
@@ -265,6 +334,8 @@ if (Test-Path (Join-Path $Dir ".git")) {
     }
 }
 Set-Location $Dir
+Detail "The app on this machine is now:"
+$null = Run "git" @("--no-pager", "log", "-1", "--format=%h %cs %s") $Dir  # which commit, in the log, for a bug report
 
 # --- 3. environment ---------------------------------------------------------------------------------
 Step "Building the app's environment"
@@ -326,7 +397,7 @@ if ($bundled) {
 
 Step "Checking this machine (before the big download)"
 if ((Run "uv" @("run", "--frozen", "camtrap-measure", "--preflight", "--no-prompt") $Dir) -ne 0) {
-    Fail "This machine is not ready yet. The details pane lists what to fix; fix it and run the installer again."
+    Fail "This machine is not ready yet. The details pane lists what to fix, and so does $LogFile. Fix it and run the installer again."
 }
 
 # --- 5. the models' software ------------------------------------------------------------------------
@@ -370,9 +441,9 @@ Detail "Listed in Settings > Apps as $Name $version."
 # --- 7. first start ---------------------------------------------------------------------------------
 Step $(if ($bundled) { "Starting $Name" } else { "Starting $Name (the first start downloads the models; the window shows the progress)" })
 Start-Process -FilePath $Wscript -ArgumentList (Join-Path $Dir "scripts\launch.vbs") -WorkingDirectory $Dir
+Detail "Done. $Name is installed."
 if ($Form) {
     $StepLabel.Text = "$Name is installed. From now on, double-click its icon on the desktop."
-    $Details.AppendText("Done.`r`n")
     Pump
     Start-Sleep -Seconds 3
     $Form.Close()

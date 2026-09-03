@@ -123,7 +123,11 @@ Both A and B can coexist; they are separate clones and share only `~/.camtrap-me
    of real photos (sign-in by email code verified 2026-08-23). Then tag `v0.1.0` as the first
    `ref.txt` rollback target.
 2. Collect dept hardware facts at first install (GPU model, photo volume) — open item 3. The
-   workstation used for acceptance: RTX 2060 SUPER 8 GB, driver 581.95, Windows 11.
+   workstation used for acceptance: RTX 2060 SUPER 8 GB, driver 581.95, Windows 11. **The installer now
+   does the collecting** (ticket 23): every run writes `%LOCALAPPDATA%\CamTrapMeasure-setup.log`, opening
+   with the machine's name, Windows build, processor, memory, graphics and free disk space, and a failed
+   install tells the user to send that file. Ask for it after each dept install; photo volume still has to
+   be asked for in words.
 3. MD-only vs MD+SAM3 comparison on existing labeled data in `distance_estimation` → sets
    `DEFAULT_METHOD` (`inference.py`); note the RoMa run-to-run spread recorded under ticket 08
    must be pinned first (fixed seed or averaged draws).

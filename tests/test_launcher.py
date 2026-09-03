@@ -162,3 +162,54 @@ def test_the_running_app_is_found_by_its_process_and_a_real_null_class():
     ps = text(SCRIPTS / "launcher.ps1")
     assert "[NullString]::Value" in ps and "FindWindowW($null" not in ps
     assert 'Get-Process -Name "camtrap-measure-app"' in ps and "StartsWith($Dir" in ps
+# --- the setup log (ticket 23) --------------------------------------------------------------------
+
+def fail_body(install: str) -> str:
+    """The body of `function Fail`, up to the next function."""
+    return install.split("function Fail", 1)[1].split("\nfunction ", 1)[0]
+
+
+def test_every_run_writes_the_details_pane_to_a_file():
+    """A dept user hit the preflight failure on 2026-09-03 and could send nothing but a photograph of
+    the message box: the pane went with the window. Both modes now write the same lines to a file."""
+    install = text(SCRIPTS / "install.ps1")
+    assert '$LogFile = Join-Path $env:LOCALAPPDATA "CamTrapMeasure-setup.log"' in install
+    detail = install.split("function Detail", 1)[1].split("\nfunction ", 1)[0]
+    assert "Log $line" in detail  # every printed line, in the window and in -Console alike
+    assert 'Log "== $msg"' in install  # and every step
+    assert "Set-Content -Path $LogFile" in install  # overwritten per run: the file is the last run only
+    assert "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'" in install
+
+
+def test_the_log_says_what_the_machine_is():
+    """Nobody has written the department's hardware down; the log is where it gets recorded (HANDOFF
+    open item 2). Each fact is asked for on its own so a failing query cannot stop an install."""
+    install = text(SCRIPTS / "install.ps1")
+    for query in ("Win32_OperatingSystem", "Win32_Processor", "Win32_ComputerSystem",
+                  "Win32_VideoController", "Get-PSDrive -PSProvider FileSystem"):
+        assert query in install, query
+    fact = install.split("function Fact", 1)[1].split("\nDetail", 1)[0]
+    assert "try { $value = & $get } catch" in fact and '$value = "unknown"' in fact
+
+
+def test_a_failure_names_the_log_and_leaves_the_window_open():
+    body = fail_body(text(SCRIPTS / "install.ps1"))
+    assert "$LogFile - send that file to the researcher" in body  # the message box says where to look
+    assert "[System.Windows.Forms.Application]::Run($Form)" in body  # ... and stays up to be read
+    assert "$Form.Close()" not in body  # closing on OK is what lost the pane
+    assert '$StepLabel.Text = "Stopped."' in body
+
+
+def test_the_preflight_failure_names_the_log_too():
+    """The one failure a dept user has actually hit, and the one whose answer is in the pane."""
+    install = text(SCRIPTS / "install.ps1")
+    line = [l for l in install.splitlines() if "not ready yet" in l]
+    assert len(line) == 1 and "$LogFile" in line[0]
+
+
+def test_the_token_never_reaches_the_log():
+    """The log is fed from the details pane, and the token has never been written to the pane."""
+    install = text(SCRIPTS / "install.ps1")
+    ask = install.split("function Ask-Token", 1)[1].split("\nfunction ", 1)[0]
+    assert "Detail" not in ask and "Log " not in ask
+    assert "UseSystemPasswordChar = $true" in ask

@@ -904,3 +904,38 @@ This beats the ticket-15 order because the *default* is the thing users actually
 newest-first order was a display nicety, the default was a silent bug. `tests/test_sync.py` covers the new
 order (`test_flag_photos_are_listed_by_name_ascending`, `test_flag_photos_sort_naturally_not_lexically`)
 and the three tests that encoded the old order were updated in place, not deleted.
+
+## A failed install leaves a file to send, and says what the machine is (2026-09-03, ticket 23)
+
+**The fault.** A department user ran the installer, hit *"This machine is not ready yet. The details pane
+lists what to fix"* at the preflight step, and could not find the fix. He is not a developer. `Fail`
+appended `STOPPED: ...` to the pane, showed a message box, and called `$Form.Close()` the moment OK was
+clicked, so the pane, which is where the answer actually was, went with the window. All he could email was
+a photograph of the message box, and there was nothing on disk to send.
+
+**The log.** Every run now writes what the pane holds to `%LOCALAPPDATA%\CamTrapMeasure-setup.log`: every
+`Detail` line, every `== step`, and the `STOPPED:` line if there is one, in the window and in `-Console`
+alike. It is **overwritten each run** rather than appended: a person is asked for "the log file", and the
+last run is the run they are talking about, so a growing file would mostly be a way to send the wrong one.
+The Hugging Face token is not in it and cannot be: the log is fed from the pane, and `Ask-Token` has never
+written the token to the pane.
+
+**The window stays.** The message box now ends with "The full record is in
+`%LOCALAPPDATA%\CamTrapMeasure-setup.log` - send that file to the researcher if the fix is not clear", and
+after OK the form stays on screen with "Stopped." under the mark, running a message loop of its own
+(`[System.Windows.Forms.Application]::Run($Form)`), until the user closes it. So the pane can still be
+read and scrolled while somebody is on the phone about it. Then `exit 1`, as before. The preflight failure
+names the log file too, because it is the one failure a dept user has actually hit.
+
+**The machine profile.** The log opens with what the computer is: name, Windows edition and build,
+processor, memory, graphics adapters, free and total space per fixed drive - in the pane as well as the
+file. It closes HANDOFF open item 2 ("collect dept hardware facts at first install"), which had no
+mechanism at all before this: nobody was ever going to type `Get-CimInstance` on a machine they cannot
+reach. Each fact is asked for separately inside a try/catch and answers "unknown" when the query fails,
+because none of it is needed to install anything, and a hardware query must never be the thing that stops
+an install. Parts and sizes only, no user names beyond the ones already in the paths the installer prints.
+
+**Not established:** the failure path is a Windows window and was read, not run - the installer clones and
+syncs gigabytes, so it is not something to trigger for a screenshot. `install.ps1` parses, the log header
+and the machine block were run on their own on the workstation (RTX 2060 SUPER, i5-9400, 15.8 GB), and
+`tests/test_launcher.py` holds the contract the way it holds the rest of these scripts.
