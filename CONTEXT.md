@@ -913,7 +913,7 @@ appended `STOPPED: ...` to the pane, showed a message box, and called `$Form.Clo
 clicked, so the pane, which is where the answer actually was, went with the window. All he could email was
 a photograph of the message box, and there was nothing on disk to send.
 
-**The log.** Every run now writes what the pane holds to `%LOCALAPPDATA%\CamTrapMeasure-setup.log`: every
+**The log.** Every run now writes what the pane holds to `CamTrapMeasure-setup.log` on the Desktop (moved from %LOCALAPPDATA% the same day: the researcher asked for a place a dept user can find without typing a path): every
 `Detail` line, every `== step`, and the `STOPPED:` line if there is one, in the window and in `-Console`
 alike. It is **overwritten each run** rather than appended: a person is asked for "the log file", and the
 last run is the run they are talking about, so a growing file would mostly be a way to send the wrong one.
@@ -921,7 +921,7 @@ The Hugging Face token is not in it and cannot be: the log is fed from the pane,
 written the token to the pane.
 
 **The window stays.** The message box now ends with "The full record is in
-`%LOCALAPPDATA%\CamTrapMeasure-setup.log` - send that file to the researcher if the fix is not clear", and
+`CamTrapMeasure-setup.log` on the Desktop - send that file to the researcher if the fix is not clear", and
 after OK the form stays on screen with "Stopped." under the mark, running a message loop of its own
 (`[System.Windows.Forms.Application]::Run($Form)`), until the user closes it. So the pane can still be
 read and scrolled while somebody is on the phone about it. Then `exit 1`, as before. The preflight failure

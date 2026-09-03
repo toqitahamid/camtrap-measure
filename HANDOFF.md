@@ -124,7 +124,7 @@ Both A and B can coexist; they are separate clones and share only `~/.camtrap-me
    `ref.txt` rollback target.
 2. Collect dept hardware facts at first install (GPU model, photo volume) — open item 3. The
    workstation used for acceptance: RTX 2060 SUPER 8 GB, driver 581.95, Windows 11. **The installer now
-   does the collecting** (ticket 23): every run writes `%LOCALAPPDATA%\CamTrapMeasure-setup.log`, opening
+   does the collecting** (ticket 23): every run writes `CamTrapMeasure-setup.log` on the Desktop, opening
    with the machine's name, Windows build, processor, memory, graphics and free disk space, and a failed
    install tells the user to send that file. Ask for it after each dept install; photo volume still has to
    be asked for in words.

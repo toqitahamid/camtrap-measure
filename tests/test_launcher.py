@@ -173,7 +173,7 @@ def test_every_run_writes_the_details_pane_to_a_file():
     """A dept user hit the preflight failure on 2026-09-03 and could send nothing but a photograph of
     the message box: the pane went with the window. Both modes now write the same lines to a file."""
     install = text(SCRIPTS / "install.ps1")
-    assert '$LogFile = Join-Path $env:LOCALAPPDATA "CamTrapMeasure-setup.log"' in install
+    assert '$LogFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "CamTrapMeasure-setup.log"' in install
     detail = install.split("function Detail", 1)[1].split("\nfunction ", 1)[0]
     assert "Log $line" in detail  # every printed line, in the window and in -Console alike
     assert 'Log "== $msg"' in install  # and every step

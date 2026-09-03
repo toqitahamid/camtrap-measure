@@ -14,7 +14,7 @@ window and was read by hand, not run (the installer clones and syncs gigabytes).
 
 ## The log
 
-`%LOCALAPPDATA%\CamTrapMeasure-setup.log`, written by every run in both the window and `-Console` mode,
+`CamTrapMeasure-setup.log` on the Desktop, written by every run in both the window and `-Console` mode,
 overwritten each time so the file is always the last run and nothing else. It holds exactly what the
 details pane holds: a first line with the date, time and the version already on the machine, then every
 `Detail` line, every `== step` line and the `STOPPED:` line if there is one.

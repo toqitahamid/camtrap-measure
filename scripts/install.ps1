@@ -10,7 +10,7 @@
   none (2026-08-21): a portable Git in the user profile, uv's user-scope installer, the app under
   %LOCALAPPDATA%, shortcuts and the Settings > Apps entry all per-user.
 
-  Every run writes the same lines to %LOCALAPPDATA%\CamTrapMeasure-setup.log, last run only, starting with
+  Every run writes the same lines to CamTrapMeasure-setup.log on the Desktop, last run only, starting with
   a short description of the machine. A failure names that file and leaves the window open, so there is
   always something to read and something to send.
 
@@ -41,7 +41,7 @@ $Key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CamTrapMeasure
 $Ico = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 $Wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
 # The details pane goes with the window; this file is what a person can send afterwards.
-$LogFile = Join-Path $env:LOCALAPPDATA "CamTrapMeasure-setup.log"
+$LogFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "CamTrapMeasure-setup.log"  # the Desktop: a place a dept user can find and attach to an email
 
 # --- the window -------------------------------------------------------------------------------------
 $Form = $null
