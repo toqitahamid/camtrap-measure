@@ -119,3 +119,13 @@ def test_the_bundle_carries_the_installer_and_a_way_to_start_it():
     for want in ("install.ps1", "setup.vbs", "INSTALL.bat", "README.txt"):
         assert want in BUNDLE, want
     assert "wscript.exe" in BUNDLE  # no console window behind the installer's own
+
+
+def test_a_config_written_by_powershell_is_still_read(installed, tmp_path):
+    """PowerShell 5's `Set-Content -Encoding utf8` starts the file with a byte order mark. json.loads
+    rejected it, store.config() returned {}, and a bundled dept machine (2026-09-25) looked for a token
+    instead of using the models that came with the installer."""
+    (tmp_path / "config.json").write_bytes(b"\xef\xbb\xbf" + json.dumps({"weights_from": "bundle"}).encode())
+    assert store.config() == {"weights_from": "bundle"}
+    got = weights.ensure()
+    assert installed == [] and got["bundled"] is True

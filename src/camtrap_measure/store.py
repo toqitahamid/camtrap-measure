@@ -82,7 +82,10 @@ def save_session(s: dict | None) -> None:
 def config() -> dict:
     """Installer-written settings (`hf_token`, ...); {} when absent."""
     try:
-        return json.loads((DATA_DIR / "config.json").read_text())
+        # utf-8-sig: PowerShell 5 writes UTF-8 with a byte order mark, and plain json.loads rejects the whole
+        # file. The installer wrote config.json that way, so "weights_from": "bundle" was never seen and a
+        # bundled machine looked for a token instead of its own models (seen on a dept machine, 2026-09-25).
+        return json.loads((DATA_DIR / "config.json").read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return {}
 
