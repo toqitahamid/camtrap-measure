@@ -89,8 +89,12 @@ if (-not $Console) {
 }
 
 function Show-Now($window) {
-    # See the note where WinForms is loaded: 5 is SW_SHOW.
-    $window.add_Load({ [CamTrap.Win]::ShowWindow($this.Handle, 5) | Out-Null; $this.Activate() })
+    # See the note where WinForms is loaded: 5 is SW_SHOW. Then a moment of TopMost brings the window in
+    # front: started in the background by wscript, it otherwise opened behind whatever was on screen, and
+    # a double-click on INSTALL.bat looked like it did nothing (2026-09-25). TopMost is dropped again at
+    # once, so the window does not stay above everything for the whole install.
+    $window.add_Load({ [CamTrap.Win]::ShowWindow($this.Handle, 5) | Out-Null })
+    $window.add_Shown({ $this.TopMost = $true; $this.Activate(); $this.TopMost = $false })
 }
 
 # --- where it goes ----------------------------------------------------------------------------------

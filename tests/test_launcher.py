@@ -630,3 +630,12 @@ def test_config_json_is_written_without_a_byte_order_mark():
     install = text(SCRIPTS / "install.ps1")
     assert "Set-Content $cfg" not in install
     assert "[IO.File]::WriteAllText($cfg, ($conf | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))" in install
+
+
+def test_installer_windows_come_to_the_front():
+    """2026-09-25: a double-click on INSTALL.bat opened the window behind other windows and looked like it
+    did nothing. Each window is made TopMost for a moment when shown, then not."""
+    install = text(SCRIPTS / "install.ps1")
+    show_now = install.split("function Show-Now", 1)[1].split("\n}", 1)[0]
+    assert "$this.TopMost = $true; $this.Activate(); $this.TopMost = $false" in show_now
+    assert "add_Shown" in show_now
