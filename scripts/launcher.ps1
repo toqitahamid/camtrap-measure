@@ -24,6 +24,14 @@
 param([switch]$Console, [switch]$NoUpdate, [switch]$NoStart)
 
 $ErrorActionPreference = "Stop"
+# Where the installer put the data and uv's folders (ticket 24), saved as user environment variables. Read
+# from the user scope here rather than trusted to be inherited: Explorer, which starts the shortcut, can
+# still hold the environment it had before the install. An install from before ticket 24 has none of them
+# and keeps its data in %USERPROFILE%\.camtrap-measure, the app's own default.
+foreach ($n in @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")) {
+    $v = [Environment]::GetEnvironmentVariable($n, "User")
+    if ($v) { Set-Item -Path "env:$n" -Value $v }
+}
 $Dir = Split-Path -Parent $PSScriptRoot
 $Icon = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 $Exe = Join-Path $Dir ".venv\Scripts\camtrap-measure-app.exe"  # the pythonw entry point: it owns no console

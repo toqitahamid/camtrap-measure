@@ -13,8 +13,10 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/toq
 ```
 
 No administrator account is needed at any point. It gets Git (a portable copy unpacked into
-`%LOCALAPPDATA%\Programs\MinGit`) and uv (its own user-scope installer), downloads the app into
-`%LOCALAPPDATA%\CamTrapMeasure`, builds its environment (Python 3.12 and the CUDA build of
+`%LOCALAPPDATA%\Programs\MinGit`) and uv (its own user-scope installer), asks where to install
+(a parent folder: `D:\` becomes `D:\CamTrapMeasure`; `-InstallTo <folder>` skips the question),
+downloads the app into `<folder>\app`, keeps the models and results in `<folder>\data` and uv's
+cache and Python beside them (remembered as user environment variables), builds its environment (Python 3.12 and the CUDA build of
 PyTorch come from the lockfile — a few GB once), runs the preflight checks before the big
 download and asks for two things:
 
@@ -93,7 +95,7 @@ developer's tree, not an install. The running version and checkout show in the p
   PowerShell now, which reads a script whole before running it — cmd re-read a running `.bat` by byte
   offset, which is why `run.bat` still keeps its one command on the last line, ending in `exit /b`.)
 - **Remove it**: Settings ▸ Apps ▸ CamTrap Measure ▸ Uninstall. It asks before deleting the app, and asks
-  separately about the measurements and downloaded models in `~/.camtrap-measure`, which are kept unless
+  separately about the measurements and downloaded models (`<folder>\data`, or `~/.camtrap-measure` for an install from before ticket 24), which are kept unless
   they are asked for by name.
 - The lockfile `uv.lock` is committed and installed `--frozen`, so a release is exactly the
   set of packages it was tested with and `uv` never modifies a tracked file on the dept

@@ -962,3 +962,55 @@ The dept user found no `CamTrapMeasure-setup.log` on the Desktop, and still coul
 
 Evidence: 248 passed, 1 skipped; the Detail/Run/message code run against a fake failing preflight printed both
 failures and fixes, and no passed checks, under "What went wrong:".
+
+## The installer asks where to install (2026-09-25, ticket 24)
+
+**The fault.** A dept machine failed the 20 GB free-space check: every byte went on C: (the app and its
+environment in `%LOCALAPPDATA%\CamTrapMeasure`, ~7 GB of models and the results in
+`%USERPROFILE%\.camtrap-measure`, uv's cache in `%LOCALAPPDATA%\uv\cache`), while D: had room. The
+researcher: "how about installing it on my chosen location that I select on the installing time".
+
+**The question.** Before anything is written (so Cancel leaves nothing behind and exits 0), a small dialog
+in the installer's colours asks "Where should CamTrap Measure be installed?", with a text box, Browse...
+(FolderBrowserDialog), a live line with the final folder and its drive's free space (amber under 20 GB, a
+warning and not a stop: the preflight check says it again with more detail), Install and Cancel. The answer
+is a parent folder; the installer uses `<answer>\CamTrapMeasure` unless the answer is already so named.
+Suggested: `D:\` when D: is a fixed drive with more free space than C:, else `%LOCALAPPDATA%`, and the
+previous choice when an earlier run stopped part way. `-Console` asks with Read-Host. `-InstallTo` and
+`CAMTRAP_INSTALL_DIR` skip the question. `CAMTRAP_INSTALL_DIR` used to name the clone folder itself; it now
+means the same as `-InstallTo` (a parent, R under it), so there is one meaning and one layout. The choice is
+proved by making the folder and writing a file there, because the root of C: takes new folders but not new
+files; a refusal is explained and the question comes back.
+
+**One folder R.** `R\app` is the clone, `R\data` is `CAMTRAP_DATA_DIR`, `R\uv-cache` is `UV_CACHE_DIR`,
+`R\python` is `UV_PYTHON_INSTALL_DIR`. Portable Git and uv.exe stay on C: (small, and the launcher's PATH
+already names their folders). The three variables are saved in the **user** scope (no administrator) and set
+in the installer's own process, since step 7 starts the app from it. The launcher reads them back from the
+user scope at every start rather than trusting its inherited environment: Explorer starts the shortcut and
+may still hold the environment from before the install.
+
+**Repair never moves data.** When the Settings > Apps entry names an install folder that exists, or an old
+clone sits at `%LOCALAPPDATA%\CamTrapMeasure`, the installer repairs it there without asking, and a folder
+given with `-InstallTo` is ignored with a line in the pane saying so (remove the app first to move it). Two
+installs would share the same user variables, so one per user is the rule. An install from before this ticket
+(this workstation's) keeps its app and `%USERPROFILE%\.camtrap-measure` untouched; the installer sets no
+variables for it. Whether an install has an R is read from its app folder's name (`app`).
+
+**Uninstall.** The data is found through the user variable (else the default). `R\app`, `R\uv-cache` and
+`R\python` go with the first question, then the user variables, but only those pointing inside R (one set by
+hand, or for an older install, is not the uninstaller's to remove), then the data question as before, then R
+itself if it is empty.
+
+**The log** gains "Install folder", "App folder" and "Data folder" in the machine block, each with its drive's
+free space, and the variables as they are saved.
+
+**Publisher.** Settings > Apps now names "BASE Lab, SIU Carbondale" as the publisher (was "Southern Illinois
+University"), at the researcher's request.
+
+**Not established:** the whole installer was not run (it clones and syncs gigabytes, and this workstation's
+own install must not be disturbed). Run in a harness on the workstation: folder resolution (`D:\ct-test` ->
+`D:\ct-test\CamTrapMeasure`, `D:` and `D:\` -> `D:\CamTrapMeasure`, relative and drive-less paths refused), the
+write test (`D:\ct-test` accepted, `C:\Windows\System32` refused and nothing left behind), the live line and its
+warning, the repair detection against this machine's real Settings entry (found, nothing asked), the fresh
+`-InstallTo` layout in the process environment, and the dialog built and shown without waiting for a click.
+Persistent user variables were only exercised with a throwaway name. 260 passed, 1 skipped.

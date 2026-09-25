@@ -251,3 +251,116 @@ def test_the_checks_output_is_read_as_utf8():
     run = install.split("function Run", 1)[1].split("\nfunction ", 1)[0]
     assert run.count("-Encoding UTF8") == 3
     assert "Get-Content $out -ErrorAction" not in run  # every read of the output names its encoding
+
+
+# --- the install folder (ticket 24) ---------------------------------------------------------------
+
+def test_the_installer_asks_where_in_a_dialog_with_a_folder_picker():
+    """2026-09-25: a dept machine failed the 20 GB check with everything on C:. The researcher asked to pick
+    the place at install time: a box to type in, a Browse button, and a live line saying where and how much room."""
+    install = text(SCRIPTS / "install.ps1")
+    dialog = install.split("function New-FolderDialog", 1)[1].split("\nfunction ", 1)[0]
+    assert '"Where should $Name be installed?"' in dialog
+    assert "New-Object System.Windows.Forms.FolderBrowserDialog" in dialog
+    assert '$go.Text = "Install"' in dialog and '$stop.Text = "Cancel"' in dialog
+    assert "add_TextChanged({ Show-Where })" in dialog  # the where-and-free-space line follows the typing
+    where = install.split("function Where-Text", 1)[1].split("\nfunction ", 1)[0]
+    assert "$MinFreeGB" in where and "Free-GB" in where  # a warning, not a stop
+    assert "if (-not $Root) { exit 0 }" in install  # Cancel touches nothing
+    ask = install.split("function Ask-Folder", 1)[1].split("\nfunction ", 1)[0]
+    assert "Read-Host" in ask  # -Console asks too, Enter takes the suggestion
+
+
+def test_the_question_comes_before_anything_is_written():
+    """Cancel must leave nothing behind, so the question comes before the log and the main window."""
+    install = text(SCRIPTS / "install.ps1")
+    asked = install.index("$Root = Ask-Folder (Default-Parent)")
+    assert asked < install.index("$Form = New-Object System.Windows.Forms.Form")
+    assert asked < install.index("foreach ($candidate in $LogCandidates)")
+
+
+def test_install_to_skips_the_question_and_camtrapmeasure_is_appended():
+    install = text(SCRIPTS / "install.ps1")
+    params = install.split("param(", 1)[1].split("\n)", 1)[0]
+    assert "[string]$InstallTo" in params
+    assert "$asked = if ($InstallTo) { $InstallTo } elseif ($env:CAMTRAP_INSTALL_DIR)" in install
+    resolve = install.split("function Resolve-InstallRoot", 1)[1].split("\nfunction ", 1)[0]
+    assert '-ieq "CamTrapMeasure") { return $p }' in resolve  # a folder already so named is used as it is
+    assert 'return (Join-Path $p "CamTrapMeasure")' in resolve
+
+
+def test_the_choice_is_proved_by_writing_a_file_there():
+    """The root of C: takes new folders but not new files: only a real write answers the question."""
+    probe = text(SCRIPTS / "install.ps1").split("function Test-InstallRoot", 1)[1].split("\nfunction ", 1)[0]
+    assert "New-Item -ItemType Directory" in probe and "Set-Content -LiteralPath $probe" in probe
+    assert "Remove-Item -LiteralPath $probe" in probe
+
+
+def test_everything_big_goes_under_the_chosen_folder():
+    install = text(SCRIPTS / "install.ps1")
+    assert '$Dir = Join-Path $Root "app"' in install
+    assert '"CAMTRAP_DATA_DIR"      = (Join-Path $Root "data")' in install
+    assert '"UV_CACHE_DIR"          = (Join-Path $Root "uv-cache")' in install
+    assert '"UV_PYTHON_INSTALL_DIR" = (Join-Path $Root "python")' in install
+
+
+def test_the_folders_are_remembered_as_user_variables_and_the_launcher_reads_them():
+    """No administrator: user scope only. Set in this process too, because step 7 starts the app from here;
+    read back by the launcher itself, because Explorer may still hold the old environment."""
+    install = text(SCRIPTS / "install.ps1")
+    assert '[Environment]::SetEnvironmentVariable($n, $Layout[$n], "User")' in install
+    assert 'Set-Item -Path "env:$n" -Value $Layout[$n]' in install
+    assert '"Machine")' not in install
+    launcher = text(SCRIPTS / "launcher.ps1")
+    for name in ("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR"):
+        assert f'"{name}"' in launcher
+    assert '[Environment]::GetEnvironmentVariable($n, "User")' in launcher
+    assert launcher.index('GetEnvironmentVariable($n, "User")') < launcher.index('"sync", "--frozen"')
+
+
+def test_a_repair_stays_where_the_app_already_is():
+    """Never move a user's data: an install from before ticket 24 keeps its app and data where they are."""
+    install = text(SCRIPTS / "install.ps1")
+    assert "(Get-ItemProperty -Path $Key -ErrorAction Stop).InstallLocation" in install
+    assert "if ($known -and (Test-Path -LiteralPath $known)) {\n    $Dir = $known" in install
+    repair = install.split("if ($Repair) {", 1)[1].split("} else {", 1)[0]
+    assert "SetEnvironmentVariable" not in repair and "Ask-Folder" not in repair
+
+
+def test_the_data_folder_is_never_hardcoded_except_as_the_default():
+    for name in ("install.ps1", "uninstall.ps1"):
+        lines = [l for l in text(SCRIPTS / name).splitlines()
+                 if ".camtrap-measure" in l and not l.lstrip().startswith("#") and "%USERPROFILE%" not in l]
+        assert len(lines) == 1, (name, lines)
+        assert "CAMTRAP_DATA_DIR" in lines[0] or "if (-not $Data)" in lines[0], (name, lines)
+
+
+def test_the_uninstaller_finds_the_data_and_cleans_up_the_variables():
+    uninstall = text(SCRIPTS / "uninstall.ps1")
+    assert '$Data = [Environment]::GetEnvironmentVariable("CAMTRAP_DATA_DIR", "User")' in uninstall
+    for sub in ('"uv-cache"', '"python"'):
+        assert sub in uninstall  # software under R goes with the app, not with the data
+    removed = uninstall.index("foreach ($p in $Software)")
+    cleared = uninstall.index("[Environment]::SetEnvironmentVariable($n, $null, \"User\")")
+    assert removed < cleared < uninstall.index("Also delete your measurements")  # only once the app is gone
+
+
+def test_the_log_records_the_chosen_folder_and_its_free_space():
+    install = text(SCRIPTS / "install.ps1")
+    assert 'Fact "Install folder"' in install and 'Fact "Data folder"' in install
+    assert "GB free on $([System.IO.Path]::GetPathRoot($path))" in install
+
+
+def test_the_new_installer_code_is_ascii():
+    """install.ps1 has no byte order mark, so PowerShell 5 reads it in the ANSI code page."""
+    install = text(SCRIPTS / "install.ps1")
+    start = install.index("# --- where it goes")
+    end = install.index("$Ico = Join-Path $Dir")
+    assert install[start:end].isascii()
+
+
+def test_settings_apps_names_the_lab_as_publisher():
+    """2026-09-25, the researcher: Settings > Apps shows the lab, not the whole university."""
+    install = text(SCRIPTS / "install.ps1")
+    assert 'New-ItemProperty -Path $Key -Name "Publisher" -Value "BASE Lab, SIU Carbondale"' in install
+    assert "Southern Illinois University" not in install

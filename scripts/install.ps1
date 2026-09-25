@@ -4,11 +4,20 @@
     powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/toqitahamid/camtrap-measure/main/scripts/install.ps1 | iex"
     scripts\install.bat            (the same thing by double-click)
     install.ps1 -Console           the steps in the console instead of a window
+    install.ps1 -InstallTo D:\     install there without asking (D:\ becomes D:\CamTrapMeasure)
 
   It runs in a window: the steps tick past, the details pane holds what each one printed, and a failure
   says what to do about it in plain words. Nothing here needs an administrator - the dept machines have
-  none (2026-08-21): a portable Git in the user profile, uv's user-scope installer, the app under
-  %LOCALAPPDATA%, shortcuts and the Settings > Apps entry all per-user.
+  none (2026-08-21): a portable Git in the user profile, uv's user-scope installer, the app in a folder
+  the user picks, shortcuts, the Settings > Apps entry and the environment variables all per-user.
+
+  Where it goes (ticket 24): first it asks where. The answer is a parent folder; everything goes in a
+  CamTrapMeasure folder inside it (R): R\app is the app, R\data its models and results (CAMTRAP_DATA_DIR),
+  R\uv-cache and R\python are uv's download cache and Python (UV_CACHE_DIR, UV_PYTHON_INSTALL_DIR). Those
+  three are saved as user environment variables, which is how the launcher and the uninstaller find them.
+  Only portable Git and uv.exe stay on C: (small). A machine that already has the app is repaired where it
+  is, without the question: an install from before ticket 24 keeps its app in %LOCALAPPDATA%\CamTrapMeasure
+  and its data in %USERPROFILE%\.camtrap-measure, untouched.
 
   Every run writes the same lines to D:\CamTrapMeasure-setup.log (else C:\CamTrapMeasure-log\, the
   Desktop, or TEMP, whichever can be written first), last run only, starting with
@@ -24,7 +33,10 @@ param(
     # asks for a Hugging Face token and the app never contacts the hub: the department is handed the
     # models, not a credential. Defaults to a "weights" folder sitting beside this script, which is what
     # scripts\make_bundle.ps1 builds, so the bundle installs by double-click with no arguments.
-    [string]$WeightsFrom
+    [string]$WeightsFrom,
+    # Where to install, so the installer does not ask. A parent folder: D:\ becomes D:\CamTrapMeasure.
+    # CAMTRAP_INSTALL_DIR in the environment does the same. Ignored when the app is already installed.
+    [string]$InstallTo
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,14 +50,12 @@ $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest's progress bar slo
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Repo = "https://github.com/toqitahamid/camtrap-measure.git"
-$Dir = if ($env:CAMTRAP_INSTALL_DIR) { $env:CAMTRAP_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "CamTrapMeasure" }
 # Portable Git (MinGit: no installer, no registry, no admin). The launcher puts the same folder on the PATH.
 $MinGitUrl = "https://github.com/git-for-windows/git/releases/download/v2.51.0.windows.1/MinGit-2.51.0-64-bit.zip"
 $MinGitDir = Join-Path $env:LOCALAPPDATA "Programs\MinGit"
 $UvBin = Join-Path $env:USERPROFILE ".local\bin"  # where uv's installer puts uv.exe
 $Name = "CamTrap Measure"
 $Key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CamTrapMeasure"
-$Ico = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 $Wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
 # The details pane goes with the window; this file is what a person can send afterwards. It goes where
 # anyone can be told to look (2026-09-25: the Desktop copy was not found on a dept machine). First the root
@@ -73,6 +83,244 @@ if (-not $Console) {
         $Console = $true  # a machine without WinForms still gets installed, just in the console
     }
 }
+
+# --- where it goes ----------------------------------------------------------------------------------
+# 2026-09-25: a dept machine failed the 20 GB free-space check, because everything went on C: (the app and
+# its environment in %LOCALAPPDATA%, 7 GB of models in the user profile, uv's cache). The researcher: "how
+# about installing it on my chosen location that I select on the installing time". So the installer asks,
+# and everything big goes under the one folder that was picked (see the header for the layout).
+$MinFreeGB = 20  # preflight.MIN_FREE_GB: what the app's own disk check asks for
+$LegacyDir = Join-Path $env:LOCALAPPDATA "CamTrapMeasure"  # where every install before ticket 24 put the app
+$EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
+$Amber = if ($Console) { $null } else { [System.Drawing.ColorTranslator]::FromHtml("#E8A13C") }
+
+function Resolve-InstallRoot($picked) {
+    # The picked folder is a parent: D:\ becomes D:\CamTrapMeasure, and a folder already called
+    # CamTrapMeasure is used as it is. $null when the answer is not a full path.
+    if (-not $picked) { return $null }
+    $p = [Environment]::ExpandEnvironmentVariables(([string]$picked).Trim().Trim('"').Trim())
+    if ($p -match '^[A-Za-z]:$') { $p += "\" }
+    if ($p -notmatch '^([A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)') { return $null }
+    try { $p = [System.IO.Path]::GetFullPath($p) } catch { return $null }
+    if ($p.Length -gt 3) { $p = $p.TrimEnd("\") }
+    if ([System.IO.Path]::GetFileName($p) -ieq "CamTrapMeasure") { return $p }
+    return (Join-Path $p "CamTrapMeasure")
+}
+
+function Free-GB($path) {
+    # Free space on the drive holding $path, in whole GB; $null when Windows will not say (a network path).
+    try {
+        $drive = New-Object System.IO.DriveInfo([System.IO.Path]::GetPathRoot($path))
+        return [int][Math]::Floor($drive.AvailableFreeSpace / 1GB)
+    } catch { return $null }
+}
+
+function Test-InstallRoot($root) {
+    # Makes the folder and writes a file in it: the only sure answer to "can this account install here?"
+    # (the root of C: takes new folders but not new files). $null when it can, else why not, in words.
+    $made = -not (Test-Path -LiteralPath $root)
+    $probe = Join-Path $root "camtrap-write-test.tmp"
+    try {
+        New-Item -ItemType Directory -Force -Path $root -ErrorAction Stop | Out-Null
+        Set-Content -LiteralPath $probe -Value "test" -ErrorAction Stop
+        Remove-Item -LiteralPath $probe -Force -ErrorAction Stop
+        return $null
+    } catch {
+        $why = $_.Exception.Message
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        if ($made) { try { [System.IO.Directory]::Delete($root, $false) } catch {} }  # only if empty: never a prompt
+        return "Windows does not let this account save files in $root ($why)"
+    }
+}
+
+function Where-Text($picked) {
+    # The line under the folder box: where it will really go, and whether the drive has room. A warning,
+    # never a stop: the checks later on say the same thing with more detail.
+    $root = Resolve-InstallRoot $picked
+    if (-not $root) { return @("Type a full folder path, like D:\", $true) }
+    $free = Free-GB $root
+    $drive = [System.IO.Path]::GetPathRoot($root)
+    if ($null -eq $free) { return @("Installs into $root. Free space on that drive is unknown.", $false) }
+    if ($free -lt $MinFreeGB) {
+        return @("Installs into $root. Only $free GB free on $drive and it needs about $MinFreeGB GB.", $true)
+    }
+    return @("Installs into $root. $free GB free on $drive", $false)
+}
+
+function Default-Parent {
+    # A run that stopped part way left its choice behind: offer the same place again.
+    $before = [Environment]::GetEnvironmentVariable("CAMTRAP_DATA_DIR", "User")
+    if ($before -and ([System.IO.Path]::GetFileName($before.TrimEnd("\")) -ieq "data")) {
+        return (Split-Path $before.TrimEnd("\") -Parent)
+    }
+    # Otherwise D: when it is a local disk with more room than C: (the dept machines' case), else the old place.
+    try {
+        $d = New-Object System.IO.DriveInfo("D")
+        $c = New-Object System.IO.DriveInfo("C")
+        if ($d.IsReady -and $d.DriveType -eq [System.IO.DriveType]::Fixed -and
+            $d.AvailableFreeSpace -gt $c.AvailableFreeSpace) { return "D:\" }
+    } catch {}
+    return $env:LOCALAPPDATA
+}
+
+function New-FolderDialog($suggest) {
+    # Built apart from Ask-Folder so it can be made and looked at without waiting for a click.
+    $box = New-Object System.Windows.Forms.Form
+    $box.Text = "$Name Setup"
+    $box.Size = New-Object System.Drawing.Size(580, 250)
+    $box.StartPosition = "CenterScreen"
+    $box.FormBorderStyle = "FixedDialog"
+    $box.MaximizeBox = $false
+    $box.MinimizeBox = $false
+    $box.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#14171B")
+
+    $mark = New-Object System.Windows.Forms.Label
+    $mark.Text = "CAMTRAP MEASURE"
+    $mark.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 13)
+    $mark.ForeColor = $Amber
+    $mark.SetBounds(22, 18, 400, 28)
+    $box.Controls.Add($mark)
+
+    $question = New-Object System.Windows.Forms.Label
+    $question.Text = "Where should $Name be installed?"
+    $question.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $question.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#E8EAED")
+    $question.SetBounds(24, 54, 520, 22)
+    $box.Controls.Add($question)
+
+    $field = New-Object System.Windows.Forms.TextBox
+    $field.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $field.Text = $suggest
+    $field.SetBounds(24, 84, 412, 26)
+    $box.Controls.Add($field)
+
+    $browse = New-Object System.Windows.Forms.Button
+    $browse.Text = "Browse..."
+    $browse.SetBounds(444, 83, 100, 28)
+    $box.Controls.Add($browse)
+
+    $where = New-Object System.Windows.Forms.Label
+    $where.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $where.SetBounds(24, 118, 520, 36)
+    $box.Controls.Add($where)
+
+    $go = New-Object System.Windows.Forms.Button
+    $go.Text = "Install"
+    $go.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $go.SetBounds(336, 166, 100, 28)
+    $box.Controls.Add($go)
+    $box.AcceptButton = $go
+
+    $stop = New-Object System.Windows.Forms.Button
+    $stop.Text = "Cancel"
+    $stop.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $stop.SetBounds(444, 166, 100, 28)
+    $box.Controls.Add($stop)
+    $box.CancelButton = $stop
+
+    # Script scope, not closures: the handlers run while ShowDialog is on the stack, and a closure
+    # (GetNewClosure) would not see this script's functions.
+    $script:FolderField = $field
+    $script:FolderWhere = $where
+    $field.add_TextChanged({ Show-Where })
+    $browse.add_Click({
+        $pick = New-Object System.Windows.Forms.FolderBrowserDialog
+        $pick.Description = "Pick a folder. $Name goes in a CamTrapMeasure folder inside it."
+        if (Test-Path -LiteralPath $script:FolderField.Text) { $pick.SelectedPath = $script:FolderField.Text }
+        if ($pick.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $script:FolderField.Text = $pick.SelectedPath }
+        $pick.Dispose()
+    })
+    Show-Where
+    return $box
+}
+
+function Show-Where {
+    $said = Where-Text $script:FolderField.Text
+    $script:FolderWhere.Text = $said[0]
+    $script:FolderWhere.ForeColor = if ($said[1]) { $Amber } else { [System.Drawing.ColorTranslator]::FromHtml("#8A929C") }
+}
+
+function Ask-Folder($suggest) {
+    # Asks until the answer is a folder this account can write to. Returns it, or $null for Cancel.
+    if ($Console) {
+        while ($true) {
+            $typed = Read-Host "Where should $Name be installed? Press Enter for $suggest"
+            if (-not $typed) { $typed = $suggest }
+            $root = Resolve-InstallRoot $typed
+            $problem = if ($root) { Test-InstallRoot $root } else { "That is not a full folder path, like D:\" }
+            if (-not $problem) { return $root }
+            Write-Host "$problem. Pick another folder." -ForegroundColor Yellow
+        }
+    }
+    $box = New-FolderDialog $suggest
+    try {
+        while ($box.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $root = Resolve-InstallRoot $script:FolderField.Text
+            $problem = if ($root) { Test-InstallRoot $root } else { "That is not a full folder path, like D:\" }
+            if (-not $problem) { return $root }
+            [System.Windows.Forms.MessageBox]::Show("$problem.`r`n`r`nPick another folder.", "$Name Setup",
+                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+        }
+        return $null
+    } finally {
+        $box.Dispose()
+    }
+}
+
+# Already installed: repair it where it is, with no question, and leave its data where it is. The
+# Settings > Apps entry says where; an install from before that entry existed is found at the old place.
+$Root = $null      # R, for an install made by ticket 24 or later; $null for an older one
+$Repair = $false
+$Notes = @()       # for the details pane, which does not exist yet
+$known = $null
+try { $known = (Get-ItemProperty -Path $Key -ErrorAction Stop).InstallLocation } catch { $known = $null }
+if ($known -and (Test-Path -LiteralPath $known)) {
+    $Dir = $known
+    $Repair = $true
+} elseif (Test-Path -LiteralPath (Join-Path $LegacyDir ".git")) {
+    $Dir = $LegacyDir
+    $Repair = $true
+}
+$asked = if ($InstallTo) { $InstallTo } elseif ($env:CAMTRAP_INSTALL_DIR) { $env:CAMTRAP_INSTALL_DIR } else { $null }
+if ($Repair) {
+    if ([System.IO.Path]::GetFileName($Dir.TrimEnd("\")) -ieq "app") { $Root = Split-Path $Dir.TrimEnd("\") -Parent }
+    $Notes += "Already installed in $Dir; repairing it there."
+    if ($asked) { $Notes += "The folder given ($asked) is not used: remove the app first to install it somewhere else." }
+    # An older install has no R: its data stays wherever it has been (the variable if set, else the default).
+    foreach ($n in $EnvNames) {
+        $v = [Environment]::GetEnvironmentVariable($n, "User")
+        if ($v) { Set-Item -Path "env:$n" -Value $v }
+    }
+} else {
+    if ($asked) {
+        $Root = Resolve-InstallRoot $asked
+        $problem = if ($Root) { Test-InstallRoot $Root } else { "$asked is not a full folder path, like D:\" }
+        if ($problem) {
+            if ($Console) { Write-Host "$problem." -ForegroundColor Yellow }
+            else {
+                [System.Windows.Forms.MessageBox]::Show("$problem.`r`n`r`nPick another folder.", "$Name Setup",
+                    [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+            }
+            $Root = Ask-Folder $asked
+        }
+    } else {
+        $Root = Ask-Folder (Default-Parent)
+    }
+    if (-not $Root) { exit 0 }  # Cancel: nothing was made, nothing was changed
+    $Dir = Join-Path $Root "app"
+}
+if ($Root) {
+    $Layout = @{
+        "CAMTRAP_DATA_DIR"      = (Join-Path $Root "data")
+        "UV_CACHE_DIR"          = (Join-Path $Root "uv-cache")
+        "UV_PYTHON_INSTALL_DIR" = (Join-Path $Root "python")
+    }
+    # This process first: step 7 starts the app from here, and Explorer may not have the new values yet.
+    foreach ($n in $EnvNames) { Set-Item -Path "env:$n" -Value $Layout[$n] }
+}
+$DataDir = if ($env:CAMTRAP_DATA_DIR) { $env:CAMTRAP_DATA_DIR } else { Join-Path $env:USERPROFILE ".camtrap-measure" }
+$Ico = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
+
 if (-not $Console) {
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "$Name Setup"
@@ -90,7 +338,7 @@ if (-not $Console) {
     $Form.Controls.Add($mark)
 
     $sub = New-Object System.Windows.Forms.Label
-    $sub.Text = "Installing into $Dir. Nothing here needs an administrator."
+    $sub.Text = "Installing into $(if ($Root) { $Root } else { $Dir }). Nothing here needs an administrator."
     $sub.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $sub.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#8A929C")
     $sub.SetBounds(26, 52, 600, 20)
@@ -254,8 +502,27 @@ Fact "Disks" {
         "{0}: {1:N0} GB free of {2:N0} GB" -f $_.Name, ($_.Free / 1GB), (($_.Used + $_.Free) / 1GB)
     }) -join "; "
 }
+function Folder-Fact($path) {
+    $free = Free-GB $path
+    if ($null -eq $free) { return "$path (free space unknown)" }
+    return "$path ($free GB free on $([System.IO.Path]::GetPathRoot($path)))"
+}
+Fact "Install folder" { Folder-Fact $(if ($Root) { $Root } else { $Dir }) }
+Fact "App folder" { $Dir }
+Fact "Data folder" { Folder-Fact $DataDir }
 Detail "Log: $LogFile (this run only; every run overwrites it)"
 Detail "--------------------"
+foreach ($note in $Notes) { Detail $note }
+
+# Saved as user variables (no administrator needed) so the app, the launcher and the uninstaller find the
+# data and uv's folders on every later start. The launcher reads them back itself at start, so it does not
+# matter whether Explorer has picked them up yet.
+if ($Root) {
+    foreach ($n in $EnvNames) {
+        [Environment]::SetEnvironmentVariable($n, $Layout[$n], "User")
+        Detail "$n = $($Layout[$n])"
+    }
+}
 
 function AddPath($p) { if ((Test-Path $p) -and (($env:Path -split ";") -notcontains $p)) { $env:Path = "$p;" + $env:Path } }
 
@@ -390,8 +657,7 @@ if ((Run "uv" @("sync", "--frozen") $Dir) -ne 0) {
 # EOFError before a single check was read (2026-08-23). The token is the one thing only a person can
 # supply, so the installer asks for it in its own window and hands it over in the environment; signing in
 # to FlagLabel happens in the app window, which has had its own sign-in since ticket 14.
-$cfg = Join-Path $env:USERPROFILE ".camtrap-measure\config.json"
-$dataDir = Split-Path $cfg -Parent
+$cfg = Join-Path $DataDir "config.json"  # where the app will look: CAMTRAP_DATA_DIR, set above for this process
 
 # Weights that came with the installer: copy them in and the token question never arises.
 if (-not $WeightsFrom) {
@@ -403,7 +669,7 @@ if ($WeightsFrom) {
     if (-not (Test-Path (Join-Path $WeightsFrom "manifest.json"))) {
         Fail "No model weights in $WeightsFrom - it should hold manifest.json and the model files."
     }
-    $target = Join-Path $dataDir "weights"
+    $target = Join-Path $DataDir "weights"
     $have = Join-Path $target "manifest.json"
     $same = (Test-Path $have) -and ((Get-Content $have -Raw) -eq (Get-Content (Join-Path $WeightsFrom "manifest.json") -Raw))
     if ($same) {
@@ -430,7 +696,7 @@ if ($bundled) {
     # Said in config.json rather than guessed from the absence of a token: a developer machine has no
     # token either and still reaches the hub through a cached huggingface-cli login, and must go on
     # picking up new weights versions.
-    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
     $conf = if (Test-Path $cfg) { Get-Content $cfg -Raw | ConvertFrom-Json } else { New-Object PSObject }
     $conf | Add-Member -NotePropertyName "weights_from" -NotePropertyValue "bundle" -Force
     $conf | ConvertTo-Json | Set-Content $cfg -Encoding utf8
@@ -472,7 +738,7 @@ New-Item -Path $Key -Force | Out-Null
 New-ItemProperty -Path $Key -Name "DisplayName" -Value $Name -Force | Out-Null
 New-ItemProperty -Path $Key -Name "DisplayVersion" -Value $version -Force | Out-Null
 New-ItemProperty -Path $Key -Name "DisplayIcon" -Value $Ico -Force | Out-Null
-New-ItemProperty -Path $Key -Name "Publisher" -Value "Southern Illinois University" -Force | Out-Null
+New-ItemProperty -Path $Key -Name "Publisher" -Value "BASE Lab, SIU Carbondale" -Force | Out-Null
 New-ItemProperty -Path $Key -Name "InstallLocation" -Value $Dir -Force | Out-Null
 New-ItemProperty -Path $Key -Name "UninstallString" `
                  -Value ("$Wscript """ + (Join-Path $Dir "scripts\uninstall.vbs") + """") -Force | Out-Null
