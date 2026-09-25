@@ -456,3 +456,15 @@ def test_long_steps_keep_the_window_answering():
     assert "Invoke-WebRequest -Uri $(Quote $MinGitUrl)" in tools and "-EncodedCommand" in tools
     assert "try { Invoke-WebRequest" not in tools and "\n    Expand-Archive" not in tools
     assert tools.count('(Run "powershell.exe"') == 3  # Git download, Git unzip, uv
+
+
+def test_a_rerun_updates_the_app_it_already_downloaded():
+    """2026-09-25: after the disk check was fixed and pushed, a rerun still ran the checks from the old
+    download (the half-finished install on D:) and would have stopped the same way. The installer now
+    fetches and switches like the launcher, and leaves a clone with local changes alone."""
+    install = text(SCRIPTS / "install.ps1")
+    step = install.split('Step "Getting the app into $Dir"', 1)[1].split("Set-Location $Dir", 1)[0]
+    assert '"fetch", "--quiet", "--tags", "origin"' in step
+    assert '"checkout", "--quiet", "--detach", $ref' in step
+    assert "status --porcelain" in step and "not updating it" in step
+    assert '"ref.txt"' in step

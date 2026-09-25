@@ -759,7 +759,24 @@ if (Get-Command uv -ErrorAction SilentlyContinue) { Detail "uv is installed." } 
 # --- 2. the app -------------------------------------------------------------------------------------
 Step "Getting the app into $Dir"
 if (Test-Path (Join-Path $Dir ".git")) {
-    Detail "Already here; the launcher updates it at every start (and honours ref.txt)."
+    # Bring it up to date first, the way the launcher does (origin/main, or the tag in ref.txt). Without this a
+    # rerun after a stop ran the checks from the old download and stopped the same way again, even after the
+    # check itself had been fixed (2026-09-25). A clone with local changes is left alone, as the launcher does.
+    $dirty = @(& git -C $Dir status --porcelain 2>$null) | Where-Object { $_ -and $_ -notmatch 'CamTrapMeasure-setup\.log' }
+    if ($dirty) {
+        Detail "The app folder has local changes; not updating it."
+    } elseif ((Run "git" @("fetch", "--quiet", "--tags", "origin") $Dir) -ne 0) {
+        Detail "Could not check for a newer version; carrying on with the one here."
+    } else {
+        $ref = "origin/main"
+        $refFile = Join-Path $Dir "ref.txt"
+        if (Test-Path $refFile) { $ref = (Get-Content $refFile -TotalCount 1).Trim() }
+        if ((Run "git" @("-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", $ref) $Dir) -ne 0) {
+            Detail "Could not switch to $ref; carrying on with the version here."
+        } else {
+            Detail "Updated to the newest version."
+        }
+    }
 } else {
     if ((Run "git" @("clone", "--quiet", $Repo, $Dir) $env:TEMP) -ne 0) {
         Fail "Could not download the app from $Repo. Check the internet connection (github.com must be reachable)."
