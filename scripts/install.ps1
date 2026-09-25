@@ -79,9 +79,22 @@ if (-not $Console) {
         Add-Type -AssemblyName System.Windows.Forms
         Add-Type -AssemblyName System.Drawing
         [System.Windows.Forms.Application]::EnableVisualStyles()
+        # setup.vbs starts this process hidden (window style 0) so no console shows. Windows applies that
+        # "hidden" to the first window the process shows. Since ticket 24 that first window is the folder
+        # question, a modal dialog: it stayed invisible and waited for a click no one could make, and
+        # INSTALL.bat seemed to do nothing (2026-09-25). Show-Now makes each window call ShowWindow itself
+        # as it loads, which Windows honours. (Showing and hiding a throwaway form first was tried and did
+        # not help: measured under the same hidden start, only the explicit call made the window visible.)
+        Add-Type -Namespace CamTrap -Name Win -MemberDefinition `
+            '[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);'
     } catch {
         $Console = $true  # a machine without WinForms still gets installed, just in the console
     }
+}
+
+function Show-Now($window) {
+    # See the note where WinForms is loaded: 5 is SW_SHOW.
+    $window.add_Load({ [CamTrap.Win]::ShowWindow($this.Handle, 5) | Out-Null; $this.Activate() })
 }
 
 # --- where it goes ----------------------------------------------------------------------------------
@@ -92,7 +105,9 @@ if (-not $Console) {
 $MinFreeGB = 20  # preflight.MIN_FREE_GB: what the app's own disk check asks for
 $LegacyDir = Join-Path $env:LOCALAPPDATA "CamTrapMeasure"  # where every install before ticket 24 put the app
 $EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
-$Amber = if ($Console) { $null } else { [System.Drawing.ColorTranslator]::FromHtml("#E8A13C") }
+# Standard Windows colours throughout, like any installer: dark text on the light system background. The
+# dark theme was hard to read on a real screen (2026-09-25). Warnings are dark orange, readable on light.
+$Amber = if ($Console) { $null } else { [System.Drawing.Color]::FromArgb(176, 80, 0) }
 
 function Resolve-InstallRoot($picked) {
     # The picked folder is a parent: D:\ becomes D:\CamTrapMeasure, and a folder already called
@@ -172,19 +187,19 @@ function New-FolderDialog($suggest) {
     $box.FormBorderStyle = "FixedDialog"
     $box.MaximizeBox = $false
     $box.MinimizeBox = $false
-    $box.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#14171B")
+    Show-Now $box
 
     $mark = New-Object System.Windows.Forms.Label
     $mark.Text = "CAMTRAP MEASURE"
     $mark.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 13)
-    $mark.ForeColor = $Amber
+    $mark.ForeColor = [System.Drawing.SystemColors]::ControlText
     $mark.SetBounds(22, 18, 400, 28)
     $box.Controls.Add($mark)
 
     $question = New-Object System.Windows.Forms.Label
     $question.Text = "Where should $Name be installed?"
     $question.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $question.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#E8EAED")
+    $question.ForeColor = [System.Drawing.SystemColors]::ControlText
     $question.SetBounds(24, 54, 520, 22)
     $box.Controls.Add($question)
 
@@ -237,7 +252,7 @@ function New-FolderDialog($suggest) {
 function Show-Where {
     $said = Where-Text $script:FolderField.Text
     $script:FolderWhere.Text = $said[0]
-    $script:FolderWhere.ForeColor = if ($said[1]) { $Amber } else { [System.Drawing.ColorTranslator]::FromHtml("#8A929C") }
+    $script:FolderWhere.ForeColor = if ($said[1]) { $Amber } else { [System.Drawing.SystemColors]::ControlText }
 }
 
 function Ask-Folder($suggest) {
@@ -328,26 +343,26 @@ if (-not $Console) {
     $Form.StartPosition = "CenterScreen"
     $Form.FormBorderStyle = "FixedDialog"
     $Form.MaximizeBox = $false
-    $Form.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#14171B")
+    Show-Now $Form
 
     $mark = New-Object System.Windows.Forms.Label
     $mark.Text = "CAMTRAP MEASURE"
     $mark.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 13)
-    $mark.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#E8A13C")
+    $mark.ForeColor = [System.Drawing.SystemColors]::ControlText
     $mark.SetBounds(24, 22, 400, 28)
     $Form.Controls.Add($mark)
 
     $sub = New-Object System.Windows.Forms.Label
     $sub.Text = "Installing into $(if ($Root) { $Root } else { $Dir }). Nothing here needs an administrator."
     $sub.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $sub.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#8A929C")
+    $sub.ForeColor = [System.Drawing.SystemColors]::GrayText
     $sub.SetBounds(26, 52, 600, 20)
     $Form.Controls.Add($sub)
 
     $StepLabel = New-Object System.Windows.Forms.Label
     $StepLabel.Text = "Starting..."
     $StepLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $StepLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#E8EAED")
+    $StepLabel.ForeColor = [System.Drawing.SystemColors]::ControlText
     $StepLabel.SetBounds(26, 86, 600, 22)
     $Form.Controls.Add($StepLabel)
 
@@ -364,8 +379,8 @@ if (-not $Console) {
     $Details.ReadOnly = $true
     $Details.ScrollBars = "Vertical"
     $Details.Font = New-Object System.Drawing.Font("Consolas", 8.5)
-    $Details.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#0E1013")
-    $Details.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#C7CCD2")
+    $Details.BackColor = [System.Drawing.SystemColors]::Window
+    $Details.ForeColor = [System.Drawing.SystemColors]::WindowText
     $Details.BorderStyle = "FixedSingle"
     $Details.SetBounds(26, 134, 600, 250)
     $Form.Controls.Add($Details)

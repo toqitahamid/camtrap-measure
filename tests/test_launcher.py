@@ -376,3 +376,22 @@ def test_the_uninstaller_copy_knows_it_is_the_copy_by_a_flag_not_by_its_path():
     assert '$argv += "-FromTemp"' in un
     assert '-notlike "$env:TEMP*"' not in un
     assert "Nothing was removed." in un  # a copy with no marker stops instead of deleting its own folder
+
+
+def test_every_installer_window_shows_itself_despite_the_hidden_start():
+    """2026-09-25: INSTALL.bat did nothing. setup.vbs starts PowerShell hidden, Windows applied that to the
+    first window shown, and since ticket 24 that is the folder question, a modal dialog nobody could see.
+    Measured under the same hidden start: only an explicit ShowWindow as the window loads made it visible."""
+    install = text(SCRIPTS / "install.ps1")
+    assert "public static extern bool ShowWindow" in install
+    assert "[CamTrap.Win]::ShowWindow($this.Handle, 5)" in install
+    assert "Show-Now $box" in install and "Show-Now $Form" in install
+    assert "$prime" not in install
+
+
+def test_the_installer_uses_standard_windows_colours():
+    """2026-09-25, the researcher: the dark installer was not readable. System colours only."""
+    install = text(SCRIPTS / "install.ps1")
+    assert "FromHtml" not in install
+    assert "BackColor = [System.Drawing.ColorTranslator]" not in install
+    assert "$Details.BackColor = [System.Drawing.SystemColors]::Window" in install
