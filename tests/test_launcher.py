@@ -313,18 +313,94 @@ def test_everything_big_goes_under_the_chosen_folder():
     assert '"UV_PYTHON_INSTALL_DIR" = (Join-Path $Root "python")' in install
 
 
-def test_the_folders_are_remembered_as_user_variables_and_the_launcher_reads_them():
-    """No administrator: user scope only. Set in this process too, because step 7 starts the app from here;
-    read back by the launcher itself, because Explorer may still hold the old environment."""
+def test_no_script_saves_an_environment_variable_for_the_whole_account():
+    """2026-09-25: the three folders were saved as user variables and leaked into everything under the
+    account; on a developer's PC, uv in the dev repo used the installed app's cache and Python. Now they are
+    only ever set for a process. Clearing a leftover one (value $null) is the one user-scope write allowed."""
+    import re
+    for p in SCRIPTS.glob("*.ps1"):
+        for line in text(p).splitlines():
+            for m in re.finditer(r"SetEnvironmentVariable\((.*)\)", line):
+                if '"User"' in m.group(1) or '"Machine"' in m.group(1):
+                    assert ", $null, " in m.group(1), (p.name, line)
     install = text(SCRIPTS / "install.ps1")
-    assert '[Environment]::SetEnvironmentVariable($n, $Layout[$n], "User")' in install
-    assert 'Set-Item -Path "env:$n" -Value $Layout[$n]' in install
-    assert '"Machine")' not in install
+    assert 'Set-Item -Path "env:$n" -Value $Layout[$n]' in install  # this process: its uv steps and step 7
+
+
+def test_the_installer_writes_the_layout_file_outside_the_clone_without_a_bom():
+    """In R, not in R\\app: an untracked file in the clone makes it look changed and stops its updates."""
+    install = text(SCRIPTS / "install.ps1")
+    assert '$LayoutFile = Join-Path $Root "camtrap-install.json"' in install
+    assert "camtrap-install.json" not in install.split('$Dir = Join-Path $Root "app"', 1)[1].split("$LayoutFile", 1)[0]
+    for key in ('"data"      = $Layout["CAMTRAP_DATA_DIR"]', '"uv_cache"  = $Layout["UV_CACHE_DIR"]',
+                '"uv_python" = $Layout["UV_PYTHON_INSTALL_DIR"]'):
+        assert key in install
+    assert ("[IO.File]::WriteAllText($LayoutFile, ($saved | ConvertTo-Json), "
+            "(New-Object System.Text.UTF8Encoding $false))") in install
+    # written before any uv step, so a failure stops the install before anything big happens
+    assert install.index("[IO.File]::WriteAllText($LayoutFile") < install.index('Run "uv" @("sync", "--frozen")')
+
+
+def test_the_installer_removes_leftover_variables_only_inside_r_and_only_once_the_launcher_reads_the_file():
+    """A rerun on an install made before the layout file: the variables go, but only after step 2 put a
+    launcher there that reads the file (an older one, left by a failed update, still reads the variables)."""
+    install = text(SCRIPTS / "install.ps1")
+    after_update = install.split('Step "Getting the app into $Dir"', 1)[1].split("# --- 3. environment", 1)[0]
+    assert '-Pattern "camtrap-install.json" -SimpleMatch' in after_update
+    assert "if (Is-Inside $v $Root) {" in after_update
+    assert '[Environment]::SetEnvironmentVariable($n, $null, "User")' in after_update
+    before_update = install.split('Step "Getting the app into $Dir"', 1)[0]
+    assert "SetEnvironmentVariable" not in before_update
+
+
+def test_the_folder_question_suggests_a_known_install_from_the_file_or_the_registry():
+    install = text(SCRIPTS / "install.ps1")
+    find = install.split("function Find-KnownRoot", 1)[1].split("\nfunction ", 1)[0]
+    assert "(Get-ItemProperty -Path $Key -ErrorAction Stop).InstallLocation" in find
+    assert '(Join-Path $r "camtrap-install.json")' in find
+    default = install.split("function Default-Parent", 1)[1].split("\nfunction ", 1)[0]
+    assert "$before = Find-KnownRoot" in default
+    assert "GetEnvironmentVariable" not in default
+
+
+def launcher_layout(launcher: str) -> str:
+    return launcher.split("# --- where the data and uv's folders are", 1)[1].split("# --- the splash", 1)[0]
+
+
+def test_the_launcher_resolves_the_layout_file_then_leftover_variables_then_nothing():
     launcher = text(SCRIPTS / "launcher.ps1")
+    block = launcher_layout(launcher)
+    assert '$LayoutFile = Join-Path $InstallRoot "camtrap-install.json"' in block
+    assert "$InstallRoot = Split-Path $Dir -Parent" in block
+    # the order: not installed -> the file -> (only for R\app) the old variables -> nothing
+    order = ["if (-not $IsInstalled) {", "elseif (Test-Path -LiteralPath $LayoutFile) {",
+             '-ine "app") {', 'GetEnvironmentVariable($n, "User")', 'Log "layout: none (no $LayoutFile']
+    at = [block.index(s) for s in order]
+    assert at == sorted(at), at
     for name in ("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR"):
-        assert f'"{name}"' in launcher
-    assert '[Environment]::GetEnvironmentVariable($n, "User")' in launcher
-    assert launcher.index('GetEnvironmentVariable($n, "User")') < launcher.index('"sync", "--frozen"')
+        assert f'"{name}"' in block
+    # the old variables: only inside R, written to the file first, then removed; the process gets them
+    assert "if (Is-Inside $v $InstallRoot) { $legacy[$n] = $v }" in block
+    written = block.index("[IO.File]::WriteAllText($LayoutFile, ($out | ConvertTo-Json), "
+                          "(New-Object System.Text.UTF8Encoding $false))")
+    assert written < block.index('[Environment]::SetEnvironmentVariable($n, $null, "User")')
+    assert 'Set-Item -Path "env:$n"' in block
+    # never blocks the start, and says what it used
+    assert "try {" in block and "} catch {" in block and "carrying on" in block and "Stop-With" not in block
+    assert 'Log "layout: CAMTRAP_DATA_DIR=$env:CAMTRAP_DATA_DIR' in block
+    # before any uv or git step
+    assert launcher.index("# --- where the data and uv's folders are") < launcher.index('Capture "git"')
+    assert launcher.index("# --- where the data and uv's folders are") < launcher.index('"sync", "--frozen"')
+
+
+def test_only_the_installed_copy_has_its_layout_read_or_written():
+    """A developer's run.bat in their own clone must never read, write or delete anything here."""
+    launcher = text(SCRIPTS / "launcher.ps1")
+    which = launcher.split("# --- which copy this is", 1)[1].split("# --- where the data", 1)[0]
+    assert '"InstallLocation"' in which
+    assert "GetFullPath($InstalledAt)" in which and "GetFullPath($Dir)" in which
+    block = launcher_layout(launcher)
+    assert block.index("if (-not $IsInstalled) {") < block.index("Test-Path -LiteralPath $LayoutFile")
 
 
 def test_a_repair_stays_where_the_app_already_is():
@@ -346,12 +422,26 @@ def test_the_data_folder_is_never_hardcoded_except_as_the_default():
 
 def test_the_uninstaller_finds_the_data_and_cleans_up_the_variables():
     uninstall = text(SCRIPTS / "uninstall.ps1")
-    assert '$Data = [Environment]::GetEnvironmentVariable("CAMTRAP_DATA_DIR", "User")' in uninstall
-    for sub in ('"uv-cache"', '"python"'):
-        assert sub in uninstall  # software under R goes with the app, not with the data
+    # the layout file first, then an old variable inside R, then the default
+    read = uninstall.index("([IO.File]::ReadAllText($LayoutFile) | ConvertFrom-Json).data")
+    legacy = uninstall.index("if (Is-Inside $v $Root) { $Data = $v }")
+    default = uninstall.index('if (-not $Data) { $Data = Join-Path $env:USERPROFILE ".camtrap-measure" }')
+    assert read < legacy < default
+    assert '$LayoutFile = Join-Path $Root "camtrap-install.json"' in uninstall
+    assert 'foreach ($sub in @("uv-cache", "python", "camtrap-install.json"))' in uninstall  # go with the app
     removed = uninstall.index("foreach ($p in $Software)")
     cleared = uninstall.index("[Environment]::SetEnvironmentVariable($n, $null, \"User\")")
     assert removed < cleared < uninstall.index("Also delete your measurements")  # only once the app is gone
+    assert "if (Is-Inside $v $Root) {\n" in uninstall  # only the ones inside R
+
+
+def test_the_uninstaller_copy_is_started_with_quoted_arguments():
+    """A TEMP path with a space reached powershell.exe as two arguments: Start-Process quotes nothing."""
+    uninstall = text(SCRIPTS / "uninstall.ps1")
+    assert '$line = ($argv | ForEach-Object { Quote-Arg $_ }) -join " "' in uninstall
+    assert "-ArgumentList $line" in uninstall and "-ArgumentList $argv" not in uninstall
+    body = lambda s: s.split("function Quote-Arg(", 1)[1].split("\n}", 1)[0]
+    assert body(uninstall) == body(text(SCRIPTS / "install.ps1"))  # the same rules, copied
 
 
 def test_the_log_records_the_chosen_folder_and_its_free_space():
@@ -509,13 +599,14 @@ def test_the_launcher_goes_sparse_before_it_checks_for_local_changes():
     assert sparse < launcher.index('Capture "git" @("status", "--porcelain")')
     block = launcher.split("# --- developer files stay off", 1)[1].split("$dirty = ", 1)[0]
     assert "try {" in block and "} catch {" in block and "carrying on" in block  # never blocks the start
-    assert '"InstallLocation"' in block  # a developer's clone is not the installed copy: left whole
+    assert "if (-not $IsInstalled) {" in block  # a developer's clone is not the installed copy: left whole
+    assert '"InstallLocation"' in launcher.split("# --- which copy this is", 1)[1].split("# --- where the data", 1)[0]
     assert "Stop-With" not in block
 
 
 def test_both_scripts_are_ascii():
     """No byte order mark: PowerShell 5 reads them in the ANSI code page."""
-    for name in ("install.ps1", "launcher.ps1"):
+    for name in ("install.ps1", "launcher.ps1", "uninstall.ps1"):
         raw = (SCRIPTS / name).read_bytes()
         assert raw.isascii(), name
 

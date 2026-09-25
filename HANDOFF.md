@@ -55,9 +55,10 @@ No administrator needed: portable Git (MinGit) into `%LOCALAPPDATA%\Programs\Min
 own user-scope installer, then (ticket 24) a question: where to install. The answer R is a parent
 folder (`D:\` becomes `D:\CamTrapMeasure`; suggested `D:\` when it has more room than C:;
 `-InstallTo <folder>` or `CAMTRAP_INSTALL_DIR` skip the question). Clone into `R\app`, models and
-results in `R\data`, uv's cache and Python in `R\uv-cache` and `R\python`; the last three are the user
-environment variables `CAMTRAP_DATA_DIR`, `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, which the launcher
-reads back at every start. A rerun repairs an existing install where it is, without asking: installs from
+results in `R\data`, uv's cache and Python in `R\uv-cache` and `R\python`; the last three are written to
+`R\camtrap-install.json`, and the launcher sets `CAMTRAP_DATA_DIR`, `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`
+from it for its own process at every start. Nothing is saved as a user environment variable (an install
+that has them from before 2026-09-25 moves them into the file at its next start; CONTEXT, same date). A rerun repairs an existing install where it is, without asking: installs from
 before ticket 24 (this workstation's included) keep `%LOCALAPPDATA%\CamTrapMeasure` and
 `%USERPROFILE%\.camtrap-measure`. Then `uv sync --frozen`
 (Python 3.12 from `.python-version`), preflight checks, `uv sync --frozen --extra inference`
@@ -88,8 +89,8 @@ cd frontend; npm ci; npm run build               # rebuild UI into src/camtrap_m
   `{"hf_token": "hf_..."}` — read access to the private HF repo `toqi/camtrap-measure-weights`.
   Without it the engine runs the `fake` backend and the UI says so.
 - Local state (login session, annotations mirror, results SQLite, weights, cached flag photos):
-  `%USERPROFILE%\.camtrap-measure\` (override with `CAMTRAP_DATA_DIR`; an install made by the ticket-24
-  installer sets it as a user variable, and then a dev clone uses that folder too). Delete it for a fresh start.
+  `%USERPROFILE%\.camtrap-measure\` (override with `CAMTRAP_DATA_DIR`; an installed copy's launcher sets it only
+  for its own process, so a dev clone on the same PC keeps its own folder). Delete it for a fresh start.
 - `CAMTRAP_WEIGHTS_DIR=<folder>` pins a ready-made weights folder and skips the hub.
 - `CAMTRAP_FAKE_DELAY=0.3` slows the fake backend so the progress UI is visible.
 - The GPU smoke test (`tests/test_gpu_smoke.py`) needs `CAMTRAP_WEIGHTS_DIR`,

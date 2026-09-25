@@ -16,7 +16,7 @@ No administrator account is needed at any point. It gets Git (a portable copy un
 `%LOCALAPPDATA%\Programs\MinGit`) and uv (its own user-scope installer), asks where to install
 (a parent folder: `D:\` becomes `D:\CamTrapMeasure`; `-InstallTo <folder>` skips the question),
 downloads the app into `<folder>\app`, keeps the models and results in `<folder>\data` and uv's
-cache and Python beside them (remembered as user environment variables), builds its environment (Python 3.12 and the CUDA build of
+cache and Python beside them (remembered in `<folder>\camtrap-install.json`, never in user environment variables), builds its environment (Python 3.12 and the CUDA build of
 PyTorch come from the lockfile — a few GB once), runs the preflight checks before the big
 download and asks for two things:
 

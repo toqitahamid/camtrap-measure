@@ -1129,3 +1129,69 @@ pointing there it ran `set` (exit 0) and the files went; a third start ran nothi
 camtrap-measure --help` worked from the sparse clone. `Run` on python printed `['plain', 'a b', 'say
 "hi"', 'D:\\a b\\', ...]` and the pre-quoted path whole; the GPU-check string exited 0; the `git log` format
 printed the commit. A BOM-free write starts with `{`.
+
+## The install layout is a file in R, not user variables (2026-09-25, ticket 24)
+
+**The fault.** Ticket 24 saved `CAMTRAP_DATA_DIR`, `UV_CACHE_DIR` and `UV_PYTHON_INSTALL_DIR` as **user**
+environment variables. Those reach every program of the Windows account, not just the app: on the
+researcher's development PC, `uv` in the dev repo would have used the installed app's cache and Python, and
+the dev copy of the app would have read and written the installed app's data. The researcher: "fix the bug
+first", before reinstalling there.
+
+**The fix.** Nothing saves an environment variable for the account any more (a test holds every
+`SetEnvironmentVariable(..., "User")` in `scripts/` to a `$null` value, i.e. a removal). The three are set only
+inside a process: the installer's own (its uv steps and the first start) and the launcher's (uv and the app
+inherit them). What carries them between runs is `R\camtrap-install.json`, `{"data": ..., "uv_cache": ...,
+"uv_python": ...}` with absolute paths, written BOM-free (`[IO.File]::WriteAllText`, `UTF8Encoding($false)`).
+It sits in R, not in `R\app`: an untracked file in the clone makes `git status` report a change and the
+launcher then stops updating it.
+
+- **Launcher**, before any git or uv step, and only for the copy Settings > Apps registers (the existing
+  `InstallLocation` check, now computed once as `$IsInstalled` and used by the sparse-checkout block too; a
+  developer's `run.bat` reads, writes and deletes nothing): (a) the file at `(Split-Path $Dir -Parent)\
+  camtrap-install.json`; else (b), for a clone in a folder named `app`, the old user variables that point
+  inside R: the file is written from them, they are set for the process, and then exactly those are removed
+  from the user scope (removed only after the write, so a failed write loses nothing); else (c) nothing, and
+  an install from before ticket 24 keeps the app's defaults. A failure is a log line and the start goes on.
+  Every start logs which source it used and the three values.
+- **Installer.** A fresh install or a repair with an R writes the file right after the log header (a failure
+  to write it stops the install: without it the app would look for its models in the wrong place). The old
+  variables inside R are removed **after step 2**, and only when the clone's `launcher.ps1` mentions
+  `camtrap-install.json`: if the update in step 2 could not run, the old launcher is still there and still
+  reads the variables. It finds an existing ticket-24 install's R from the Settings entry, else the old
+  `CAMTRAP_DATA_DIR` variable, else the file in the two places the folder question suggests (`D:\CamTrapMeasure`,
+  `%LOCALAPPDATA%\CamTrapMeasure`); an R whose `app\.git` exists is repaired without asking (a run that stopped
+  after the download, before the Settings entry), and otherwise the folder question suggests it.
+- **Uninstaller.** The data folder: the file, else an old `CAMTRAP_DATA_DIR` inside R, else
+  `%USERPROFILE%\.camtrap-measure`. The file goes with the app on the first question; any old variables inside R
+  are removed after that, as before. Its relaunch from TEMP now quotes each argument (`Quote-Arg`, copied from
+  install.ps1, a test keeps the two bodies identical): `Start-Process -ArgumentList $argv` joined them unquoted,
+  and a TEMP path with a space reached powershell.exe in pieces, so the copy never started.
+
+**Seth's machine** (installed after ticket 24 at `D:\Seth\CamTrapMeasure`, variables set, old launcher). PowerShell
+has parsed a launcher before an update rewrites it, so:
+
+1. First start after the push: the **old** launcher runs. It reads the user variables as before, fetches, checks
+   out the new commit (rewriting `launcher.ps1`) and starts the app with the right folders. The variables stay.
+2. Second start: the **new** launcher. No file yet; the variables point inside `D:\Seth\CamTrapMeasure`, so it
+   writes `D:\Seth\CamTrapMeasure\camtrap-install.json`, sets the three for itself and removes the three user
+   variables. Removing one broadcasts the change to open windows and took about 10 s each here, so this one
+   start is about 30 s longer behind the splash. The app starts with the same folders as before.
+3. Every start after: the file.
+
+If he reruns the installer instead, it repairs in place, writes the file, updates the clone, then removes the
+variables; its first start is already the new launcher. If the first start after the push is offline, the
+old launcher stays and keeps working from the variables until an update goes through.
+
+Evidence: 285 passed, 1 skipped; the three scripts parse and are ASCII only, no BOM. Run in the scratchpad (a
+folder with a space), never in the dev repo, `D:\CamTrapMeasure` or `~\.camtrap-measure`: a plain clone of the
+GitHub repo as `R\app` with the new launcher, `launcher.ps1 -Console -NoStart -NoUpdate`. Not registered, with a
+file present: "not the installed copy", the three empty, nothing read. Registered (a temporary HKCU
+`Uninstall\CamTrapMeasure` with `InstallLocation` = that `R\app`) with the installer's file: "from ...
+camtrap-install.json" and the three from it. No file and temporary user variables inside R: file written (first
+byte `{`, no BOM), the three set from the variables, each variable removed; the next start read the file. No file
+and variables pointing outside R: "none", the three empty, the variables untouched. The uninstaller's relaunch
+line started a script in a path with a space with `-FromTemp -Yes`; the old unquoted form exited with an error
+and never ran it. Its data-folder lines (extracted) gave the file's `data`, else the default, and put the file
+in the app's removal list. Afterwards none of the three user variables and no uninstall key were on this PC,
+as before the run. **Not run:** the whole installer and uninstaller.

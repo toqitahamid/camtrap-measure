@@ -5,8 +5,9 @@
   name. Nothing here needs an administrator - everything it removes is this user's.
 
   Since ticket 24 an install sits under one folder R: R\app (this script's folder), R\data, R\uv-cache and
-  R\python, with the last three named by user environment variables. The app, uv-cache and python go with
-  the first question, the data only on the second, and the variables once the app is gone. An install from
+  R\python, with the last three named in R\camtrap-install.json (an install made before that file has them
+  in user environment variables instead). The app, uv-cache, python and that file go with the first
+  question, the data only on the second, and any such variables once the app is gone. An install from
   before ticket 24 has the app in %LOCALAPPDATA%\CamTrapMeasure and the data in %USERPROFILE%\.camtrap-measure.
 
     -Yes   remove the app without the first question (the data question is still asked)
@@ -33,6 +34,31 @@ function Tell($text) {
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
 }
 
+# One argument for a command line, by the Windows rules: wrapped in double quotes when it holds a space or a
+# quote, an inner quote as \", and the backslashes before a quote (or before the closing one) doubled. The
+# same function as in install.ps1 (the scripts share no code). An argument already in quotes passes as it is.
+function Quote-Arg([string]$a) {
+    if ($a.Length -ge 2 -and $a.StartsWith('"') -and $a.EndsWith('"')) { return $a }
+    if ($a -ne "" -and $a -notmatch '[\s"]') { return $a }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+    $slashes = 0
+    foreach ($c in $a.ToCharArray()) {
+        if ($c -eq [char]'\') { $slashes++; continue }
+        if ($c -eq [char]'"') { [void]$sb.Append('\' * (2 * $slashes + 1)) } else { [void]$sb.Append('\' * $slashes) }
+        [void]$sb.Append($c)
+        $slashes = 0
+    }
+    [void]$sb.Append('\' * (2 * $slashes))
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
+function Is-Inside($path, $root) {
+    if (-not $path -or -not $root) { return $false }
+    return ($path.TrimEnd("\") + "\").StartsWith($root.TrimEnd("\") + "\", [StringComparison]::OrdinalIgnoreCase)
+}
+
 # This script lives inside the folder it deletes, so it finishes the job from a copy in TEMP. The copy is told
 # so by -FromTemp. It used to work it out by comparing $PSScriptRoot with $env:TEMP, but when the account name
 # is longer than 8 characters TEMP is the short 8.3 form (SIU856~4) and $PSScriptRoot the long one,
@@ -46,7 +72,10 @@ if (-not $FromTemp) {
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $copy "uninstall.ps1"))
     $argv += "-FromTemp"
     if ($Yes) { $argv += "-Yes" }
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $argv
+    # Quoted (Quote-Arg): Start-Process joins the list with spaces and quotes nothing, so a TEMP path with a
+    # space reached powershell.exe as two arguments and the copy never started.
+    $line = ($argv | ForEach-Object { Quote-Arg $_ }) -join " "
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $line
     exit 0
 }
 $marker = Join-Path $PSScriptRoot "installed-at.txt"
@@ -60,14 +89,26 @@ $EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
 # R, for an install made by ticket 24 or later: the app folder is R\app. $null for an older install.
 $Root = $null
 if ([System.IO.Path]::GetFileName($Dir.TrimEnd("\")) -ieq "app") { $Root = Split-Path $Dir.TrimEnd("\") -Parent }
-# The data is where the app has been keeping it: the user variable the installer set, else the app's default.
-$Data = [Environment]::GetEnvironmentVariable("CAMTRAP_DATA_DIR", "User")
-if (-not $Data) { $Data = $env:CAMTRAP_DATA_DIR }
+# The data is where the app has been keeping it: the layout file the installer wrote in R, else the user
+# variable an install made before that file set (only one inside R), else the app's default.
+$Data = $null
+$LayoutFile = $null
+if ($Root) {
+    $LayoutFile = Join-Path $Root "camtrap-install.json"
+    if (Test-Path -LiteralPath $LayoutFile) {
+        try { $Data = ([IO.File]::ReadAllText($LayoutFile) | ConvertFrom-Json).data } catch { $Data = $null }
+    }
+    if (-not $Data) {
+        $v = [Environment]::GetEnvironmentVariable("CAMTRAP_DATA_DIR", "User")
+        if (Is-Inside $v $Root) { $Data = $v }
+    }
+}
 if (-not $Data) { $Data = Join-Path $env:USERPROFILE ".camtrap-measure" }
-# What the first question removes: the app, and uv's cache and Python when they are this install's own.
+# What the first question removes: the app, uv's cache and Python when they are this install's own, and the
+# layout file (it describes the app, which is going).
 $Software = @($Dir)
 if ($Root) {
-    foreach ($sub in @("uv-cache", "python")) {
+    foreach ($sub in @("uv-cache", "python", "camtrap-install.json")) {
         $p = Join-Path $Root $sub
         if (Test-Path -LiteralPath $p) { $Software += $p }
     }
@@ -129,7 +170,7 @@ foreach ($p in $Software) {
 if ($Root) {
     foreach ($n in $EnvNames) {
         $v = [Environment]::GetEnvironmentVariable($n, "User")
-        if ($v -and ($v.TrimEnd("\") + "\").StartsWith($Root.TrimEnd("\") + "\", [StringComparison]::OrdinalIgnoreCase)) {
+        if (Is-Inside $v $Root) {
             [Environment]::SetEnvironmentVariable($n, $null, "User")
         }
     }

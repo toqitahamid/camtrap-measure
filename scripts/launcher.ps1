@@ -24,14 +24,6 @@
 param([switch]$Console, [switch]$NoUpdate, [switch]$NoStart)
 
 $ErrorActionPreference = "Stop"
-# Where the installer put the data and uv's folders (ticket 24), saved as user environment variables. Read
-# from the user scope here rather than trusted to be inherited: Explorer, which starts the shortcut, can
-# still hold the environment it had before the install. An install from before ticket 24 has none of them
-# and keeps its data in %USERPROFILE%\.camtrap-measure, the app's own default.
-foreach ($n in @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")) {
-    $v = [Environment]::GetEnvironmentVariable($n, "User")
-    if ($v) { Set-Item -Path "env:$n" -Value $v }
-}
 $Dir = Split-Path -Parent $PSScriptRoot
 $Icon = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 $Exe = Join-Path $Dir ".venv\Scripts\camtrap-measure-app.exe"  # the pythonw entry point: it owns no console
@@ -48,6 +40,86 @@ function Log($msg) {
     "$(Get-Date -Format 'HH:mm:ss')  $msg" | Add-Content $Log
     if ($Console) { Write-Host $msg }
 }
+
+# --- which copy this is -----------------------------------------------------------------------------
+# Settings > Apps registers one folder as the installed app. Only that copy has its layout read and its
+# files trimmed below; for a developer who runs run.bat in their own clone, nothing here reads, writes or
+# deletes anything.
+$InstalledAt = $null
+$IsInstalled = $false
+try {
+    $InstalledAt = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CamTrapMeasure" `
+                                     -Name "InstallLocation" -ErrorAction SilentlyContinue).InstallLocation
+    $IsInstalled = [bool]($InstalledAt -and
+        [IO.Path]::GetFullPath($InstalledAt).TrimEnd("\") -eq [IO.Path]::GetFullPath($Dir).TrimEnd("\"))
+} catch {
+    Log "could not tell whether this is the installed copy ($($_.Exception.Message)) - treating it as not"
+}
+
+# --- where the data and uv's folders are ------------------------------------------------------------
+# An install made by ticket 24 or later sits under one folder R: R\app (this clone), R\data, R\uv-cache and
+# R\python. R\camtrap-install.json names the last three, and they are set here for this process only, before
+# any uv or git step, so uv and the app inherit them. The file is in R, not in the clone: an untracked file
+# there would make the clone look changed and stop its updates.
+# They used to be saved as user environment variables, which every program of the Windows account then saw:
+# on a developer's PC, uv in their own repo used the installed app's cache and Python, and their copy of the
+# app its data (2026-09-25). An install from that time has the variables and no file; its first start with
+# this launcher writes the file and removes exactly those variables (only ones pointing inside R). An install
+# from before ticket 24 has neither and keeps the app's defaults (%USERPROFILE%\.camtrap-measure).
+# Any failure is a log line and the start carries on.
+$EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
+$LayoutKeys = @{ "CAMTRAP_DATA_DIR" = "data"; "UV_CACHE_DIR" = "uv_cache"; "UV_PYTHON_INSTALL_DIR" = "uv_python" }
+$InstallRoot = Split-Path $Dir -Parent
+$LayoutFile = Join-Path $InstallRoot "camtrap-install.json"
+
+function Is-Inside($path, $root) {
+    if (-not $path -or -not $root) { return $false }
+    return ($path.TrimEnd("\") + "\").StartsWith($root.TrimEnd("\") + "\", [StringComparison]::OrdinalIgnoreCase)
+}
+
+try {
+    if (-not $IsInstalled) {
+        Log "layout: not the installed copy ($InstalledAt) - the environment is left as it is"
+    } elseif (Test-Path -LiteralPath $LayoutFile) {
+        $saved = [IO.File]::ReadAllText($LayoutFile) | ConvertFrom-Json
+        foreach ($n in $EnvNames) {
+            $v = $saved.($LayoutKeys[$n])
+            if ($v) { Set-Item -Path "env:$n" -Value $v }
+        }
+        Log "layout: from $LayoutFile"
+    } elseif ([IO.Path]::GetFileName($Dir.TrimEnd("\")) -ine "app") {
+        Log "layout: none (an install from before ticket 24 - the app's defaults)"
+    } else {
+        # An install made after ticket 24 but before the layout file: its folders are in user variables.
+        $legacy = [ordered]@{}
+        foreach ($n in $EnvNames) {
+            $v = [Environment]::GetEnvironmentVariable($n, "User")
+            if (Is-Inside $v $InstallRoot) { $legacy[$n] = $v }
+        }
+        if ($legacy.Count -eq 0) {
+            Log "layout: none (no $LayoutFile and no user variables inside $InstallRoot - the app's defaults)"
+        } else {
+            $out = [ordered]@{}
+            foreach ($n in $legacy.Keys) { $out[$LayoutKeys[$n]] = $legacy[$n] }
+            # UTF-8 without a byte order mark, like config.json
+            [IO.File]::WriteAllText($LayoutFile, ($out | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+            foreach ($n in $legacy.Keys) { Set-Item -Path "env:$n" -Value $legacy[$n] }
+            Log "layout: from the user variables ($($legacy.Keys -join ', ')), now saved in $LayoutFile"
+            # Only once the file is written: removed first, a failed write would lose the layout.
+            foreach ($n in $legacy.Keys) {
+                try {
+                    [Environment]::SetEnvironmentVariable($n, $null, "User")
+                    Log "layout: removed the user variable $n"
+                } catch {
+                    Log "layout: could not remove the user variable $n ($($_.Exception.Message)) - carrying on"
+                }
+            }
+        }
+    }
+} catch {
+    Log "layout: could not be read ($($_.Exception.Message)) - carrying on with the environment as it is"
+}
+Log "layout: CAMTRAP_DATA_DIR=$env:CAMTRAP_DATA_DIR; UV_CACHE_DIR=$env:UV_CACHE_DIR; UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR"
 
 # --- the splash -------------------------------------------------------------------------------------
 # WinForms is on every Windows 10/11; nothing is installed for this. Without a console there is no other
@@ -202,14 +274,12 @@ $env:GIT_TERMINAL_PROMPT = "0"
 # a clone that already has exactly it is left alone. Any failure is logged and the start carries on.
 # An install that gets this launcher through an update applies it at the start AFTER that update:
 # PowerShell had already parsed the old launcher when the checkout rewrote this file.
-# Only the copy Settings > Apps lists as installed is touched, so a developer's clone keeps its files.
+# Only the installed copy ($IsInstalled, from the "InstallLocation" check above) is touched, so a
+# developer's clone keeps its files.
 $SparsePatterns = @("/*", "!/CLAUDE.md", "!/CONTEXT.md", "!/HANDOFF.md", "!/.scratch/", "!/.claude/")
 try {
-    $installedAt = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CamTrapMeasure" `
-                                     -Name "InstallLocation" -ErrorAction SilentlyContinue).InstallLocation
-    if (-not $installedAt -or
-        [IO.Path]::GetFullPath($installedAt).TrimEnd("\") -ne [IO.Path]::GetFullPath($Dir).TrimEnd("\")) {
-        Log "not the installed copy ($installedAt) - leaving its files as they are"
+    if (-not $IsInstalled) {
+        Log "not the installed copy ($InstalledAt) - leaving its files as they are"
     } else {
         $have = Capture "git" @("sparse-checkout", "list")  # $null when the clone is not sparse yet
         $haveList = @()

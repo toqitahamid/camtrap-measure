@@ -9,12 +9,13 @@
   It runs in a window: the steps tick past, the details pane holds what each one printed, and a failure
   says what to do about it in plain words. Nothing here needs an administrator - the dept machines have
   none (2026-08-21): a portable Git in the user profile, uv's user-scope installer, the app in a folder
-  the user picks, shortcuts, the Settings > Apps entry and the environment variables all per-user.
+  the user picks, shortcuts and the Settings > Apps entry all per-user.
 
   Where it goes (ticket 24): first it asks where. The answer is a parent folder; everything goes in a
   CamTrapMeasure folder inside it (R): R\app is the app, R\data its models and results (CAMTRAP_DATA_DIR),
   R\uv-cache and R\python are uv's download cache and Python (UV_CACHE_DIR, UV_PYTHON_INSTALL_DIR). Those
-  three are saved as user environment variables, which is how the launcher and the uninstaller find them.
+  three are written to R\camtrap-install.json, which is how the launcher and the uninstaller find them; they
+  are environment variables only inside this installer and the launcher, never saved for the whole account.
   Only portable Git and uv.exe stay on C: (small). A machine that already has the app is repaired where it
   is, without the question: an install from before ticket 24 keeps its app in %LOCALAPPDATA%\CamTrapMeasure
   and its data in %USERPROFILE%\.camtrap-measure, untouched.
@@ -160,12 +161,35 @@ function Where-Text($picked) {
     return @("Installs into $root. $free GB free on $drive", $false)
 }
 
-function Default-Parent {
-    # A run that stopped part way left its choice behind: offer the same place again.
+function Is-Inside($path, $root) {
+    if (-not $path -or -not $root) { return $false }
+    return ($path.TrimEnd("\") + "\").StartsWith($root.TrimEnd("\") + "\", [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Find-KnownRoot {
+    # R of an install made by ticket 24 or later that this machine already has, even one whose run stopped
+    # before the Settings > Apps entry was written; $null when there is none. From, in order: the Settings
+    # entry, the user variable an install made before the layout file left behind, and the layout file
+    # (camtrap-install.json) in the places the folder question suggests.
+    try {
+        $at = (Get-ItemProperty -Path $Key -ErrorAction Stop).InstallLocation
+        if ($at -and ([System.IO.Path]::GetFileName($at.TrimEnd("\")) -ieq "app")) { return (Split-Path $at.TrimEnd("\") -Parent) }
+    } catch {}
     $before = [Environment]::GetEnvironmentVariable("CAMTRAP_DATA_DIR", "User")
     if ($before -and ([System.IO.Path]::GetFileName($before.TrimEnd("\")) -ieq "data")) {
         return (Split-Path $before.TrimEnd("\") -Parent)
     }
+    foreach ($parent in @("D:\", $env:LOCALAPPDATA)) {
+        $r = Resolve-InstallRoot $parent
+        if ($r -and (Test-Path -LiteralPath (Join-Path $r "camtrap-install.json"))) { return $r }
+    }
+    return $null
+}
+
+function Default-Parent {
+    # A run that stopped part way left its choice behind: offer the same place again.
+    $before = Find-KnownRoot
+    if ($before) { return (Split-Path $before -Parent) }
     # Otherwise D: when it is a local disk with more room than C: (the dept machines' case), else the old place.
     try {
         $d = New-Object System.IO.DriveInfo("D")
@@ -287,8 +311,12 @@ $Repair = $false
 $Notes = @()       # for the details pane, which does not exist yet
 $known = $null
 try { $known = (Get-ItemProperty -Path $Key -ErrorAction Stop).InstallLocation } catch { $known = $null }
+$knownRoot = Find-KnownRoot
 if ($known -and (Test-Path -LiteralPath $known)) {
     $Dir = $known
+    $Repair = $true
+} elseif ($knownRoot -and (Test-Path -LiteralPath (Join-Path $knownRoot "app\.git"))) {
+    $Dir = Join-Path $knownRoot "app"  # a run that stopped after the download, before the Settings entry
     $Repair = $true
 } elseif (Test-Path -LiteralPath (Join-Path $LegacyDir ".git")) {
     $Dir = $LegacyDir
@@ -299,11 +327,7 @@ if ($Repair) {
     if ([System.IO.Path]::GetFileName($Dir.TrimEnd("\")) -ieq "app") { $Root = Split-Path $Dir.TrimEnd("\") -Parent }
     $Notes += "Already installed in $Dir; repairing it there."
     if ($asked) { $Notes += "The folder given ($asked) is not used: remove the app first to install it somewhere else." }
-    # An older install has no R: its data stays wherever it has been (the variable if set, else the default).
-    foreach ($n in $EnvNames) {
-        $v = [Environment]::GetEnvironmentVariable($n, "User")
-        if ($v) { Set-Item -Path "env:$n" -Value $v }
-    }
+    # An older install has no R: its data stays wherever it has been (the app's default).
 } else {
     if ($asked) {
         $Root = Resolve-InstallRoot $asked
@@ -328,7 +352,8 @@ if ($Root) {
         "UV_CACHE_DIR"          = (Join-Path $Root "uv-cache")
         "UV_PYTHON_INSTALL_DIR" = (Join-Path $Root "python")
     }
-    # This process first: step 7 starts the app from here, and Explorer may not have the new values yet.
+    # This process only: its uv steps and the first start (step 7) inherit them. Never saved for the
+    # account (see the layout file below).
     foreach ($n in $EnvNames) { Set-Item -Path "env:$n" -Value $Layout[$n] }
 }
 $DataDir = if ($env:CAMTRAP_DATA_DIR) { $env:CAMTRAP_DATA_DIR } else { Join-Path $env:USERPROFILE ".camtrap-measure" }
@@ -629,14 +654,27 @@ Detail "Log: $LogFile (this run only; every run overwrites it)"
 Detail "--------------------"
 foreach ($note in $Notes) { Detail $note }
 
-# Saved as user variables (no administrator needed) so the app, the launcher and the uninstaller find the
-# data and uv's folders on every later start. The launcher reads them back itself at start, so it does not
-# matter whether Explorer has picked them up yet.
+# The layout file: how the launcher and the uninstaller find the data and uv's folders on every later start.
+# In R, not in the app folder: an untracked file in the clone makes it look changed and stops its updates.
+# These used to be saved as user environment variables, which every program of the Windows account then saw:
+# on a developer's PC, uv in their own repo used the installed app's cache and Python (2026-09-25). A rerun
+# on an install from that time writes the file here and removes those variables after step 2 (only the ones
+# pointing inside R).
 if ($Root) {
-    foreach ($n in $EnvNames) {
-        [Environment]::SetEnvironmentVariable($n, $Layout[$n], "User")
-        Detail "$n = $($Layout[$n])"
+    $LayoutFile = Join-Path $Root "camtrap-install.json"
+    $saved = [ordered]@{
+        "data"      = $Layout["CAMTRAP_DATA_DIR"]
+        "uv_cache"  = $Layout["UV_CACHE_DIR"]
+        "uv_python" = $Layout["UV_PYTHON_INSTALL_DIR"]
     }
+    try {
+        # UTF-8 without a byte order mark, like config.json
+        [IO.File]::WriteAllText($LayoutFile, ($saved | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+    } catch {
+        Fail "Could not write $LayoutFile ($($_.Exception.Message)). Without it the app cannot find its models. Check that the folder can be written to, then run this again."
+    }
+    Detail "Layout saved in $LayoutFile"
+    foreach ($n in $EnvNames) { Detail "$n = $($Layout[$n])" }
 }
 
 function AddPath($p) { if ((Test-Path $p) -and (($env:Path -split ";") -notcontains $p)) { $env:Path = "$p;" + $env:Path } }
@@ -824,6 +862,22 @@ if (Test-Path (Join-Path $Dir ".git")) {
     }
 }
 Set-Location $Dir
+# The old user variables (see the layout file above) go once the app here reads the layout file: an
+# older launcher, left by an update that could not run, still reads them, and without them its app
+# would look for its models in the wrong place. Only the ones pointing inside R.
+if ($Root -and (Select-String -LiteralPath (Join-Path $Dir "scripts\launcher.ps1") -Pattern "camtrap-install.json" -SimpleMatch -Quiet -ErrorAction SilentlyContinue)) {
+    foreach ($n in $EnvNames) {
+        $v = [Environment]::GetEnvironmentVariable($n, "User")
+        if (Is-Inside $v $Root) {
+            try {
+                [Environment]::SetEnvironmentVariable($n, $null, "User")
+                Detail "Removed the old user variable $n ($v)."
+            } catch {
+                Detail "Could not remove the old user variable $n ($($_.Exception.Message)); carrying on."
+            }
+        }
+    }
+}
 Detail "The app on this machine is now:"
 $null = Run "git" @("--no-pager", "log", "-1", "--format=%h %cs %s") $Dir  # which commit, in the log, for a bug report
 
