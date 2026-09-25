@@ -10,7 +10,8 @@
   none (2026-08-21): a portable Git in the user profile, uv's user-scope installer, the app under
   %LOCALAPPDATA%, shortcuts and the Settings > Apps entry all per-user.
 
-  Every run writes the same lines to CamTrapMeasure-setup.log on the Desktop, last run only, starting with
+  Every run writes the same lines to D:\CamTrapMeasure-setup.log (else C:\CamTrapMeasure-log\, the
+  Desktop, or TEMP, whichever can be written first), last run only, starting with
   a short description of the machine. A failure names that file and leaves the window open, so there is
   always something to read and something to send.
 
@@ -27,6 +28,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# The app's checks print check and cross marks. Python writes its output as UTF-8 and Run reads it back as UTF-8; before
+# this the pane read it as the ANSI code page and showed each mark as three garbled characters (seen 2026-09-25).
+$env:PYTHONUTF8 = "1"
+# This file has no byte order mark, so PowerShell 5 would misread the marks as literals: build them instead.
+$Cross = [string][char]0x2717
+$Arrow = [string][char]0x2192
 $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest's progress bar slows downloads badly on PowerShell 5
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -40,8 +47,18 @@ $Name = "CamTrap Measure"
 $Key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CamTrapMeasure"
 $Ico = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 $Wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
-# The details pane goes with the window; this file is what a person can send afterwards.
-$LogFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "CamTrapMeasure-setup.log"  # the Desktop: a place a dept user can find and attach to an email
+# The details pane goes with the window; this file is what a person can send afterwards. It goes where
+# anyone can be told to look (2026-09-25: the Desktop copy was not found on a dept machine). First the root
+# of D:, where the dept image lets any signed-in user write files. The root of C: does not (new folders
+# only, no new files, without an administrator), hence a folder there next. The Desktop and TEMP are the
+# last fallbacks, for a machine with no writable D:. The pane says which one was used.
+$LogCandidates = @(
+    "D:\CamTrapMeasure-setup.log",
+    "C:\CamTrapMeasure-log\CamTrapMeasure-setup.log",
+    (Join-Path ([Environment]::GetFolderPath("Desktop")) "CamTrapMeasure-setup.log"),
+    (Join-Path $env:TEMP "CamTrapMeasure-setup.log")
+)
+$LogFile = $LogCandidates[0]
 
 # --- the window -------------------------------------------------------------------------------------
 $Form = $null
@@ -111,10 +128,19 @@ if (-not $Console) {
 $Done = 0
 function Pump { if ($Form) { [System.Windows.Forms.Application]::DoEvents() } }
 
+# Each failed check (a line starting with the cross) and the fix under it (the arrow line), kept so a failure
+# can show them in the message box itself: on 2026-09-03 a dept user saw only "the details pane lists what
+# to fix" and never found the fix in the pane.
+$script:Problems = New-Object System.Collections.Generic.List[string]
+$script:InProblem = $false
 function Detail($text) {
     if ($null -eq $text) { return }
     foreach ($line in ($text -split "`r?`n")) {
         if ($line.Trim() -eq "") { continue }
+        $trimmed = $line.Trim()
+        if ($trimmed.StartsWith($Cross)) { $script:Problems.Add($trimmed); $script:InProblem = $true }
+        elseif ($script:InProblem -and $trimmed.StartsWith($Arrow)) { $script:Problems.Add("    $trimmed") }
+        else { $script:InProblem = $false }
         if ($Details) {
             $Details.AppendText("$line`r`n")
         } else {
@@ -141,13 +167,18 @@ function Step($msg) {
 
 function Fail($msg) {
     $send = "The full record is in $LogFile - send that file to the researcher if the fix is not clear."
+    $found = ""
+    if ($script:Problems.Count -gt 0) {
+        $shown = @($script:Problems | Select-Object -First 20)
+        $found = "What went wrong:`r`n" + ($shown -join "`r`n") + "`r`n`r`n"
+    }
     Log "STOPPED: $msg"
     Log $send
     if ($Form) {
         $StepLabel.Text = "Stopped."
         $Details.AppendText("STOPPED: $msg`r`n")
         $Details.AppendText("$send`r`n")
-        [System.Windows.Forms.MessageBox]::Show("$msg`r`n`r`n$send", "$Name Setup",
+        [System.Windows.Forms.MessageBox]::Show("$msg`r`n`r`n$found$send", "$Name Setup",
             [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         # The window stays after OK, with a message loop of its own, until the user closes it. Closing it
         # here took the pane off the screen at the one moment somebody needed to read it: a dept user hit
@@ -156,6 +187,7 @@ function Fail($msg) {
     } else {
         Write-Host ""
         Write-Host "STOPPED: $msg" -ForegroundColor Red
+        if ($found) { Write-Host $found -ForegroundColor Red }
         Write-Host $send -ForegroundColor Yellow
         Read-Host "Press Enter to close" | Out-Null
     }
@@ -184,12 +216,22 @@ if (Test-Path $pyproject0) {
     $v0 = Select-String -Path $pyproject0 -Pattern '^version = "(.+)"' | Select-Object -First 1
     if ($v0) { $here = "app version " + $v0.Matches[0].Groups[1].Value + " already installed" }
 }
-try {
-    Set-Content -Path $LogFile -Encoding utf8 -ErrorAction Stop `
-                -Value "$Name setup - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $here"
-} catch {
-    $script:LogOff = $true
+$script:LogOff = $true  # until one of the candidates takes the header
+$logMisses = @()
+foreach ($candidate in $LogCandidates) {
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $candidate -Parent) -ErrorAction Stop | Out-Null
+        Set-Content -Path $candidate -Encoding utf8 -ErrorAction Stop `
+                    -Value "$Name setup - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $here"
+        $LogFile = $candidate
+        $script:LogOff = $false
+        break
+    } catch {
+        $logMisses += "Could not write the setup log to $candidate ($($_.Exception.Message))."
+    }
 }
+foreach ($miss in $logMisses) { Detail $miss }
+if ($script:LogOff) { Detail "No setup log this time; the install carries on." }
 
 # What this machine is. Whoever reads the log has never seen the computer it came from, and nobody has
 # written the department's hardware down at all. Each fact is asked for on its own: a query that fails
@@ -233,7 +275,7 @@ function Run($exe, $arguments, $where) {
         Pump
         Start-Sleep -Milliseconds 150
         if (Test-Path $out) {  # stream it: `uv sync` pulls gigabytes and silence reads as a hang
-            $lines = @(Get-Content $out -ErrorAction SilentlyContinue)
+            $lines = @(Get-Content $out -Encoding UTF8 -ErrorAction SilentlyContinue)
             if ($lines.Count -gt $shown) {
                 Detail ($lines[$shown..($lines.Count - 1)] -join "`r`n")
                 $shown = $lines.Count
@@ -241,10 +283,10 @@ function Run($exe, $arguments, $where) {
         }
     }
     if (Test-Path $out) {
-        $lines = @(Get-Content $out)
+        $lines = @(Get-Content $out -Encoding UTF8)
         if ($lines.Count -gt $shown) { Detail ($lines[$shown..($lines.Count - 1)] -join "`r`n") }
     }
-    if (Test-Path $err) { Detail (Get-Content $err -Raw) }
+    if (Test-Path $err) { Detail (Get-Content $err -Raw -Encoding UTF8) }
     Remove-Item $out, $err -ErrorAction SilentlyContinue
     return $p.ExitCode
 }
@@ -397,7 +439,7 @@ if ($bundled) {
 
 Step "Checking this machine (before the big download)"
 if ((Run "uv" @("run", "--frozen", "camtrap-measure", "--preflight", "--no-prompt") $Dir) -ne 0) {
-    Fail "This machine is not ready yet. The details pane lists what to fix, and so does $LogFile. Fix it and run the installer again."
+    Fail "This machine is not ready yet. Fix what is listed below and run the installer again."
 }
 
 # --- 5. the models' software ------------------------------------------------------------------------

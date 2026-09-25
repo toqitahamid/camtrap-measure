@@ -173,11 +173,11 @@ def test_every_run_writes_the_details_pane_to_a_file():
     """A dept user hit the preflight failure on 2026-09-03 and could send nothing but a photograph of
     the message box: the pane went with the window. Both modes now write the same lines to a file."""
     install = text(SCRIPTS / "install.ps1")
-    assert '$LogFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "CamTrapMeasure-setup.log"' in install
+    assert "$LogCandidates = @(" in install
     detail = install.split("function Detail", 1)[1].split("\nfunction ", 1)[0]
     assert "Log $line" in detail  # every printed line, in the window and in -Console alike
     assert 'Log "== $msg"' in install  # and every step
-    assert "Set-Content -Path $LogFile" in install  # overwritten per run: the file is the last run only
+    assert "Set-Content -Path $candidate" in install  # overwritten per run: the file is the last run only
     assert "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'" in install
 
 
@@ -200,11 +200,13 @@ def test_a_failure_names_the_log_and_leaves_the_window_open():
     assert '$StepLabel.Text = "Stopped."' in body
 
 
-def test_the_preflight_failure_names_the_log_too():
-    """The one failure a dept user has actually hit, and the one whose answer is in the pane."""
+def test_the_preflight_failure_points_at_the_list_and_the_log():
+    """The one failure a dept user has actually hit. Its message box now lists the failed checks itself
+    (see the message-box test below), and Fail adds the log's path to every failure."""
     install = text(SCRIPTS / "install.ps1")
     line = [l for l in install.splitlines() if "not ready yet" in l]
-    assert len(line) == 1 and "$LogFile" in line[0]
+    assert len(line) == 1 and "listed below" in line[0]
+    assert "$send = \"The full record is in $LogFile" in fail_body(install)
 
 
 def test_the_token_never_reaches_the_log():
@@ -213,3 +215,39 @@ def test_the_token_never_reaches_the_log():
     ask = install.split("function Ask-Token", 1)[1].split("\nfunction ", 1)[0]
     assert "Detail" not in ask and "Log " not in ask
     assert "UseSystemPasswordChar = $true" in ask
+
+
+def test_the_log_goes_where_a_person_can_be_told_to_look():
+    """2026-09-25: the dept user found no log on the Desktop; the researcher asked for the root of a drive.
+    The root of D: takes files from any signed-in user on the dept image. The root of C: takes new folders
+    but not new files without an administrator (Authenticated Users hold AD there, not WD), so C: gets a
+    folder. The Desktop and TEMP come last, for a machine without a writable D:."""
+    install = text(SCRIPTS / "install.ps1")
+    block = install.split("$LogCandidates = @(", 1)[1].split("\n)", 1)[0]
+    lines = [l.strip() for l in block.strip().splitlines()]
+    assert lines[0] == r'"D:\CamTrapMeasure-setup.log",'
+    assert lines[1] == r'"C:\CamTrapMeasure-log\CamTrapMeasure-setup.log",'
+    assert "Desktop" in lines[2] and "TEMP" in lines[3]
+    assert "New-Item -ItemType Directory -Force -Path (Split-Path $candidate -Parent)" in install
+    assert "foreach ($miss in $logMisses) { Detail $miss }" in install  # a fallback is never silent
+
+
+def test_a_failure_shows_what_went_wrong_in_the_message_box():
+    """2026-09-25, the researcher: show the error in the installer window, not only in the log. The failed
+    checks and their fixes are collected as they reach the pane and printed in the message box itself."""
+    install = text(SCRIPTS / "install.ps1")
+    detail = install.split("function Detail", 1)[1].split("\nfunction ", 1)[0]
+    assert "$trimmed.StartsWith($Cross)" in detail and "$trimmed.StartsWith($Arrow)" in detail
+    assert "$Cross = [string][char]0x2717" in install and "$Arrow = [string][char]0x2192" in install
+    body = fail_body(install)
+    assert '"What went wrong:`r`n"' in body
+    assert '::Show("$msg`r`n`r`n$found$send"' in body
+
+
+def test_the_checks_output_is_read_as_utf8():
+    """The pane showed each check mark as mojibake: Python's output was read in the ANSI code page."""
+    install = text(SCRIPTS / "install.ps1")
+    assert '$env:PYTHONUTF8 = "1"' in install
+    run = install.split("function Run", 1)[1].split("\nfunction ", 1)[0]
+    assert run.count("-Encoding UTF8") == 3
+    assert "Get-Content $out -ErrorAction" not in run  # every read of the output names its encoding

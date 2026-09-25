@@ -39,3 +39,9 @@ clicked. The message box says what went wrong in one sentence; the pane says whi
 and that is the part a researcher needs. So the message box now ends by naming the log file, and after OK
 the form stays on screen with "Stopped." under the mark, running its own message loop
 (`[System.Windows.Forms.Application]::Run($Form)`), until the user closes it. Then `exit 1` as before.
+
+## Follow-up (2026-09-25)
+
+The dept user found no log on the Desktop. The log now goes to `D:\CamTrapMeasure-setup.log` first (then a
+folder on C:, the Desktop, TEMP), the failure box lists the failed checks and their fixes itself, and the
+pane reads the checks' output as UTF-8 so the marks are readable. See CONTEXT.md, same date. 248 passed.

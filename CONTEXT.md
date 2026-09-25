@@ -939,3 +939,26 @@ an install. Parts and sizes only, no user names beyond the ones already in the p
 syncs gigabytes, so it is not something to trigger for a screenshot. `install.ps1` parses, the log header
 and the machine block were run on their own on the workstation (RTX 2060 SUPER, i5-9400, 15.8 GB), and
 `tests/test_launcher.py` holds the contract the way it holds the rest of these scripts.
+
+### Correction: the setup log goes to D:, and the message box lists what failed (2026-09-25, ticket 23)
+
+The dept user found no `CamTrapMeasure-setup.log` on the Desktop, and still could not see the fix. Two changes:
+
+- **Where the log goes.** The installer tries, in order: `D:\CamTrapMeasure-setup.log`, then
+  `C:\CamTrapMeasure-log\CamTrapMeasure-setup.log`, then the Desktop, then TEMP. The first one it can write
+  wins, and the pane says which. The researcher asked for the root of C:, but a user with no administrator
+  cannot create files there (Authenticated Users hold only AD, append data / add subdirectory, on `C:\`;
+  checked on a dept-image machine: "Access to the path 'C:\camtrap-test.txt' is denied"). They can create
+  folders there, hence the C: folder. The root of D: on the dept image grants Authenticated Users Modify, so
+  a file there works; a machine with no D: falls through to C:.
+- **The message box names the failed checks.** `Detail` keeps every line starting with the cross mark and the
+  arrow line under it; `Fail` prints them under "What went wrong:" before the log path. The preflight
+  message now reads "This machine is not ready yet. Fix what is listed below and run the installer again."
+- **Encoding.** The pane read Python's output in the ANSI code page, so each ✗ showed as three garbled
+  characters; a reader could not tell a failed check from a passed one. The installer now sets
+  `PYTHONUTF8=1` and reads the output as UTF-8. The marks are built from code points in the script
+  (`[char]0x2717`, `[char]0x2192`) because install.ps1 has no byte order mark and PowerShell 5 would misread
+  them as literals.
+
+Evidence: 248 passed, 1 skipped; the Detail/Run/message code run against a fake failing preflight printed both
+failures and fixes, and no passed checks, under "What went wrong:".
