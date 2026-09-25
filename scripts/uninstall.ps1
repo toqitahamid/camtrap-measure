@@ -10,9 +10,10 @@
   before ticket 24 has the app in %LOCALAPPDATA%\CamTrapMeasure and the data in %USERPROFILE%\.camtrap-measure.
 
     -Yes   remove the app without the first question (the data question is still asked)
+    -FromTemp   internal: this is the copy in TEMP that does the removing (passed by the first stage)
 #>
 [CmdletBinding()]
-param([switch]$Yes)
+param([switch]$Yes, [switch]$FromTemp)
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
@@ -32,19 +33,28 @@ function Tell($text) {
         [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
 }
 
-# This script lives inside the folder it deletes, so it finishes the job from a copy in TEMP.
-if ($PSScriptRoot -notlike "$env:TEMP*") {
+# This script lives inside the folder it deletes, so it finishes the job from a copy in TEMP. The copy is told
+# so by -FromTemp. It used to work it out by comparing $PSScriptRoot with $env:TEMP, but when the account name
+# is longer than 8 characters TEMP is the short 8.3 form (SIU856~4) and $PSScriptRoot the long one,
+# so the copy thought it was the original, tried to copy itself onto itself, and died with no window: Uninstall
+# in Settings did nothing at all (2026-09-25).
+if (-not $FromTemp) {
     $copy = Join-Path $env:TEMP "camtrap-uninstall\scripts"
     New-Item -ItemType Directory -Force -Path $copy | Out-Null
     Copy-Item $PSCommandPath (Join-Path $copy "uninstall.ps1") -Force
     "$Dir" | Set-Content (Join-Path $copy "installed-at.txt")
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $copy "uninstall.ps1"))
+    $argv += "-FromTemp"
     if ($Yes) { $argv += "-Yes" }
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $argv
     exit 0
 }
 $marker = Join-Path $PSScriptRoot "installed-at.txt"
-if (Test-Path $marker) { $Dir = (Get-Content $marker -TotalCount 1).Trim() }
+if (-not (Test-Path $marker)) {
+    Tell "Could not tell where $Name is installed ($marker is missing). Nothing was removed. Use Uninstall in Settings > Apps again."
+    exit 1
+}
+$Dir = (Get-Content $marker -TotalCount 1).Trim()
 
 $EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
 # R, for an install made by ticket 24 or later: the app folder is R\app. $null for an older install.

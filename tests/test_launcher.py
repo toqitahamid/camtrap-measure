@@ -364,3 +364,15 @@ def test_settings_apps_names_the_lab_as_publisher():
     install = text(SCRIPTS / "install.ps1")
     assert 'New-ItemProperty -Path $Key -Name "Publisher" -Value "BASE Lab, SIU Carbondale"' in install
     assert "Southern Illinois University" not in install
+
+
+def test_the_uninstaller_copy_knows_it_is_the_copy_by_a_flag_not_by_its_path():
+    """2026-09-25: Uninstall in Settings did nothing. TEMP used the short 8.3 name SIU856~4 (account
+    name over 8 characters) while the copy's $PSScriptRoot was the long form, so the path test said "not in
+    TEMP", the copy tried to copy itself onto itself and died hidden. The first stage now passes -FromTemp."""
+    un = text(SCRIPTS / "uninstall.ps1")
+    assert "param([switch]$Yes, [switch]$FromTemp)" in un
+    assert "if (-not $FromTemp) {" in un
+    assert '$argv += "-FromTemp"' in un
+    assert '-notlike "$env:TEMP*"' not in un
+    assert "Nothing was removed." in un  # a copy with no marker stops instead of deleting its own folder
