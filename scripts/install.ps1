@@ -51,6 +51,11 @@ $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest's progress bar slo
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Repo = "https://github.com/toqitahamid/camtrap-measure.git"
+# The repo is public and was cloned whole, so the developers' notes landed on department machines too
+# (2026-09-25, the researcher: "i dont want him to see this files"). A sparse checkout leaves these paths out
+# of the app folder: never checked out, and not reported by `git status`, so the clone never looks changed.
+# The same list, in the same order, is in launcher.ps1, which applies it to installs made before this.
+$SparsePatterns = @("/*", "!/CLAUDE.md", "!/CONTEXT.md", "!/HANDOFF.md", "!/.scratch/", "!/.claude/")
 # Portable Git (MinGit: no installer, no registry, no admin). The launcher puts the same folder on the PATH.
 $MinGitUrl = "https://github.com/git-for-windows/git/releases/download/v2.51.0.windows.1/MinGit-2.51.0-64-bit.zip"
 $MinGitDir = Join-Path $env:LOCALAPPDATA "Programs\MinGit"
@@ -636,13 +641,37 @@ if ($Root) {
 
 function AddPath($p) { if ((Test-Path $p) -and (($env:Path -split ";") -notcontains $p)) { $env:Path = "$p;" + $env:Path } }
 
+# One argument for a command line, by the Windows rules: wrapped in double quotes when it holds a space or a
+# quote, an inner quote as \", and the backslashes before a quote (or before the closing one) doubled.
+# Start-Process in PowerShell 5 joins its argument list with spaces and quotes nothing, so the GPU check's
+# "import torch, sys; ..." reached python as `-c import` and failed, which read as "PyTorch does not see a
+# GPU" on an RTX 6000 Ada; `git log --format=%h %cs %s` failed the same way (2026-09-25, Seth's machine).
+# An argument already wrapped in quotes (robocopy's paths) is passed as it is.
+function Quote-Arg([string]$a) {
+    if ($a.Length -ge 2 -and $a.StartsWith('"') -and $a.EndsWith('"')) { return $a }
+    if ($a -ne "" -and $a -notmatch '[\s"]') { return $a }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+    $slashes = 0
+    foreach ($c in $a.ToCharArray()) {
+        if ($c -eq [char]'\') { $slashes++; continue }
+        if ($c -eq [char]'"') { [void]$sb.Append('\' * (2 * $slashes + 1)) } else { [void]$sb.Append('\' * $slashes) }
+        [void]$sb.Append($c)
+        $slashes = 0
+    }
+    [void]$sb.Append('\' * (2 * $slashes))
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
 # Runs a command with its output in the details pane and no console window of its own.
 function Run($exe, $arguments, $where) {
     if (-not $where) { $where = $env:TEMP }
     $out = Join-Path $env:TEMP "camtrap-setup.out"
     $err = Join-Path $env:TEMP "camtrap-setup.err"
     Remove-Item $out, $err -ErrorAction SilentlyContinue
-    $p = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $where -NoNewWindow -PassThru `
+    $line = (@($arguments) | ForEach-Object { Quote-Arg $_ }) -join " "  # see Quote-Arg
+    $p = Start-Process -FilePath $exe -ArgumentList $line -WorkingDirectory $where -NoNewWindow -PassThru `
                        -RedirectStandardOutput $out -RedirectStandardError $err
     # Touching .Handle keeps the process object's handle open; without it PowerShell can hand back
     # a null ExitCode when the child has already gone, and every step would read as a failure.
@@ -762,6 +791,11 @@ if (Test-Path (Join-Path $Dir ".git")) {
     # Bring it up to date first, the way the launcher does (origin/main, or the tag in ref.txt). Without this a
     # rerun after a stop ran the checks from the old download and stopped the same way again, even after the
     # check itself had been fixed (2026-09-25). A clone with local changes is left alone, as the launcher does.
+    # The developer files go first ($SparsePatterns): a clone made before they were left out loses them here,
+    # and files deleted from it by hand stop counting as local changes.
+    if ((Run "git" (@("sparse-checkout", "set", "--no-cone") + $SparsePatterns) $Dir) -ne 0) {
+        Detail "Could not leave the developer notes out of the app folder; carrying on."
+    }
     $dirty = @(& git -C $Dir status --porcelain 2>$null) | Where-Object { $_ -and $_ -notmatch 'CamTrapMeasure-setup\.log' }
     if ($dirty) {
         Detail "The app folder has local changes; not updating it."
@@ -778,8 +812,15 @@ if (Test-Path (Join-Path $Dir ".git")) {
         }
     }
 } else {
-    if ((Run "git" @("clone", "--quiet", $Repo, $Dir) $env:TEMP) -ne 0) {
+    # Cloned without a checkout, so the developer files ($SparsePatterns) are never written here at all.
+    if ((Run "git" @("clone", "--quiet", "--no-checkout", $Repo, $Dir) $env:TEMP) -ne 0) {
         Fail "Could not download the app from $Repo. Check the internet connection (github.com must be reachable)."
+    }
+    if ((Run "git" (@("sparse-checkout", "set", "--no-cone") + $SparsePatterns) $Dir) -ne 0) {
+        Detail "Could not leave the developer notes out of the app folder; carrying on."
+    }
+    if ((Run "git" @("-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", "origin/main") $Dir) -ne 0) {
+        Fail "The app was downloaded but could not be unpacked into $Dir. Delete that folder and run this again."
     }
 }
 Set-Location $Dir
@@ -838,9 +879,11 @@ if ($bundled) {
     # token either and still reaches the hub through a cached huggingface-cli login, and must go on
     # picking up new weights versions.
     New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
-    $conf = if (Test-Path $cfg) { Get-Content $cfg -Raw | ConvertFrom-Json } else { New-Object PSObject }
+    $conf = if (Test-Path $cfg) { Get-Content $cfg -Raw -Encoding UTF8 | ConvertFrom-Json } else { New-Object PSObject }
     $conf | Add-Member -NotePropertyName "weights_from" -NotePropertyValue "bundle" -Force
-    $conf | ConvertTo-Json | Set-Content $cfg -Encoding utf8
+    # UTF-8 without a byte order mark: Set-Content -Encoding utf8 writes one in PowerShell 5, and the app's
+    # config reader failed on it (2026-09-25, Seth's machine).
+    [IO.File]::WriteAllText($cfg, ($conf | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
     Detail "This machine uses the models that came with the installer; no Hugging Face token is needed."
 }
 
@@ -889,7 +932,7 @@ Detail "Listed in Settings > Apps as $Name $version."
 
 # --- 7. first start ---------------------------------------------------------------------------------
 Step $(if ($bundled) { "Starting $Name" } else { "Starting $Name (the first start downloads the models; the window shows the progress)" })
-Start-Process -FilePath $Wscript -ArgumentList (Join-Path $Dir "scripts\launch.vbs") -WorkingDirectory $Dir
+Start-Process -FilePath $Wscript -ArgumentList (Quote-Arg (Join-Path $Dir "scripts\launch.vbs")) -WorkingDirectory $Dir
 Detail "Done. $Name is installed."
 if ($Form) {
     $script:Phase = "done"  # the window closes without asking

@@ -1082,3 +1082,50 @@ and stopped the child; in the stopped phase it closed without asking. `camtrap-m
 --no-prompt` on this workstation: "Disk space: 34 GB free on C:\", and with a bundled data folder no token
 and no FlagLabel line. **Not run:** the whole installer (the researcher has a half-finished install at
 `D:\CamTrapMeasure` and reruns it), and the Git download on a machine without Git.
+
+## Developer notes stay off department machines; arguments reach commands whole (2026-09-25)
+
+- **Sparse checkout.** The installer git-clones this public repo, so `CLAUDE.md`, `CONTEXT.md`, `HANDOFF.md`
+  and `.scratch/` landed on Seth's machine. The researcher: "i dont want him to see this files". Both scripts
+  now hold one list, `$SparsePatterns = @("/*", "!/CLAUDE.md", "!/CONTEXT.md", "!/HANDOFF.md", "!/.scratch/",
+  "!/.claude/")`, in the order the coordinator gave the researcher to run by hand on that machine, and apply it
+  with `git sparse-checkout set --no-cone`. Non-cone because the list is "everything but these files", which
+  cone mode cannot say. Chosen over deleting files after the clone: deleted tracked files show in `git status
+  --porcelain` and the launcher then stops updating a "changed" clone; sparse-excluded ones do not show, even
+  when they were deleted by hand first (checked). A checkout of a newer commit keeps them out.
+- **Installer.** A fresh install clones with `--no-checkout`, sets the list, then checks out `origin/main`
+  detached (the launcher detaches at its first update anyway), so the files are never written. A failed
+  sparse set is a line in the pane and the checkout goes on whole. A rerun on an existing clone sets the list
+  before its local-changes check.
+- **Launcher.** Before its local-changes check it compares `git sparse-checkout list` with the list and runs
+  `set` only when they differ, so a machine where the command was run by hand is left alone. Any failure is
+  a log line and the start carries on. It acts only on the clone that Settings > Apps registers
+  (`InstallLocation` in the uninstall key equals the launcher's folder), so a developer who runs `run.bat` in
+  their own clone keeps the notes. An install that receives this launcher through an update applies it at
+  the start after that update: PowerShell had already parsed the old launcher when the checkout rewrote it.
+  Nothing here, and no test, runs sparse-checkout in the development repo.
+- **Arguments with spaces.** `Run` handed its array to `Start-Process -ArgumentList`, which PowerShell 5.1
+  joins with spaces and quotes nothing. On Seth's machine (a successful install) the GPU check reached python
+  as `-c import` and reported "PyTorch does not see a GPU" on an RTX 6000 Ada, and `git log --format=%h %cs
+  %s` failed with "ambiguous argument '%cs'". An install folder with a space would have broken the clone.
+  `Quote-Arg` now quotes each argument by the Windows rules (quotes around it when it has a space or a quote,
+  `\"` inside, backslashes before a quote or the closing quote doubled); an argument already wrapped in quotes
+  (robocopy's paths) passes as it is. The final `wscript launch.vbs` start is quoted the same way. The
+  launcher's `Step`/`Capture` are unchanged: none of their arguments has a space.
+- **config.json without a BOM.** `Set-Content -Encoding utf8` writes a byte order mark in PowerShell 5 and
+  the app's config reader failed on it (fixed on the reader side in 39c51da too). The installer now writes it
+  with `[IO.File]::WriteAllText` and a BOM-free UTF8Encoding, and reads it back with `-Encoding UTF8`. The
+  other files it writes are the setup log (keeps its encoding) and `.git\info\exclude` (`Add-Content`, ANSI,
+  no BOM, ASCII text).
+
+Evidence: 279 passed, 1 skipped; both scripts parse and are ASCII only (0 bytes over 127, no BOM). Run in the
+scratchpad, never in the development repo: a clone made the new installer's way (MinGit 2.51 and Git
+2.42) had none of the five paths, empty `status --porcelain`, and the same after `checkout --detach
+origin/main`; the same lines through the installer's own `Run` (parsed out of install.ps1) cloned into a
+folder with a space. A plain clone with `CLAUDE.md`, `CONTEXT.md` and `.scratch/` deleted by hand showed 38
+deletions; after `set` the status was empty. The new launcher (`-Console -NoStart -NoUpdate`) in a plain
+clone: without the uninstall key it logged "not the installed copy" and left the files; with the key
+pointing there it ran `set` (exit 0) and the files went; a third start ran nothing. `uv run --frozen
+camtrap-measure --help` worked from the sparse clone. `Run` on python printed `['plain', 'a b', 'say
+"hi"', 'D:\\a b\\', ...]` and the pre-quoted path whole; the GPU-check string exited 0; the `git log` format
+printed the commit. A BOM-free write starts with `{`.

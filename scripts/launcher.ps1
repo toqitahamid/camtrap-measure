@@ -193,6 +193,37 @@ if ($already.Count -gt 0) {
 $env:Path = "$env:LOCALAPPDATA\Programs\MinGit\cmd;$env:USERPROFILE\.local\bin;$env:Path"
 $env:GIT_TERMINAL_PROMPT = "0"
 
+# --- developer files stay off this computer ---------------------------------------------------------
+# The repo is public and the installer cloned it whole, so the developers' notes landed on department
+# machines too (2026-09-25, the researcher: "i dont want him to see this files"). A sparse checkout leaves
+# these paths out of the app folder; excluded files are not reported by `git status --porcelain`, even
+# ones deleted by hand, so this runs BEFORE the local-changes check below and never makes a clean clone
+# look changed. The same list, in the same order, is in install.ps1 (and was run by hand on one machine):
+# a clone that already has exactly it is left alone. Any failure is logged and the start carries on.
+# An install that gets this launcher through an update applies it at the start AFTER that update:
+# PowerShell had already parsed the old launcher when the checkout rewrote this file.
+# Only the copy Settings > Apps lists as installed is touched, so a developer's clone keeps its files.
+$SparsePatterns = @("/*", "!/CLAUDE.md", "!/CONTEXT.md", "!/HANDOFF.md", "!/.scratch/", "!/.claude/")
+try {
+    $installedAt = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CamTrapMeasure" `
+                                     -Name "InstallLocation" -ErrorAction SilentlyContinue).InstallLocation
+    if (-not $installedAt -or
+        [IO.Path]::GetFullPath($installedAt).TrimEnd("\") -ne [IO.Path]::GetFullPath($Dir).TrimEnd("\")) {
+        Log "not the installed copy ($installedAt) - leaving its files as they are"
+    } else {
+        $have = Capture "git" @("sparse-checkout", "list")  # $null when the clone is not sparse yet
+        $haveList = @()
+        if ($have) { $haveList = @($have -split "`r?`n" | Where-Object { $_ }) }
+        if (($haveList -join "`n") -cne ($SparsePatterns -join "`n")) {
+            if ((Step "git" (@("sparse-checkout", "set", "--no-cone") + $SparsePatterns)) -ne 0) {
+                Log "could not leave the developer files out - carrying on"
+            }
+        }
+    }
+} catch {
+    Log "could not leave the developer files out ($($_.Exception.Message)) - carrying on"
+}
+
 $dirty = Capture "git" @("status", "--porcelain")
 if ($dirty -and $dirty.Trim()) {
     Log "the clone has local changes - not updating it"  # a developer's tree, or a half-finished checkout

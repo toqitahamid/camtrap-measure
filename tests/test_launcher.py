@@ -468,3 +468,74 @@ def test_a_rerun_updates_the_app_it_already_downloaded():
     assert '"checkout", "--quiet", "--detach", $ref' in step
     assert "status --porcelain" in step and "not updating it" in step
     assert '"ref.txt"' in step
+
+
+# --- developer files stay off department machines ------------------------------------------------
+
+def sparse_patterns(script: str) -> str:
+    line = next(l for l in script.splitlines() if l.startswith("$SparsePatterns = @("))
+    return line
+
+
+def test_both_scripts_leave_out_the_same_developer_files():
+    """2026-09-25, the researcher: CLAUDE.md, CONTEXT.md, HANDOFF.md were on Seth's machine. One list, the
+    same in both scripts and in the order given by hand on that machine, so the launcher finds it already set."""
+    install = text(SCRIPTS / "install.ps1")
+    launcher = text(SCRIPTS / "launcher.ps1")
+    expected = ('$SparsePatterns = @("/*", "!/CLAUDE.md", "!/CONTEXT.md", "!/HANDOFF.md", "!/.scratch/", '
+                '"!/.claude/")')
+    assert sparse_patterns(install) == expected
+    assert sparse_patterns(launcher) == expected
+    assert install.count("$SparsePatterns = ") == 1 and launcher.count("$SparsePatterns = ") == 1
+
+
+def test_the_installer_clones_without_a_checkout_then_goes_sparse():
+    install = text(SCRIPTS / "install.ps1")
+    step = install.split('Step "Getting the app into $Dir"', 1)[1].split("Set-Location $Dir", 1)[0]
+    fresh = step.split("} else {\n    # Cloned without", 1)[1]
+    clone = fresh.index('"clone", "--quiet", "--no-checkout", $Repo, $Dir')
+    sparse = fresh.index('(@("sparse-checkout", "set", "--no-cone") + $SparsePatterns)')
+    checkout = fresh.index('"checkout", "--quiet", "--detach", "origin/main"')
+    assert clone < sparse < checkout
+    # a repair: the files go before the local-changes check, so a clone made earlier loses them too
+    repair = step.split("} else {\n    # Cloned without", 1)[0]
+    assert repair.index("+ $SparsePatterns)") < repair.index("status --porcelain")
+
+
+def test_the_launcher_goes_sparse_before_it_checks_for_local_changes():
+    launcher = text(SCRIPTS / "launcher.ps1")
+    sparse = launcher.index('(Step "git" (@("sparse-checkout", "set", "--no-cone") + $SparsePatterns))')
+    assert launcher.index('Capture "git" @("sparse-checkout", "list")') < sparse
+    assert sparse < launcher.index('Capture "git" @("status", "--porcelain")')
+    block = launcher.split("# --- developer files stay off", 1)[1].split("$dirty = ", 1)[0]
+    assert "try {" in block and "} catch {" in block and "carrying on" in block  # never blocks the start
+    assert '"InstallLocation"' in block  # a developer's clone is not the installed copy: left whole
+    assert "Stop-With" not in block
+
+
+def test_both_scripts_are_ascii():
+    """No byte order mark: PowerShell 5 reads them in the ANSI code page."""
+    for name in ("install.ps1", "launcher.ps1"):
+        raw = (SCRIPTS / name).read_bytes()
+        assert raw.isascii(), name
+
+
+def test_run_quotes_each_argument_by_the_windows_rules():
+    """2026-09-25, Seth's machine: Start-Process joins its argument list unquoted, so the GPU check reached
+    python as `-c import` and said PyTorch saw no GPU on an RTX 6000 Ada. Checked by running Run on python
+    and git with spaces, quotes and trailing backslashes (CONTEXT, 2026-09-25)."""
+    install = text(SCRIPTS / "install.ps1")
+    run = install.split("function Run(", 1)[1].split("\nfunction ", 1)[0]
+    assert '$line = (@($arguments) | ForEach-Object { Quote-Arg $_ }) -join " "' in run
+    assert "-ArgumentList $line " in run and "-ArgumentList $arguments" not in run
+    quote = install.split("function Quote-Arg(", 1)[1].split("\n}", 1)[0]
+    assert "$a.StartsWith('\"') -and $a.EndsWith('\"')" in quote  # robocopy's pre-quoted paths pass as they are
+    assert r"'\' * (2 * $slashes + 1)" in quote and r"'\' * (2 * $slashes)" in quote
+    assert r'-ArgumentList (Quote-Arg (Join-Path $Dir "scripts\launch.vbs"))' in install
+
+
+def test_config_json_is_written_without_a_byte_order_mark():
+    """Set-Content -Encoding utf8 writes a BOM in PowerShell 5; the app's config reader failed on it."""
+    install = text(SCRIPTS / "install.ps1")
+    assert "Set-Content $cfg" not in install
+    assert "[IO.File]::WriteAllText($cfg, ($conf | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))" in install
