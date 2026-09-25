@@ -1014,3 +1014,15 @@ write test (`D:\ct-test` accepted, `C:\Windows\System32` refused and nothing lef
 warning, the repair detection against this machine's real Settings entry (found, nothing asked), the fresh
 `-InstallTo` layout in the process environment, and the dialog built and shown without waiting for a click.
 Persistent user variables were only exercised with a throwaway name. 260 passed, 1 skipped.
+
+### Correction: installer windows show themselves; standard Windows colours (2026-09-25)
+
+- **INSTALL.bat did nothing** after ticket 24. setup.vbs starts PowerShell with window style 0, and Windows
+  applies that to the first window the process shows. Before ticket 24 that was the main window; now it is the
+  modal folder question, which stayed invisible and waited for a click. Every installer window now calls
+  `ShowWindow(handle, SW_SHOW)` in its Load event (`Show-Now`). Measured under the same hidden start: no fix and
+  "show and hide a throwaway form first" both left the window invisible; only the explicit call showed it.
+  Verified by starting the real INSTALL.bat and finding the setup window visible.
+- **The dark theme is gone.** On the researcher's screen the dialog's buttons were black text on black. The
+  installer now uses the system colours (dark text on the light system background), which is also what a
+  Windows installer is expected to look like. Warnings are dark orange (176, 80, 0), readable on light.
