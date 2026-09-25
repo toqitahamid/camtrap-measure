@@ -2,6 +2,7 @@ scripts/slurm-*.out
 ref.txt
 # what the launcher writes on this computer
 logs/
+CamTrapMeasure-setup.log
 __pycache__/
 *.pyc
 

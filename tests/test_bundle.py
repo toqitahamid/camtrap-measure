@@ -87,7 +87,9 @@ def test_the_installer_records_where_the_weights_came_from():
 
 
 def test_the_installer_copies_six_gigabytes_with_something_that_can_resume():
-    assert "robocopy" in INSTALL and "$LASTEXITCODE -ge 8" in INSTALL  # robocopy's success codes are < 8
+    assert "robocopy" in INSTALL and "$copied -ge 8" in INSTALL  # robocopy's success codes are < 8
+    # through Run, which keeps the window answering: a direct call held it for minutes (2026-09-25)
+    assert '$copied = Run "robocopy.exe"' in INSTALL and "& robocopy" not in INSTALL
 
 
 def test_the_bundle_builder_refuses_to_ship_a_token():

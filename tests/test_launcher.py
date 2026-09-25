@@ -217,18 +217,26 @@ def test_the_token_never_reaches_the_log():
     assert "UseSystemPasswordChar = $true" in ask
 
 
-def test_the_log_goes_where_a_person_can_be_told_to_look():
-    """2026-09-25: the dept user found no log on the Desktop; the researcher asked for the root of a drive.
-    The root of D: takes files from any signed-in user on the dept image. The root of C: takes new folders
-    but not new files without an administrator (Authenticated Users hold AD there, not WD), so C: gets a
-    folder. The Desktop and TEMP come last, for a machine without a writable D:."""
+def test_the_log_goes_in_the_install_folder():
+    """2026-09-25, the researcher: "write the log inside the camtrap measure folder". R for an install made
+    by ticket 24 or later, the app folder for an older one; the Desktop and TEMP come last."""
     install = text(SCRIPTS / "install.ps1")
     block = install.split("$LogCandidates = @(", 1)[1].split("\n)", 1)[0]
     lines = [l.strip() for l in block.strip().splitlines()]
-    assert lines[0] == r'"D:\CamTrapMeasure-setup.log",'
-    assert lines[1] == r'"C:\CamTrapMeasure-log\CamTrapMeasure-setup.log",'
-    assert "Desktop" in lines[2] and "TEMP" in lines[3]
-    assert "New-Item -ItemType Directory -Force -Path (Split-Path $candidate -Parent)" in install
+    assert len(lines) == 3
+    assert lines[0] == '(Join-Path $LogHome "CamTrapMeasure-setup.log"),'
+    assert "Desktop" in lines[1] and "TEMP" in lines[2]
+    assert "$LogHome = if ($Root) { $Root } else { $Dir }" in install
+    assert r'"D:\CamTrapMeasure-setup.log"' not in install and "CamTrapMeasure-log" not in install
+    # the folder is known first: the question, then the candidates, then the header
+    assert install.index("$Root = Ask-Folder (Default-Parent)") < install.index("$LogCandidates = @(")
+    assert install.index("$LogCandidates = @(") < install.index("foreach ($candidate in $LogCandidates)")
+    # an old install's log sits in its clone: kept out of git, or the launcher stops updating a "changed" clone
+    assert r'".git\info\exclude"' in install
+    assert 'Add-Content -LiteralPath $gitExclude -Value "CamTrapMeasure-setup.log"' in install
+    assert "$logParent = Split-Path $candidate -Parent" in install
+    # a drive root (D:\) is never passed to New-Item: it fails there with "not of a legal form"
+    assert "if (-not (Test-Path -LiteralPath $logParent)) {" in install
     assert "foreach ($miss in $logMisses) { Detail $miss }" in install  # a fallback is never silent
 
 
@@ -256,7 +264,7 @@ def test_the_checks_output_is_read_as_utf8():
 # --- the install folder (ticket 24) ---------------------------------------------------------------
 
 def test_the_installer_asks_where_in_a_dialog_with_a_folder_picker():
-    """2026-09-25: a dept machine failed the 20 GB check with everything on C:. The researcher asked to pick
+    """2026-09-25: a dept machine failed the free-space check with everything on C:. The researcher asked to pick
     the place at install time: a box to type in, a Browse button, and a live line saying where and how much room."""
     install = text(SCRIPTS / "install.ps1")
     dialog = install.split("function New-FolderDialog", 1)[1].split("\nfunction ", 1)[0]
@@ -265,7 +273,8 @@ def test_the_installer_asks_where_in_a_dialog_with_a_folder_picker():
     assert '$go.Text = "Install"' in dialog and '$stop.Text = "Cancel"' in dialog
     assert "add_TextChanged({ Show-Where })" in dialog  # the where-and-free-space line follows the typing
     where = install.split("function Where-Text", 1)[1].split("\nfunction ", 1)[0]
-    assert "$MinFreeGB" in where and "Free-GB" in where  # a warning, not a stop
+    assert "$NeedGB" in where and "Free-GB" in where  # a warning, not a stop
+    assert "$NeedGB = 14" in install  # models 6.5 + PyTorch 6 + results 1 + base 0.3, as in preflight.py
     assert "if (-not $Root) { exit 0 }" in install  # Cancel touches nothing
     ask = install.split("function Ask-Folder", 1)[1].split("\nfunction ", 1)[0]
     assert "Read-Host" in ask  # -Console asks too, Enter takes the suggestion
@@ -275,7 +284,7 @@ def test_the_question_comes_before_anything_is_written():
     """Cancel must leave nothing behind, so the question comes before the log and the main window."""
     install = text(SCRIPTS / "install.ps1")
     asked = install.index("$Root = Ask-Folder (Default-Parent)")
-    assert asked < install.index("$Form = New-Object System.Windows.Forms.Form")
+    assert asked < install.index("$Form = New-MainForm")
     assert asked < install.index("foreach ($candidate in $LogCandidates)")
 
 
@@ -385,7 +394,7 @@ def test_every_installer_window_shows_itself_despite_the_hidden_start():
     install = text(SCRIPTS / "install.ps1")
     assert "public static extern bool ShowWindow" in install
     assert "[CamTrap.Win]::ShowWindow($this.Handle, 5)" in install
-    assert "Show-Now $box" in install and "Show-Now $Form" in install
+    assert "Show-Now $box" in install and "Show-Now $form" in install
     assert "$prime" not in install
 
 
@@ -394,4 +403,56 @@ def test_the_installer_uses_standard_windows_colours():
     install = text(SCRIPTS / "install.ps1")
     assert "FromHtml" not in install
     assert "BackColor = [System.Drawing.ColorTranslator]" not in install
-    assert "$Details.BackColor = [System.Drawing.SystemColors]::Window" in install
+    assert "$script:Details.BackColor = [System.Drawing.SystemColors]::Window" in install
+
+
+def main_form(install: str) -> str:
+    return install.split("function New-MainForm", 1)[1].split("\nfunction ", 1)[0]
+
+
+def test_the_main_window_has_copy_log_and_open_log_folder():
+    """2026-09-25, the researcher: a way to hand the pane over without selecting text in it."""
+    install = text(SCRIPTS / "install.ps1")
+    form = main_form(install)
+    assert '$copy.Text = "Copy log"' in form and "[System.Windows.Forms.Clipboard]::SetText($script:Details.Text)" in form
+    assert '$script:CopyButton.Text = "Copied"' in form
+    assert "New-Object System.Windows.Forms.Timer" in form and "Start-Sleep" not in form  # the caption comes back by itself
+    assert '$open.Text = "Open log folder"' in form and '"/select,`"$($script:LogFile)`""' in form
+    assert "$open.Visible = $false" in form
+    assert "if ($Form -and -not $script:LogOff) { $script:OpenLogButton.Visible = $true }" in install
+    assert "Show-Now $form" in form  # the hidden start (see the test above)
+    assert "BackColor = [System.Drawing.Color]" not in form and "ForeColor = [System.Drawing.Color]" not in form
+
+
+def test_the_main_window_can_always_be_closed():
+    """2026-09-25, the researcher, after a stopped run: "there should be a button to cancel or close this
+    window". Cancel while steps run asks first and stops the running child; Close once stopped or done."""
+    install = text(SCRIPTS / "install.ps1")
+    form = main_form(install)
+    assert '$close.Text = "Cancel"' in form
+    assert "$form.add_FormClosing({ param($sender, $e) Confirm-Cancel $e })" in form  # the title-bar X too
+    confirm = install.split("function Confirm-Cancel", 1)[1].split("\nfunction ", 1)[0]
+    assert 'if ($script:Phase -ne "running") { return }' in confirm
+    assert "Stop the installer? You can run it again later; finished steps are kept." in confirm
+    assert "MessageBoxDefaultButton]::Button2" in confirm  # default No
+    assert "$e.Cancel = $true" in confirm and 'Log "STOPPED: cancelled by the user"' in confirm
+    assert confirm.index("Stop-Child") < confirm.index('$script:Phase = "cancelled"')
+    stop = install.split("function Stop-Child", 1)[1].split("\nfunction ", 1)[0]
+    assert "taskkill.exe /PID $child.Id /T /F" in stop and "Stop-Process -Id $child.Id -Force" in stop
+    pump = install.split("function Pump", 1)[1].split("\n}", 1)[0]
+    assert 'if ($script:Phase -eq "cancelled") { exit 1 }' in pump
+    assert "$script:Child = $p" in install.split("function Run", 1)[1].split("\nfunction ", 1)[0]
+    body = fail_body(install)
+    assert '$script:Phase = "stopped"' in body and '$script:CloseButton.Text = "Close"' in body
+    end = install.split("# --- 7. first start", 1)[1]
+    assert '$script:Phase = "done"' in end and '$script:CloseButton.Text = "Close"' in end
+
+
+def test_long_steps_keep_the_window_answering():
+    """2026-09-25: the pane could not be scrolled during the 6.5 GB model copy. Everything long runs through
+    Run, which pumps the window every 150 ms."""
+    install = text(SCRIPTS / "install.ps1")
+    tools = install.split("# --- 1. tools", 1)[1].split("# --- 2. the app", 1)[0]
+    assert "Invoke-WebRequest -Uri $(Quote $MinGitUrl)" in tools and "-EncodedCommand" in tools
+    assert "try { Invoke-WebRequest" not in tools and "\n    Expand-Archive" not in tools
+    assert tools.count('(Run "powershell.exe"') == 3  # Git download, Git unzip, uv

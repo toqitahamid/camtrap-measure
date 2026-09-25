@@ -108,7 +108,7 @@ What this computer needs:
   - Windows 11, and an internet connection for the install (the app itself downloads from GitHub).
   - An NVIDIA graphics card, driver version 570 or newer. Without one the app still runs, on the
     processor instead, many times slower.
-  - 20 GB of free disk space.
+  - About 14 GB of free disk space on the drive you install to.
 
 If something goes wrong the installer says what to do in plain words, and it is safe to run again -
 running it a second time repairs a half-finished install rather than starting over.

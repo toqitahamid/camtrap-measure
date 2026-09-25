@@ -19,10 +19,11 @@
   is, without the question: an install from before ticket 24 keeps its app in %LOCALAPPDATA%\CamTrapMeasure
   and its data in %USERPROFILE%\.camtrap-measure, untouched.
 
-  Every run writes the same lines to D:\CamTrapMeasure-setup.log (else C:\CamTrapMeasure-log\, the
-  Desktop, or TEMP, whichever can be written first), last run only, starting with
-  a short description of the machine. A failure names that file and leaves the window open, so there is
-  always something to read and something to send.
+  Every run writes the same lines to CamTrapMeasure-setup.log inside the install folder (R, e.g.
+  D:\CamTrapMeasure\CamTrapMeasure-setup.log; else the Desktop, or TEMP, whichever can be written first),
+  last run only, starting with a short description of the machine. A failure names that file and leaves
+  the window open, with buttons to copy the log and to open its folder, so there is always something to
+  read and something to send.
 
   Safe to run again: every step is a no-op when it is already done, so this is also the repair path.
 #>
@@ -57,18 +58,7 @@ $UvBin = Join-Path $env:USERPROFILE ".local\bin"  # where uv's installer puts uv
 $Name = "CamTrap Measure"
 $Key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CamTrapMeasure"
 $Wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
-# The details pane goes with the window; this file is what a person can send afterwards. It goes where
-# anyone can be told to look (2026-09-25: the Desktop copy was not found on a dept machine). First the root
-# of D:, where the dept image lets any signed-in user write files. The root of C: does not (new folders
-# only, no new files, without an administrator), hence a folder there next. The Desktop and TEMP are the
-# last fallbacks, for a machine with no writable D:. The pane says which one was used.
-$LogCandidates = @(
-    "D:\CamTrapMeasure-setup.log",
-    "C:\CamTrapMeasure-log\CamTrapMeasure-setup.log",
-    (Join-Path ([Environment]::GetFolderPath("Desktop")) "CamTrapMeasure-setup.log"),
-    (Join-Path $env:TEMP "CamTrapMeasure-setup.log")
-)
-$LogFile = $LogCandidates[0]
+$LogFile = $null  # set once the install folder is known (see "the log" below)
 
 # --- the window -------------------------------------------------------------------------------------
 $Form = $null
@@ -98,11 +88,14 @@ function Show-Now($window) {
 }
 
 # --- where it goes ----------------------------------------------------------------------------------
-# 2026-09-25: a dept machine failed the 20 GB free-space check, because everything went on C: (the app and
+# 2026-09-25: a dept machine failed the free-space check, because everything went on C: (the app and
 # its environment in %LOCALAPPDATA%, 7 GB of models in the user profile, uv's cache). The researcher: "how
 # about installing it on my chosen location that I select on the installing time". So the installer asks,
 # and everything big goes under the one folder that was picked (see the header for the layout).
-$MinFreeGB = 20  # preflight.MIN_FREE_GB: what the app's own disk check asks for
+# What a fresh install writes there, from preflight.py: the models (6.5 GB), the CUDA build of PyTorch
+# (6 GB, cache and environment), 1 GB for results, Python and the base environment (0.3 GB). A warning below
+# this, never a stop.
+$NeedGB = 14
 $LegacyDir = Join-Path $env:LOCALAPPDATA "CamTrapMeasure"  # where every install before ticket 24 put the app
 $EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
 # Standard Windows colours throughout, like any installer: dark text on the light system background. The
@@ -156,8 +149,8 @@ function Where-Text($picked) {
     $free = Free-GB $root
     $drive = [System.IO.Path]::GetPathRoot($root)
     if ($null -eq $free) { return @("Installs into $root. Free space on that drive is unknown.", $false) }
-    if ($free -lt $MinFreeGB) {
-        return @("Installs into $root. Only $free GB free on $drive and it needs about $MinFreeGB GB.", $true)
+    if ($free -lt $NeedGB) {
+        return @("Installs into $root. Only $free GB free on $drive and it needs about $NeedGB GB.", $true)
     }
     return @("Installs into $root. $free GB free on $drive", $false)
 }
@@ -336,60 +329,134 @@ if ($Root) {
 $DataDir = if ($env:CAMTRAP_DATA_DIR) { $env:CAMTRAP_DATA_DIR } else { Join-Path $env:USERPROFILE ".camtrap-measure" }
 $Ico = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 
-if (-not $Console) {
-    $Form = New-Object System.Windows.Forms.Form
-    $Form.Text = "$Name Setup"
-    $Form.Size = New-Object System.Drawing.Size(660, 470)
-    $Form.StartPosition = "CenterScreen"
-    $Form.FormBorderStyle = "FixedDialog"
-    $Form.MaximizeBox = $false
-    Show-Now $Form
+function New-MainForm($installingInto) {
+    # Built apart from the steps so it can be made and looked at on its own, like New-FolderDialog.
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "$Name Setup"
+    $form.Size = New-Object System.Drawing.Size(660, 490)
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+    Show-Now $form
 
     $mark = New-Object System.Windows.Forms.Label
     $mark.Text = "CAMTRAP MEASURE"
     $mark.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 13)
     $mark.ForeColor = [System.Drawing.SystemColors]::ControlText
     $mark.SetBounds(24, 22, 400, 28)
-    $Form.Controls.Add($mark)
+    $form.Controls.Add($mark)
 
     $sub = New-Object System.Windows.Forms.Label
-    $sub.Text = "Installing into $(if ($Root) { $Root } else { $Dir }). Nothing here needs an administrator."
+    $sub.Text = "Installing into $installingInto. Nothing here needs an administrator."
     $sub.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $sub.ForeColor = [System.Drawing.SystemColors]::GrayText
     $sub.SetBounds(26, 52, 600, 20)
-    $Form.Controls.Add($sub)
+    $form.Controls.Add($sub)
 
-    $StepLabel = New-Object System.Windows.Forms.Label
-    $StepLabel.Text = "Starting..."
-    $StepLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $StepLabel.ForeColor = [System.Drawing.SystemColors]::ControlText
-    $StepLabel.SetBounds(26, 86, 600, 22)
-    $Form.Controls.Add($StepLabel)
+    $script:StepLabel = New-Object System.Windows.Forms.Label
+    $script:StepLabel.Text = "Starting..."
+    $script:StepLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $script:StepLabel.ForeColor = [System.Drawing.SystemColors]::ControlText
+    $script:StepLabel.SetBounds(26, 86, 600, 22)
+    $form.Controls.Add($script:StepLabel)
 
     $bar = New-Object System.Windows.Forms.ProgressBar
     $bar.Style = "Continuous"
     $bar.Minimum = 0
     $bar.Maximum = 7  # the steps below; the bar is a promise about how much is left, so keep it in step
     $bar.SetBounds(26, 112, 600, 8)
-    $Form.Controls.Add($bar)
+    $form.Controls.Add($bar)
     $script:Bar = $bar
 
-    $Details = New-Object System.Windows.Forms.TextBox
-    $Details.Multiline = $true
-    $Details.ReadOnly = $true
-    $Details.ScrollBars = "Vertical"
-    $Details.Font = New-Object System.Drawing.Font("Consolas", 8.5)
-    $Details.BackColor = [System.Drawing.SystemColors]::Window
-    $Details.ForeColor = [System.Drawing.SystemColors]::WindowText
-    $Details.BorderStyle = "FixedSingle"
-    $Details.SetBounds(26, 134, 600, 250)
-    $Form.Controls.Add($Details)
+    $script:Details = New-Object System.Windows.Forms.TextBox
+    $script:Details.Multiline = $true
+    $script:Details.ReadOnly = $true
+    $script:Details.ScrollBars = "Vertical"
+    $script:Details.Font = New-Object System.Drawing.Font("Consolas", 8.5)
+    $script:Details.BackColor = [System.Drawing.SystemColors]::Window
+    $script:Details.ForeColor = [System.Drawing.SystemColors]::WindowText
+    $script:Details.BorderStyle = "FixedSingle"
+    $script:Details.SetBounds(26, 134, 600, 250)
+    $form.Controls.Add($script:Details)
 
+    # The buttons under the pane (2026-09-25, the researcher): copy what the pane says, find the log file,
+    # and a way out. They work after a failure too: Fail keeps the window up with a message loop of its own.
+    $copy = New-Object System.Windows.Forms.Button
+    $copy.Text = "Copy log"
+    $copy.SetBounds(26, 396, 110, 28)
+    $form.Controls.Add($copy)
+    $script:CopyButton = $copy
+    $script:CopyTimer = New-Object System.Windows.Forms.Timer
+    $script:CopyTimer.Interval = 1500
+    $script:CopyTimer.add_Tick({ $script:CopyTimer.Stop(); $script:CopyButton.Text = "Copy log" })
+    $copy.add_Click({
+        try {
+            if ($script:Details.Text) { [System.Windows.Forms.Clipboard]::SetText($script:Details.Text) }
+            $script:CopyButton.Text = "Copied"
+        } catch {
+            $script:CopyButton.Text = "Not copied"  # the clipboard was busy; another click tries again
+        }
+        $script:CopyTimer.Stop()
+        $script:CopyTimer.Start()
+    })
+
+    $open = New-Object System.Windows.Forms.Button
+    $open.Text = "Open log folder"
+    $open.SetBounds(144, 396, 130, 28)
+    $open.Visible = $false  # until the log file exists
+    $form.Controls.Add($open)
+    $script:OpenLogButton = $open
+    $open.add_Click({
+        if ($script:LogFile) { Start-Process -FilePath "explorer.exe" -ArgumentList "/select,`"$($script:LogFile)`"" }
+    })
+
+    $close = New-Object System.Windows.Forms.Button
+    $close.Text = "Cancel"  # "Close" once the install has stopped or finished
+    $close.SetBounds(526, 396, 100, 28)
+    $form.Controls.Add($close)
+    $script:CloseButton = $close
+    $close.add_Click({ $this.FindForm().Close() })
+    # The button and the title-bar X both come here.
+    $form.add_FormClosing({ param($sender, $e) Confirm-Cancel $e })
+    return $form
+}
+
+function Confirm-Cancel($e) {
+    # While steps run, closing asks first; stopped or finished, the window just closes.
+    if ($script:Phase -ne "running") { return }
+    $answer = [System.Windows.Forms.MessageBox]::Show($Form,
+        "Stop the installer? You can run it again later; finished steps are kept.", "$Name Setup",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question,
+        [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
+    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { $e.Cancel = $true; return }
+    Log "STOPPED: cancelled by the user"
+    Stop-Child
+    $script:Phase = "cancelled"  # last: Pump ends the script on this, and it must not do so in here
+}
+
+function Stop-Child {
+    # Nothing keeps running hidden after a cancel: uv, git and robocopy go with the window, children too.
+    $child = $script:Child
+    if (-not $child -or $child.HasExited) { return }
+    # PowerShell 5 turns a native stderr line into an error under Stop; whether it worked is checked below.
+    try { $null = & taskkill.exe /PID $child.Id /T /F 2>&1 } catch { }
+    if (-not $child.HasExited) {
+        try { Stop-Process -Id $child.Id -Force -ErrorAction Stop } catch { Log "Could not stop process $($child.Id): $($_.Exception.Message)" }
+    }
+}
+
+$script:Phase = "running"
+$script:Child = $null
+if (-not $Console) {
+    $Form = New-MainForm $(if ($Root) { $Root } else { $Dir })
     $Form.Show()
 }
 
 $Done = 0
-function Pump { if ($Form) { [System.Windows.Forms.Application]::DoEvents() } }
+function Pump {
+    if ($Form) { [System.Windows.Forms.Application]::DoEvents() }
+    if ($script:Phase -eq "cancelled") { exit 1 }  # the user closed the window and said yes (Confirm-Cancel)
+}
 
 # Each failed check (a line starting with the cross) and the fix under it (the arrow line), kept so a failure
 # can show them in the message box itself: on 2026-09-03 a dept user saw only "the details pane lists what
@@ -435,10 +502,12 @@ function Fail($msg) {
         $shown = @($script:Problems | Select-Object -First 20)
         $found = "What went wrong:`r`n" + ($shown -join "`r`n") + "`r`n`r`n"
     }
+    $script:Phase = "stopped"  # from here the window closes without asking
     Log "STOPPED: $msg"
     Log $send
     if ($Form) {
         $StepLabel.Text = "Stopped."
+        $script:CloseButton.Text = "Close"
         $Details.AppendText("STOPPED: $msg`r`n")
         $Details.AppendText("$send`r`n")
         [System.Windows.Forms.MessageBox]::Show("$msg`r`n`r`n$found$send", "$Name Setup",
@@ -462,7 +531,7 @@ function Fail($msg) {
 # person who can fix what it says. So every run - window or -Console - writes the same lines to $LogFile,
 # overwriting it, so the file is always the last run and nothing else. The Hugging Face token never
 # reaches the pane (see Ask-Token), which is why it never reaches this file either.
-$script:LogOff = $false
+$script:LogOff = $true  # until the header below is written
 function Log($line) {
     if ($script:LogOff) { return }
     try {
@@ -479,11 +548,36 @@ if (Test-Path $pyproject0) {
     $v0 = Select-String -Path $pyproject0 -Pattern '^version = "(.+)"' | Select-Object -First 1
     if ($v0) { $here = "app version " + $v0.Matches[0].Groups[1].Value + " already installed" }
 }
-$script:LogOff = $true  # until one of the candidates takes the header
+# The details pane goes with the window; this file is what a person can send afterwards. It goes in the
+# install folder, next to the app it describes (2026-09-25, the researcher: "write the log inside the
+# camtrap measure folder"). An install from before ticket 24 has no such folder: its log goes in the app
+# folder, kept out of git (below) so the launcher does not take the clone for a changed one and stop
+# updating it. The Desktop and TEMP are the fallbacks. The pane says which one was used.
+$LogHome = if ($Root) { $Root } else { $Dir }
+$LogCandidates = @(
+    (Join-Path $LogHome "CamTrapMeasure-setup.log"),
+    (Join-Path ([Environment]::GetFolderPath("Desktop")) "CamTrapMeasure-setup.log"),
+    (Join-Path $env:TEMP "CamTrapMeasure-setup.log")
+)
+$gitExclude = Join-Path $Dir ".git\info\exclude"
+if (-not $Root -and (Test-Path -LiteralPath (Split-Path $gitExclude -Parent))) {
+    try {
+        $excluded = (Test-Path -LiteralPath $gitExclude) -and
+                    ((Get-Content -LiteralPath $gitExclude) -contains "CamTrapMeasure-setup.log")
+        if (-not $excluded) { Add-Content -LiteralPath $gitExclude -Value "CamTrapMeasure-setup.log" -ErrorAction Stop }
+    } catch {
+        $Notes += "Could not keep the setup log out of git ($($_.Exception.Message))."
+    }
+}
 $logMisses = @()
 foreach ($candidate in $LogCandidates) {
     try {
-        New-Item -ItemType Directory -Force -Path (Split-Path $candidate -Parent) -ErrorAction Stop | Out-Null
+        # Only make the folder when it is missing: New-Item on a drive root (a log right in D:\) fails with
+        # "The path is not of a legal form" (seen 2026-09-25).
+        $logParent = Split-Path $candidate -Parent
+        if (-not (Test-Path -LiteralPath $logParent)) {
+            New-Item -ItemType Directory -Force -Path $logParent -ErrorAction Stop | Out-Null
+        }
         Set-Content -Path $candidate -Encoding utf8 -ErrorAction Stop `
                     -Value "$Name setup - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $here"
         $LogFile = $candidate
@@ -495,6 +589,7 @@ foreach ($candidate in $LogCandidates) {
 }
 foreach ($miss in $logMisses) { Detail $miss }
 if ($script:LogOff) { Detail "No setup log this time; the install carries on." }
+if ($Form -and -not $script:LogOff) { $script:OpenLogButton.Visible = $true }
 
 # What this machine is. Whoever reads the log has never seen the computer it came from, and nobody has
 # written the department's hardware down at all. Each fact is asked for on its own: a query that fails
@@ -552,6 +647,7 @@ function Run($exe, $arguments, $where) {
     # Touching .Handle keeps the process object's handle open; without it PowerShell can hand back
     # a null ExitCode when the child has already gone, and every step would read as a failure.
     $null = $p.Handle
+    $script:Child = $p  # so a cancel can stop it (Stop-Child)
     $shown = 0
     while (-not $p.HasExited) {
         Pump
@@ -570,8 +666,11 @@ function Run($exe, $arguments, $where) {
     }
     if (Test-Path $err) { Detail (Get-Content $err -Raw -Encoding UTF8) }
     Remove-Item $out, $err -ErrorAction SilentlyContinue
+    $script:Child = $null
     return $p.ExitCode
 }
+
+function Quote($text) { "'" + ([string]$text).Replace("'", "''") + "'" }  # a PowerShell string literal
 
 function Ask-Token {
     # Asks for the Hugging Face read token. Never echoed and never written to the details pane: the
@@ -627,11 +726,20 @@ AddPath $UvBin
 if (Get-Command git -ErrorAction SilentlyContinue) { Detail "Git is installed." } else {
     Detail "Getting a portable Git into $MinGitDir (40 MB)..."
     $zip = Join-Path $env:TEMP "MinGit.zip"
-    try { Invoke-WebRequest -Uri $MinGitUrl -OutFile $zip } catch {
-        Fail "Could not download Git from $MinGitUrl ($($_.Exception.Message)). Check the internet connection (github.com must be reachable), then run this again."
+    # In a child PowerShell through Run, so the window keeps answering (and its pane scrolls) meanwhile.
+    $get = "`$ProgressPreference = 'SilentlyContinue'; " +
+           "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; " +
+           "Invoke-WebRequest -Uri $(Quote $MinGitUrl) -OutFile $(Quote $zip)"
+    $unzip = "`$ProgressPreference = 'SilentlyContinue'; " +
+             "Expand-Archive -Path $(Quote $zip) -DestinationPath $(Quote $MinGitDir) -Force; Remove-Item $(Quote $zip)"
+    if ((Run "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand",
+            [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($get)))) -ne 0) {
+        Fail "Could not download Git from $MinGitUrl. Check the internet connection (github.com must be reachable), then run this again."
     }
-    Expand-Archive -Path $zip -DestinationPath $MinGitDir -Force
-    Remove-Item $zip
+    if ((Run "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand",
+            [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($unzip)))) -ne 0) {
+        Fail "Git was downloaded but could not be unpacked into $MinGitDir. Delete that folder and run this again."
+    }
     AddPath (Join-Path $MinGitDir "cmd")
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Fail "Git was unpacked into $MinGitDir but git.exe is not there. Delete that folder and run this again."
@@ -694,8 +802,9 @@ if ($WeightsFrom) {
         New-Item -ItemType Directory -Force -Path $target | Out-Null
         # robocopy: the only thing on a stock Windows that copies 6.5 GB reliably and restarts a part-
         # copied file. Its exit codes below 8 are all success (0 = nothing to do, 1 = files copied).
-        $null = & robocopy $WeightsFrom $target /E /NFL /NDL /NJH /NJS /NP /R:2 /W:2
-        if ($LASTEXITCODE -ge 8) { Fail "The models could not be copied to $target (robocopy $LASTEXITCODE). Check the free disk space." }
+        # Through Run: called directly it held the window for minutes and the pane could not be scrolled.
+        $copied = Run "robocopy.exe" @("`"$WeightsFrom`"", "`"$target`"", "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/R:2", "/W:2")
+        if ($copied -ge 8) { Fail "The models could not be copied to $target (robocopy $copied). Check the free disk space." }
         Detail "Models installed in $target."
     }
     $bundled = $true
@@ -766,10 +875,11 @@ Step $(if ($bundled) { "Starting $Name" } else { "Starting $Name (the first star
 Start-Process -FilePath $Wscript -ArgumentList (Join-Path $Dir "scripts\launch.vbs") -WorkingDirectory $Dir
 Detail "Done. $Name is installed."
 if ($Form) {
+    $script:Phase = "done"  # the window closes without asking
+    $script:CloseButton.Text = "Close"
     $StepLabel.Text = "$Name is installed. From now on, double-click its icon on the desktop."
-    Pump
-    Start-Sleep -Seconds 3
-    $Form.Close()
+    for ($i = 0; $i -lt 20 -and -not $Form.IsDisposed; $i++) { Pump; Start-Sleep -Milliseconds 150 }
+    if (-not $Form.IsDisposed) { $Form.Close() }
 } else {
     Write-Host ""
     Write-Host "Done. From now on, double-click '$Name' on the desktop." -ForegroundColor Green

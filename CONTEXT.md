@@ -1026,3 +1026,59 @@ Persistent user variables were only exercised with a throwaway name. 260 passed,
 - **The dark theme is gone.** On the researcher's screen the dialog's buttons were black text on black. The
   installer now uses the system colours (dark text on the light system background), which is also what a
   Windows installer is expected to look like. Warnings are dark orange (176, 80, 0), readable on light.
+
+### Correction: log in the install folder, a window that answers, no disk-space stop (2026-09-25, ticket 24)
+
+The researcher ran the new installer for real (window, bundle with models, `D:\` -> `D:\CamTrapMeasure`).
+What came of it:
+
+- **The log goes inside the install folder.** "Instead of saving the logfile in D: you should write the log
+  inside the camtrap measure folder." The candidates are now `R\CamTrapMeasure-setup.log`, then the
+  Desktop, then TEMP; the `D:\` root and `C:\CamTrapMeasure-log` are gone. They are built after the folder
+  question, so the log always names the chosen folder. An install from before ticket 24 has no R: its log
+  goes in its app folder, and the installer adds the file name to that clone's `.git\info\exclude` (and
+  `.gitignore` has it too), because the launcher stops updating a clone that `git status` calls changed.
+  The folder is only made when missing: `New-Item -ItemType Directory D:\` fails with "The path is not of a
+  legal form" (seen on the same run).
+- **The window answers during long steps.** The 6.5 GB model copy (`& robocopy`, minutes) and, without Git,
+  the MinGit download and unzip ran on the window's thread, so the details pane could not be scrolled. They
+  now go through `Run`, which pumps the window every 150 ms: robocopy directly (exit codes below 8 are
+  success), the Git download and unzip in a child PowerShell given `-EncodedCommand`, so no path needs
+  quoting on a command line.
+- **Buttons under the pane.** "Copy log" puts the whole pane on the clipboard and reads "Copied" for 1.5 s
+  (a WinForms Timer). "Open log folder" opens Explorer with the log selected, shown once the log exists. A
+  right-aligned "Cancel" asks "Stop the installer? You can run it again later; finished steps are kept."
+  (Yes/No, No is the default); Yes logs "STOPPED: cancelled by the user", kills the running child with its
+  children (`taskkill /T /F`, then `Stop-Process`), and exits 1. The title-bar X goes the same way
+  (FormClosing). After a failure and after success it reads "Close" and just closes. The researcher, after
+  a stopped run: "there should be a button to cancel or close this window". The main window is built by
+  `New-MainForm` now, like the folder dialog, so it can be made on its own, and it still gets `Show-Now`.
+- **No 20 GB stop.** The researcher: "remove the 20gb free space requirement. the app dont need 20 gb. it
+  need to save the model weight only". The real run showed why it was wrong: 26 GB free on D:, the
+  installer copied 6.5 GB of models into `R\data\weights`, then preflight said "19 GB free ... needs about
+  20 GB" and stopped, because the 20 GB counted those models again. The disk check now adds up only what is
+  still to come, per drive: the models unless `DATA_DIR\weights\manifest.json` is there (6.5 GB less
+  whatever part is already on disk), the CUDA build of PyTorch unless torch is installed (6 GB, measured:
+  `--extra inference` took this workstation's `.venv` from 0.2 to 5.7 GB; uv unpacks into `UV_CACHE_DIR`
+  and hard-links into `.venv`, so it counts once on one drive and on both when they differ), and 1 GB for
+  results. Short of that it is a warning, never a stop: "only 5 GB free on D:\ / Needs about 14 GB. Free up
+  9 GB there, or install on another drive." The folder dialog warns in amber below 14 GB (the same sum plus
+  0.3 GB for Python and the base environment). README, the bundle README and the on-site checklist say
+  about 14 GB.
+- **Only what a person must act on.** The researcher: "i dont need this unwanted message at all. make the
+  instruction simple as possible". The installer's `--no-prompt` preflight prints no FlagLabel line at all
+  (signing in happens in the app, after the install; "not signed in" landed under "What went wrong:"), and
+  no token line when `config.json` says `"weights_from": "bundle"`. A stored token that is rejected, with no
+  bundle, still fails; no token and no bundle is still the made-up-numbers warning. The terminal path that
+  asks for the token and the sign-in is unchanged.
+
+Evidence: 271 passed, 1 skipped. `install.ps1` parses and is ASCII only. The main window was built from the
+script's own functions (parsed out of install.ps1) and shown: the three buttons are there, Copy log put the
+pane text on the clipboard and read "Copied", then "Copy log" again 2 s later; Open log folder appeared once
+a log path was set; robocopy through `Run` returned 1 and copied; an encoded child PowerShell unzipped into
+a path with a space and an apostrophe (exit 0) and a failed download returned 1; Stop-Child ended a child and
+both its children; the close button with No kept the window running, with Yes closed it, logged the line
+and stopped the child; in the stopped phase it closed without asking. `camtrap-measure --preflight
+--no-prompt` on this workstation: "Disk space: 34 GB free on C:\", and with a bundled data folder no token
+and no FlagLabel line. **Not run:** the whole installer (the researcher has a half-finished install at
+`D:\CamTrapMeasure` and reruns it), and the Git download on a machine without Git.
