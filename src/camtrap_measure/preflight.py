@@ -7,6 +7,8 @@ launch is already set up.
 The logic lives here (not in the PowerShell installer) so it is testable without a Windows machine.
 """
 
+import importlib.util
+import math
 import os
 import re
 import shutil
@@ -22,7 +24,14 @@ from . import supabase_ro as sb
 from .inference import VRAM_FLOOR_GB
 
 MIN_DRIVER = 570  # the CUDA 12.8 wheels the lockfile pins need this NVIDIA driver or newer
-MIN_FREE_GB = 20  # weights ~7 GB + torch ~3 GB + environment, with room for the results database
+# What the install still has to write, per drive. There is no fixed total any more: the old 20 GB floor
+# counted the models even after the installer had copied them in, and stopped a machine that had room
+# (2026-09-25). Measured on the workstation (RTX 2060 SUPER, 2026-09-25):
+WEIGHTS_GB = 6.5  # the weights folder: 6 965 393 129 bytes in the bundle
+TORCH_GB = 6.0  # `--extra inference` grew .venv from 0.2 to 5.7 GB (torch alone 4.2 GB), rounded up for the
+#                 download. uv unpacks into UV_CACHE_DIR and hard-links into .venv on the same drive, so it
+#                 lands once there, and on both drives when they differ.
+RESULTS_GB = 1.0  # headroom for the results database and reference photos
 HOSTS = {  # host → what the app needs it for; reachability = a TCP connection to port 443 (no HTTP client outside the wrapper)
     "github.com": "app updates",
     "huggingface.co": "model weights",
@@ -81,21 +90,49 @@ def check_gpu() -> Result:
     return Result("GPU", True, detail)
 
 
+def _torch_installed() -> bool:
+    return importlib.util.find_spec("torch") is not None
+
+
+def _uv_cache() -> Path:
+    return Path(os.environ.get("UV_CACHE_DIR") or Path(os.environ.get("LOCALAPPDATA", Path.home())) / "uv" / "cache")
+
+
+def _weights_to_come() -> float:
+    """GB of models still to arrive: none once a manifest is there (the installer copies it last)."""
+    local = store.DATA_DIR / "weights"
+    if (local / "manifest.json").exists():
+        return 0.0
+    have = weights._dir_bytes(local) / 2**30 if local.exists() else 0.0
+    return max(0.0, WEIGHTS_GB - have)
+
+
 def check_disk() -> list[Result]:
-    """The data folder (weights, results) and the app folder (environment, torch) may sit on different drives."""
+    """Room for what is still to come, per drive; a warning at most, never a stop (the researcher, 2026-09-25)."""
     store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    needs: dict[str, tuple[Path, float]] = {}
+
+    def add(path: Path, gb: float) -> None:
+        anchor = path.anchor or str(path)
+        first, sofar = needs.get(anchor, (path, 0.0))
+        needs[anchor] = (first, sofar + gb)
+
+    add(store.DATA_DIR, _weights_to_come() + RESULTS_GB)
+    if not _torch_installed():
+        venv, cache = Path(sys.prefix), _uv_cache()
+        add(venv, TORCH_GB)
+        if cache.anchor != venv.anchor:
+            add(cache, TORCH_GB)
     out = []
-    for what, path in {"data folder": store.DATA_DIR, "app folder": Path(__file__).resolve().parent}.items():
-        if any(Path(r.detail.split(" holding ")[-1]).anchor == path.anchor for r in out):
-            continue  # same drive, already reported
-        free = shutil.disk_usage(path).free // 2**30
-        detail = f"{free} GB free on the drive holding {path}"
-        if free < MIN_FREE_GB:
-            out.append(Result(f"Disk space ({what})", False, detail,
-                              f"The app needs about {MIN_FREE_GB} GB for its models and environment. Free up space on this "
-                              f"drive (for the data folder, CAMTRAP_DATA_DIR can point at a bigger one) and run the installer again."))
+    for anchor, (path, gb) in needs.items():
+        free = shutil.disk_usage(path if path.exists() else anchor).free // 2**30
+        need = math.ceil(gb)
+        if free < need:
+            out.append(Result("Disk space", False, f"only {free} GB free on {anchor}",
+                              f"Needs about {need} GB. Free up {need - free} GB there, or install on another drive.",
+                              hard=False))
         else:
-            out.append(Result(f"Disk space ({what})", True, detail))
+            out.append(Result("Disk space", True, f"{free} GB free on {anchor}"))
     return out
 
 
@@ -209,16 +246,17 @@ def run(ask=input, say=print, prompt: bool | None = None) -> int:
 
     `prompt=False` asks nothing: the installer's window has no console to ask through, and a bare
     `input()` there raises EOFError before a single check is read (seen 2026-08-23). What is already
-    stored is checked instead, and what is missing becomes a warning naming where to put it - never a
-    hard failure, because the window itself takes the sign-in and the token can be dropped into
-    config.json afterwards. Left at None it asks when there is a terminal to ask through.
+    stored is checked instead: a missing token (with no bundled models) is a warning, never a hard
+    failure, and the sign-in is left to the app window. Left at None it asks when there is a terminal.
     """
     if prompt is None:
         prompt = bool(getattr(sys.stdin, "isatty", lambda: False)())
     results = [r for r in (check_gpu(), *check_disk(), *check_network(), check_window(), check_engine()) if r]
     say("")
     if not prompt:
-        results += [_stored_token(), _stored_session()]
+        # Only what a person must act on (the researcher, 2026-09-25): signing in to FlagLabel happens in the
+        # app after the install, and bundled models need no token, so neither gets a line here.
+        results += [r for r in (_stored_token(),) if r]
         return _report(results, say)
     for _ in range(ATTEMPTS):
         token = ask("Hugging Face read token for the model weights (Enter to skip for now): ").strip()
@@ -249,24 +287,16 @@ def run(ask=input, say=print, prompt: bool | None = None) -> int:
     return _report(results, say)
 
 
-def _stored_token() -> Result:
-    """What the weights loader will find, when nobody can be asked for a token."""
+def _stored_token() -> Result | None:
+    """What the weights loader will find, when nobody can be asked for a token. None with bundled models."""
     token = os.environ.get("HF_TOKEN") or store.config().get("hf_token")
+    if not token and store.config().get("weights_from") == "bundle":
+        return None
     if not token:
         return Result("Model weights access", False, "no token stored yet",
                       "The app will start with made-up numbers until hf_token is set in "
                       f"{store.DATA_DIR / 'config.json'} (ask the researcher for the token).", hard=False)
     return check_token(token)
-
-
-def _stored_session() -> Result:
-    """Signing in is the window's job now (ticket 14); this only says where this computer stands."""
-    session = store.session()
-    if session:
-        return Result("FlagLabel login", True, f"signed in as {session['email']}")
-    return Result("FlagLabel login", False, "not signed in on this computer yet",
-                  "Sign in with your FlagLabel email in the app window when it opens - it emails you a "
-                  "one-time code, there is no password.", hard=False)
 
 
 def _report(results: list[Result], say) -> int:

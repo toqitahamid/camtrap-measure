@@ -27,7 +27,7 @@ download and asks for two things:
 
 Every failed check prints what it found and what to do, in plain words: GPU driver missing or
 older than 570 (install/update from nvidia.com/drivers — a warning, the app still installs and
-runs on the CPU), less than 20 GB free, a host that the network or firewall blocks
+runs on the CPU), too little free space for what is still to install (a warning), a host that the network or firewall blocks
 (`github.com` for updates, `huggingface.co` for weights, the FlagLabel cloud for sync — a
 warning), WebView2 runtime missing, a rejected token, an unknown email or a wrong code, and finally the
 engine's own health check. Fix, run the same line again.
@@ -42,7 +42,7 @@ window cannot be drawn.
 
 Requirements: Windows 10/11, an NVIDIA GPU (8 GB recommended; less runs with a warning, none
 runs on the CPU slowly) with its driver already installed (driver 570 or newer — the one thing
-that does need IT), ~20 GB free, the WebView2 runtime (built into Windows 11; the checks name
+that does need IT), about 14 GB free on the install drive, the WebView2 runtime (built into Windows 11; the checks name
 the download if it is missing). A Git or uv already on the PATH is used as is.
 `CAMTRAP_INSTALL_DIR` overrides the install folder.
 
