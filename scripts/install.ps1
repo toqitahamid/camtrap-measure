@@ -345,7 +345,7 @@ if (-not $Console) {
     $Form.Controls.Add($sub)
 
     $StepLabel = New-Object System.Windows.Forms.Label
-    $StepLabel.Text = "Starting…"
+    $StepLabel.Text = "Starting..."
     $StepLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $StepLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#E8EAED")
     $StepLabel.SetBounds(26, 86, 600, 22)
@@ -610,7 +610,7 @@ Step "Checking the tools (nothing here needs an administrator)"
 AddPath (Join-Path $MinGitDir "cmd")
 AddPath $UvBin
 if (Get-Command git -ErrorAction SilentlyContinue) { Detail "Git is installed." } else {
-    Detail "Getting a portable Git into $MinGitDir (40 MB)…"
+    Detail "Getting a portable Git into $MinGitDir (40 MB)..."
     $zip = Join-Path $env:TEMP "MinGit.zip"
     try { Invoke-WebRequest -Uri $MinGitUrl -OutFile $zip } catch {
         Fail "Could not download Git from $MinGitUrl ($($_.Exception.Message)). Check the internet connection (github.com must be reachable), then run this again."
@@ -623,7 +623,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) { Detail "Git is installed." 
     }
 }
 if (Get-Command uv -ErrorAction SilentlyContinue) { Detail "uv is installed." } else {
-    Detail "Installing uv into $UvBin…"
+    Detail "Installing uv into $UvBin..."
     if ((Run "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://astral.sh/uv/install.ps1 | iex")) -ne 0) {
         Fail "uv did not install. Check the internet connection (astral.sh must be reachable), then run this again."
     }
