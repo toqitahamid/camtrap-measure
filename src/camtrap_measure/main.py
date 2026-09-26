@@ -53,13 +53,30 @@ def shutdown(exit_process=os._exit) -> None:
     exit_process(0)
 
 
-def _wear_icon() -> None:
-    """Runs once the GUI is up (pywebview gives it a thread): the window is Python's until this lands."""
+def say(msg: str) -> None:
+    """A line for whoever reads the logs: stderr, and the launcher's log when the launcher names it.
+
+    The launcher sends stderr to logs\\app.err and only copies that into logs\\launcher.log when the app
+    dies while starting, so a cosmetic failure in a running app would sit where nobody looks.
+    """
+    print(msg, file=sys.stderr, flush=True)
+    log = os.environ.get("CAMTRAP_LAUNCHER_LOG")
+    if not log:
+        return
+    try:
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')}  app: {msg}\n")
+    except OSError as e:
+        print(f"could not write to {log}: {e}", file=sys.stderr, flush=True)
+
+
+def _wear_icon(window) -> None:
+    """Runs on its own thread once the GUI loop starts (pywebview gives it one)."""
     from . import win_icon
 
-    why = win_icon.apply()
+    why = win_icon.apply(window)
     if why:  # cosmetic, so it never stops the app - but it is said out loud, into the launcher's log
-        print(f"window icon not set: {why}", file=sys.stderr, flush=True)
+        say(f"window icon not set: {why}")
 
 
 def main() -> None:
@@ -95,8 +112,9 @@ def main() -> None:
 
     why = win_icon.identify()  # before the window exists: Windows reads this when it makes the taskbar button
     if why:
-        print(f"application identity not set: {why}", file=sys.stderr, flush=True)
+        say(f"application identity not set: {why}")
     webview.settings["ALLOW_DOWNLOADS"] = True  # the CSV export is a plain download link
     dialogs.window = webview.create_window(win_icon.TITLE, url, width=1200, height=800)  # Browse… opens its dialog
-    webview.start(_wear_icon)
+    # The icon given here is what the form is built with, before it is shown; _wear_icon sets it again.
+    webview.start(_wear_icon, (dialogs.window,), icon=str(win_icon.ICON))
     shutdown()  # webview.start() returns once the window is closed

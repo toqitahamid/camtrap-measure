@@ -108,10 +108,67 @@ def test_the_shortcut_and_the_window_use_the_same_icon():
     assert rel in text(SCRIPTS / "install.ps1") and rel in text(SCRIPTS / "launcher.ps1")
 
 
+class FakeShown:
+    def __init__(self, shown: bool):
+        self.shown, self.waited = shown, None
+
+    def wait(self, timeout):
+        self.waited = timeout
+        return self.shown
+
+
+class FakeForm:
+    """Stands in for pywebview's WinForms BrowserForm: an `Icon` property set on its own thread."""
+
+    def __init__(self):
+        self.Icon = "python.exe's icon"
+        self.on_its_thread = False
+
+
+class FakeWindow:
+    def __init__(self, shown=True, native=None):
+        self.events = type("Events", (), {})()
+        self.events.shown = FakeShown(shown)
+        self.native = native
+
+
+def run_on_form_thread(form, fn):
+    form.on_its_thread = True
+    fn()
+
+
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="the icon is set on Windows only")
+
+
+@windows_only
+def test_the_icon_becomes_the_forms_own_property_on_its_gui_thread():
+    """WinForms re-sends its `Icon` property to the window; an icon sent from outside was overwritten
+    by the form's constructor and the taskbar showed Python's (2026-09-25)."""
+    form = FakeForm()
+    why = win_icon.apply(FakeWindow(native=form), load_icon=lambda p: f"icon from {p.name}",
+                         on_gui_thread=run_on_form_thread)
+    assert why is None
+    assert form.Icon == "icon from camtrap-measure.ico" and form.on_its_thread
+
+
+@windows_only
+def test_the_icon_waits_for_the_window_to_be_shown():
+    window = FakeWindow(shown=False, native=FakeForm())
+    why = win_icon.apply(window, wait=0.05, load_icon=lambda p: "ours", on_gui_thread=run_on_form_thread)
+    assert window.events.shown.waited == 0.05
+    assert why == "the window was not shown within 0.05s" and window.native.Icon == "python.exe's icon"
+
+
 def test_the_window_says_why_when_it_cannot_wear_its_icon():
     """Cosmetic, so it must not raise — but it must never fail silently either."""
-    assert win_icon.apply(title="no window is called this", wait=0.05) is not None
-    assert win_icon.apply(ico=ROOT / "nothing.ico", wait=0.05).startswith(("no icon file", "not Windows"))
+    def broken(p):
+        raise OSError("the file is locked")
+
+    assert win_icon.apply(FakeWindow(native=FakeForm()), ico=ROOT / "nothing.ico").startswith(
+        ("no icon file", "not Windows"))
+    assert win_icon.apply(FakeWindow(native=None)) is not None
+    why = win_icon.apply(FakeWindow(native=FakeForm()), load_icon=broken, on_gui_thread=run_on_form_thread)
+    assert why in ("OSError: the file is locked", "not Windows")
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the taskbar identity is a Windows call")
@@ -119,10 +176,30 @@ def test_the_process_names_itself_to_windows():
     assert win_icon.identify() is None
 
 
-def test_main_hangs_the_icon_once_the_window_exists():
+def test_main_builds_the_window_with_its_icon_and_sets_it_again_once_shown():
     main = text(ROOT / "src" / "camtrap_measure" / "main.py")
     assert "win_icon.identify()" in main  # before the window: Windows reads it when making the taskbar button
-    assert "webview.start(_wear_icon)" in main
+    assert "webview.start(_wear_icon, (dialogs.window,), icon=str(win_icon.ICON))" in main
+
+
+def test_the_shortcuts_carry_the_same_taskbar_identity_as_the_process():
+    """A pin of the running window then starts the app through the shortcut, not a bare pythonw.exe."""
+    install = text(SCRIPTS / "install.ps1")
+    assert f'$AppId = "{win_icon.APP_ID}"' in install
+    assert "[CamTrap.AppId]::Stamp($path, $AppId)" in install
+    assert "9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3" in install  # System.AppUserModel.ID, pid 5
+
+
+def test_a_cosmetic_failure_reaches_the_launchers_log(tmp_path, monkeypatch, capsys):
+    """stderr lands in app.err, which the launcher only reads when the app dies while starting."""
+    from camtrap_measure import main
+
+    log = tmp_path / "launcher.log"
+    monkeypatch.setenv("CAMTRAP_LAUNCHER_LOG", str(log))
+    main.say("window icon not set: because")
+    assert log.read_text(encoding="utf-8").endswith("  app: window icon not set: because\n")
+    assert "window icon not set: because" in capsys.readouterr().err
+    assert "$env:CAMTRAP_LAUNCHER_LOG = $Log" in text(SCRIPTS / "launcher.ps1")
 
 
 def test_the_installer_never_asks_through_a_console_it_does_not_have():

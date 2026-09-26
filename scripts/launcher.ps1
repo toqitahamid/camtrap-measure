@@ -341,6 +341,9 @@ if (-not (Test-Path $Exe)) {
 }
 # The generated entry point re-runs itself as pythonw, so the window belongs to a CHILD process and the
 # handle on the one started here stays empty. The window is found by its title instead.
+# The app's stderr goes to app.err, which is only copied here if it dies while starting; a problem it hits
+# later (its icon, say) it writes straight into this log, which it finds through this variable.
+$env:CAMTRAP_LAUNCHER_LOG = $Log
 $app = Start-Process -FilePath $Exe -WorkingDirectory $Dir -PassThru `
                      -RedirectStandardOutput (Join-Path $LogDir "app.out") `
                      -RedirectStandardError (Join-Path $LogDir "app.err")

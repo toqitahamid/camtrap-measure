@@ -780,6 +780,83 @@ function Ask-Token {
     return $typed
 }
 
+# The app names its process "SIU.CamTrapMeasure" to the taskbar (win_icon.py). A shortcut with the same
+# name is how Windows ties the running window to the app: a pin then starts the app through this shortcut,
+# with its icon, instead of pinning a bare pythonw.exe. WScript.Shell cannot set that name, so this does.
+$AppId = "SIU.CamTrapMeasure"
+$AppIdSource = @'
+using System;
+using System.Runtime.InteropServices;
+namespace CamTrap {
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct PropKey { public Guid fmtid; public uint pid; }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct PropVariant {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr p;
+        [FieldOffset(16)] public IntPtr p2;
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore {
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int GetAt(uint index, out PropKey key);
+        [PreserveSig] int GetValue(ref PropKey key, out PropVariant value);
+        [PreserveSig] int SetValue(ref PropKey key, ref PropVariant value);
+        [PreserveSig] int Commit();
+    }
+
+    public static class AppId {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+        static extern void SHGetPropertyStoreFromParsingName(string path, IntPtr bindCtx, int flags,
+                                                             ref Guid iid, out IPropertyStore store);
+        [DllImport("ole32.dll")]
+        static extern int PropVariantClear(ref PropVariant value);
+
+        static PropKey Key() {  // System.AppUserModel.ID
+            PropKey k; k.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"); k.pid = 5; return k;
+        }
+
+        static IPropertyStore Open(string path, int flags) {
+            Guid iid = typeof(IPropertyStore).GUID;
+            IPropertyStore store;
+            SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, flags, ref iid, out store);
+            return store;
+        }
+
+        public static void Stamp(string path, string id) {
+            IPropertyStore store = Open(path, 2);  // GPS_READWRITE
+            PropKey key = Key();
+            PropVariant v = new PropVariant();
+            v.vt = 31;  // VT_LPWSTR
+            v.p = Marshal.StringToCoTaskMemUni(id);
+            try {
+                Marshal.ThrowExceptionForHR(store.SetValue(ref key, ref v));
+                Marshal.ThrowExceptionForHR(store.Commit());
+            } finally {
+                Marshal.FreeCoTaskMem(v.p);
+                Marshal.ReleaseComObject(store);
+            }
+        }
+
+        public static string Read(string path) {
+            IPropertyStore store = Open(path, 0);  // GPS_DEFAULT
+            PropKey key = Key();
+            PropVariant v;
+            try {
+                Marshal.ThrowExceptionForHR(store.GetValue(ref key, out v));
+                string id = v.vt == 31 ? Marshal.PtrToStringUni(v.p) : null;
+                PropVariantClear(ref v);
+                return id;
+            } finally {
+                Marshal.ReleaseComObject(store);
+            }
+        }
+    }
+}
+'@
+
 function Shortcut($path, $target, $arguments, $description) {
     $s = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
     $s.TargetPath = $target
@@ -788,6 +865,15 @@ function Shortcut($path, $target, $arguments, $description) {
     $s.Description = $description
     if (Test-Path $Ico) { $s.IconLocation = "$Ico,0" }
     $s.Save()
+    # Cosmetic, so a failure here never stops the install; it is written down instead.
+    try {
+        if (-not ("CamTrap.AppId" -as [type])) { Add-Type -TypeDefinition $AppIdSource }
+        [CamTrap.AppId]::Stamp($path, $AppId)
+        $got = [CamTrap.AppId]::Read($path)
+        if ($got -ne $AppId) { throw "it reads back as '$got'" }
+    } catch {
+        Detail "Note: the shortcut works, but a pinned app may show the Python icon ($($_.Exception.Message))."
+    }
 }
 
 # --- 1. tools ---------------------------------------------------------------------------------------

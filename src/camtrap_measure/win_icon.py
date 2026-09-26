@@ -1,26 +1,30 @@
 """The app's own icon on its window, its taskbar button and Alt-Tab.
 
 A window opened by pywebview wears the icon of the executable that opened it, which is a generic Python
-one — the shortcut can carry the app's icon, but the running window then looks like something else. So
-the icon is hung on the window itself once it exists, and the process is given an explicit application
-identity first, which is what Windows groups and pins taskbar buttons by.
+one. The shortcut can carry the app's icon, but the running window then looks like something else.
+
+pywebview's WinForms form sets its `Icon` property in its constructor: from `webview.start(icon=...)` when
+given, else from python.exe. WinForms re-sends that property to the window whenever it needs to, so the
+property itself must be ours. An icon sent to the window from outside (WM_SETICON by title, the first
+attempt) landed as soon as the window existed, and the constructor then put Python's back a moment later
+(seen 2026-09-25: the taskbar showed the Python logo and nothing was logged). So `main` passes the icon to
+`webview.start`, and `apply` sets the form's own property again once the window is shown, on its GUI
+thread: that also covers a pywebview that ignores the argument.
+
+The process is given an explicit application identity first, which is what Windows groups and pins taskbar
+buttons by; the installer stamps the same identity on its shortcuts.
 
 Both are cosmetic and best-effort: they must never stop the app starting. Neither swallows its failure
-either — each returns the reason in plain words, and `main` writes it to stderr, which the launcher folds
-into logs\\launcher.log.
+either: each returns the reason in plain words, and `main` writes it to the launcher's log.
 """
 
 import ctypes
 import sys
-import time
 from pathlib import Path
 
 ICON = Path(__file__).parent / "assets" / "camtrap-measure.ico"
-TITLE = "CamTrap Measure"  # the window title main.py opens with; FindWindowW matches on it
-APP_ID = "SIU.CamTrapMeasure"  # taskbar identity: same string on the shortcut would let a pin group with it
-
-WM_SETICON, ICON_SMALL, ICON_BIG = 0x0080, 0, 1
-IMAGE_ICON, LR_LOADFROMFILE = 1, 0x0010
+TITLE = "CamTrap Measure"  # the window title main.py opens with; the launcher finds the window by it
+APP_ID = "SIU.CamTrapMeasure"  # taskbar identity: install.ps1 puts the same string on its shortcuts
 
 
 def identify(app_id: str = APP_ID) -> str | None:
@@ -34,38 +38,43 @@ def identify(app_id: str = APP_ID) -> str | None:
     return None
 
 
-def apply(title: str = TITLE, ico: Path = ICON, wait: float = 10.0) -> str | None:
-    """Hang `ico` on the window titled `title`, waiting up to `wait` seconds for it to appear.
+def _load_icon(ico: Path):
+    """The .ico as a .NET System.Drawing.Icon (pythonnet is loaded by pywebview's WinForms backend)."""
+    from System.Drawing import Icon
 
-    Returns None when both sizes are set, otherwise the reason in plain words.
+    return Icon(str(ico))
+
+
+def _on_gui_thread(form, fn) -> None:
+    """Run `fn` on the thread that owns `form`: WinForms properties may only be set from there."""
+    from System import Action
+
+    form.Invoke(Action(fn))
+
+
+def apply(window, ico: Path = ICON, wait: float = 60.0, load_icon=_load_icon,
+          on_gui_thread=_on_gui_thread) -> str | None:
+    """Make `ico` the icon of pywebview `window`'s own form, once it is shown (up to `wait` seconds).
+
+    Uses the form itself, not a window found by title, so a second copy of the app cannot be mistaken
+    for this one. Returns None when the icon is set, otherwise the reason in plain words.
     """
     if sys.platform != "win32":
         return "not Windows"
     if not ico.is_file():
         return f"no icon file at {ico}"
+    if not window.events.shown.wait(wait):
+        return f"the window was not shown within {wait:g}s"
+    form = getattr(window, "native", None)
+    if form is None or not hasattr(form, "Icon"):
+        return f"the window has no WinForms form to set an icon on (got {type(form).__name__})"
+    try:
+        icon = load_icon(ico)
 
-    user32 = ctypes.windll.user32
-    user32.FindWindowW.restype = ctypes.c_void_p
-    user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
-    user32.LoadImageW.restype = ctypes.c_void_p
-    user32.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_int,
-                                  ctypes.c_int, ctypes.c_uint]
-    user32.SendMessageW.restype = ctypes.c_void_p
-    user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
-    # Handles are pointers: left as the default c_int they would be cut in half on 64-bit Windows.
+        def put() -> None:
+            form.Icon = icon
 
-    deadline = time.monotonic() + wait
-    while True:
-        hwnd = user32.FindWindowW(None, title)
-        if hwnd or time.monotonic() >= deadline:
-            break
-        time.sleep(0.1)
-    if not hwnd:
-        return f"no window titled {title!r} appeared within {wait:g}s"
-
-    for which, px in ((ICON_BIG, 32), (ICON_SMALL, 16)):  # the title bar takes 16, Alt-Tab and the taskbar 32
-        handle = user32.LoadImageW(None, str(ico), IMAGE_ICON, px, px, LR_LOADFROMFILE)
-        if not handle:
-            return f"Windows could not read {ico}"
-        user32.SendMessageW(hwnd, WM_SETICON, which, handle)
+        on_gui_thread(form, put)
+    except Exception as e:  # a .NET exception arrives as a Python one through pythonnet
+        return f"{type(e).__name__}: {e}"
     return None
