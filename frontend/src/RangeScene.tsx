@@ -5,8 +5,11 @@
 
    A plain 2D canvas and a pinhole projection written here, no 3D library. The camera sways and dollies
    a little on a 24 s loop; the deer's loop has the same period, so the whole scene repeats seamlessly.
-   It draws at most 30 frames a second, stops while the window is hidden, and draws one still frame
-   when the system asks for reduced motion. Decoration only: hidden from screen readers.
+   It draws at most 30 frames a second and stops while the window is hidden. When the system asks for
+   reduced motion it still moves, gently: the loop runs at half speed and the camera barely sways. It
+   does not stop, because on many university PCs Windows' "Animation effects" is off by policy, not by
+   the user's choice, and WebView2 reports that as reduced motion. Decoration only: hidden from screen
+   readers.
 
    The horizon sits a fixed gap under the element passed as `below` (the headline and paragraph), so the
    text always reads on the plain sky and the ground fills the rest of the panel at any window size. */
@@ -16,7 +19,9 @@ import { drawDeer } from './deer'
 
 const LOOP_S = 24 // one full loop of the scene, seconds
 const STRIDES = 32 // walking strides per loop (1.33 a second); a whole number, so the loop stays seamless
-const STILL_T = 14 // the moment drawn when motion is reduced: deer mid-field, about 16 m away
+const START_T = 14 // where the loop starts: deer mid-field, about 16 m away
+const GENTLE_SPEED = 0.5 // under reduced motion the loop runs at this fraction of its speed
+const GENTLE_SWAY = 0.25 // and the camera's sway, dolly and pan are cut to this fraction
 const FRAME_MS = 1000 / 30
 const GAP_PX = 96 // from the bottom of `below` to the horizon
 
@@ -33,10 +38,14 @@ const MONO = "ui-monospace, 'Cascadia Mono', Consolas, monospace"
 
 type Pt = { x: number; y: number; z: number } // camera space: x right, y up, z forward (metres)
 
-/** Where the camera is at time t: a slow sideways sway, a small dolly, a slight pan. */
-function cameraAt(t: number) {
+/** Where the camera is at time t: a slow sideways sway, a small dolly, a slight pan, each `amp` of full. */
+function cameraAt(t: number, amp: number) {
   const w = (2 * Math.PI * t) / LOOP_S
-  return { x: 0.9 * Math.sin(w), z: -0.8 + 0.6 * Math.sin(2 * w + 1), yaw: 0.07 * Math.sin(w + 0.6) }
+  return {
+    x: amp * 0.9 * Math.sin(w),
+    z: -0.8 + amp * 0.6 * Math.sin(2 * w + 1),
+    yaw: amp * 0.07 * Math.sin(w + 0.6),
+  }
 }
 
 /** Where the deer is at time t, on the ground (x across, z away from the camera trap at the origin).
@@ -64,7 +73,7 @@ export default function RangeScene({ below }: { below?: RefObject<HTMLElement | 
     let w = 0
     let h = 0
     let hy = 0 // horizon, px from the top
-    let t = STILL_T
+    let t = START_T
     let last = 0
     let raf = 0
     let shown = { r: 0, at: -1 } // the readout changes a few times a second, like an instrument
@@ -87,7 +96,8 @@ export default function RangeScene({ below }: { below?: RefObject<HTMLElement | 
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick)
       if (now - last < FRAME_MS) return
-      t = (t + Math.min(now - last, 100) / 1000) % LOOP_S // capped, so a long pause does not jump
+      const speed = reduce.matches ? GENTLE_SPEED : 1
+      t = (t + (speed * Math.min(now - last, 100)) / 1000) % LOOP_S // capped, so a long pause does not jump
       last = now
       frame()
     }
@@ -95,8 +105,7 @@ export default function RangeScene({ below }: { below?: RefObject<HTMLElement | 
     const start = () => {
       cancelAnimationFrame(raf)
       raf = 0
-      if (reduce.matches || document.hidden) {
-        if (reduce.matches) t = STILL_T
+      if (document.hidden) {
         shown = { r: 0, at: -1 }
         frame()
         return
@@ -127,7 +136,7 @@ export default function RangeScene({ below }: { below?: RefObject<HTMLElement | 
 }
 
 /** One frame. Pure drawing: everything it shows follows from t, the canvas size and the horizon.
-    `still` (reduced motion) draws the deer standing instead of mid-stride. */
+    `gentle` (reduced motion) cuts the camera's movement to a quarter. */
 function draw(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -135,12 +144,12 @@ function draw(
   hy: number,
   t: number,
   shown: { r: number; at: number },
-  still: boolean,
+  gentle: boolean,
 ) {
   if (w === 0 || h === 0) return
   const f = ((h - hy) * NEAR_M) / EYE_M // focal length, px: the NEAR_M ground line sits on the bottom edge
   const cx = w * 0.56 // vanishing point a little right of centre, away from the text column
-  const cam = cameraAt(t)
+  const cam = cameraAt(t, gentle ? GENTLE_SWAY : 1)
   const cos = Math.cos(cam.yaw)
   const sin = Math.sin(cam.yaw)
 
@@ -270,9 +279,7 @@ function draw(
     ctx.stroke()
 
     // One stride covers the ground the deer crosses in 1/STRIDES of the loop, so planted hooves hold still.
-    const gait = still
-      ? null
-      : { phase: ((t * STRIDES) / LOOP_S) % 1, stride: (Math.abs(deer.across) * LOOP_S) / STRIDES }
+    const gait = { phase: ((t * STRIDES) / LOOP_S) % 1, stride: (Math.abs(deer.across) * LOOP_S) / STRIDES }
     drawDeer(ctx, fs.x, fs.y, scale, deer.heading, gait)
 
     // reticle: the app's corner brackets around the animal

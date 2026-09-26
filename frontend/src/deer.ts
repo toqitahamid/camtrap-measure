@@ -3,9 +3,10 @@
    Everything is built in metres in the deer's own frame: x forward (the deer faces +x), y up, the hooves on
    y = 0 and the body centred on x = 0. The caller places and scales it; `drawDeer` flips it to face left.
 
-   The silhouette is one flat grey shape (torso, neck and head, tail, the near legs, near ear and antler)
-   with a thin dark rim round the outside, and a darker copy of the far legs, ear and antler behind it for
-   depth. Legs are jointed chains (elbow, knee, fetlock for the forelegs; stifle, hock, fetlock for the hind
+   The coat is one shape (torso, neck and head, tail, the near legs and near ear) in a tawny summer coat,
+   darker along the back, with a thin dark rim round the outside, and the far legs and ear behind it in the
+   same hues in shade. The white markings (belly, inner legs, throat, chin, eye ring, tail) are painted
+   inside the coat, clipped to it; the antlers are bone, drawn in their own pass. Legs are jointed chains (elbow, knee, fetlock for the forelegs; stifle, hock, fetlock for the hind
    legs) posed by two-bone inverse kinematics from where each hoof is.
 
    The walk is the four-beat lateral sequence a deer uses: near hind, near fore, far hind, far fore, a
@@ -19,12 +20,18 @@ type V = { x: number; y: number }
     `stride` the distance, metres, the body moves over the ground in one stride. */
 export type Gait = { phase: number; stride: number }
 
-const NEAR = '#aeb5bd' // the scene's deer grey
-const FAR = '#7e868e' // the far legs, ear and antler: the same grey in shade
-const HOOF = '#5d646b'
-const WHITE = '#e2e5e8' // the tail's white underside
+// A white-tailed deer in its summer coat, a little muted so it sits in the dark scene.
+const COAT_TOP = '#7a4828' // head and top of the neck: the darkest brown
+const SADDLE = '#8a5530' // along the back
+const FLANK = '#b47a48' // the warm tawny flank
+const SHANK = '#a06c42' // the lower legs, a little duller
+const FAR_COAT = '#5e3a22' // the far legs and ear: the coat in shade
+const WHITE = '#ece6da' // belly, throat, chin, eye ring, the tail's underside: a warm off-white
+const ANTLER = '#d9ccae' // near antler: bone
+const FAR_ANTLER = '#9d9178' // far antler: bone in shade
+const HOOF = '#2a2420' // near-black brown
+const NOSE = '#0d0b0a' // the nose and the eye
 const RIM = 'rgba(8, 10, 12, 0.7)'
-const MARK = 'rgba(11, 13, 15, 0.75)' // eye and nose
 
 const SHIFT = -0.15 // moves the body back so the rack and the tail sit evenly inside the reticle
 const STANCE = 0.62 // fraction of a stride each hoof is on the ground (a walk: more than half)
@@ -82,40 +89,103 @@ export function drawDeer(
   const farHooves: Path2D[] = []
   const near: Path2D[] = []
   const nearHooves: Path2D[] = []
+  const nearLegs: { limb: Path2D; inner: V }[] = []
   for (const leg of LEGS) {
-    const { limb, hoof } = legShape(leg, gait, rise)
+    const { limb, hoof, inner } = legShape(leg, gait, rise)
     ;(leg.near ? near : far).push(limb)
     ;(leg.near ? nearHooves : farHooves).push(hoof)
+    if (leg.near) nearLegs.push({ limb, inner })
   }
-  far.push(ear(head, 0.025, 0.012), ...antler(head, -0.035, 0.014, FAR_TINES))
+  far.push(ear(head, 0.025, 0.012))
 
   const tl = tail(gait, rise)
-  near.push(body(head), tl.shape, ear(head, 0, 0), ...antler(head, 0, 0, TINES))
+  const torso = body(head)
+  near.push(torso, tl.shape, ear(head, 0, 0))
 
+  // coat: dark along the back and over the head, warm on the flank, a little duller down the legs
+  const coat = ctx.createLinearGradient(0, 1.1, 0, 0.1)
+  coat.addColorStop(0, COAT_TOP)
+  coat.addColorStop(0.12, SADDLE)
+  coat.addColorStop(0.48, FLANK)
+  coat.addColorStop(1, SHANK)
+
+  // back to front: far legs and ear, far antler, the body, its markings, the near antler
   const rim = 2.2 / scale // px -> metres
-  silhouette(ctx, far, farHooves, FAR, rim)
-  silhouette(ctx, near, nearHooves, NEAR, rim)
+  silhouette(ctx, far, farHooves, FAR_COAT, rim)
+  silhouette(ctx, antler(head, -0.035, 0.014, FAR_TINES), [], FAR_ANTLER, rim)
+  silhouette(ctx, near, nearHooves, coat, rim)
+  markings(ctx, head, torso, nearLegs)
 
   // the white underside of the tail, along its back edge
   ctx.fillStyle = WHITE
   ctx.fill(tl.white)
 
-  // an eye and a dark nose: only visible when the deer is close
+  silhouette(ctx, antler(head, 0, 0, TINES), [], ANTLER, rim)
+
+  // the eye in its white ring, and the black nose: only visible when the deer is close
   if (scale > 45) {
-    ctx.fillStyle = MARK
     const eye = head(0.83, 1.2)
     const nose = head(0.985, 1.1)
+    ctx.strokeStyle = WHITE
+    ctx.lineWidth = 0.009
+    ctx.beginPath()
+    ctx.ellipse(eye.x, eye.y, 0.02, 0.016, 0, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.fillStyle = NOSE
     ctx.beginPath()
     ctx.ellipse(eye.x, eye.y, 0.014, 0.011, 0, 0, Math.PI * 2)
-    ctx.ellipse(nose.x, nose.y, 0.016, 0.014, 0, 0, Math.PI * 2)
+    ctx.ellipse(nose.x, nose.y, 0.018, 0.016, 0, 0, Math.PI * 2)
     ctx.fill()
   }
   ctx.restore()
 }
 
+/** The white of a white-tailed deer, each patch clipped to the shape it lies on so none spills past the
+    outline: the belly band along the underside, the inside of the near legs where they meet it, the throat
+    patch below the jaw, and the band under the chin behind the nose. */
+function markings(
+  ctx: CanvasRenderingContext2D,
+  head: (x: number, y: number) => V,
+  torso: Path2D,
+  legs: { limb: Path2D; inner: V }[],
+) {
+  ctx.save()
+  ctx.clip(torso)
+  patch(ctx, head(0.0, 0.455), 0.37, 0.12, 0.85) // belly, fading up the flank
+  patch(ctx, head(0.715, 1.07), 0.05, 0.036, 0.9) // throat patch
+  patch(ctx, head(0.955, 1.055), 0.04, 0.028, 0.85) // chin and the band round the muzzle
+  ctx.restore()
+  for (const { limb, inner } of legs) {
+    ctx.save()
+    ctx.clip(limb)
+    patch(ctx, inner, 0.028, 0.09, 0.4) // inner leg, subtle
+    ctx.restore()
+  }
+}
+
+/** A soft white oval centred on c, (rx, ry) metres, solid in the middle and fading out at its edge. */
+function patch(ctx: CanvasRenderingContext2D, c: V, rx: number, ry: number, alpha: number) {
+  ctx.save()
+  ctx.translate(c.x, c.y)
+  ctx.scale(rx, ry)
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
+  g.addColorStop(0, `rgba(236, 230, 218, ${alpha})`) // WHITE
+  g.addColorStop(0.55, `rgba(236, 230, 218, ${alpha * 0.9})`)
+  g.addColorStop(1, 'rgba(236, 230, 218, 0)')
+  ctx.fillStyle = g
+  ctx.fillRect(-1, -1, 2, 2)
+  ctx.restore()
+}
+
 /** Fill a group of shapes as one silhouette with a rim round its outside only: stroke every shape, then
     fill them all over the strokes, so the strokes survive only where they face out. */
-function silhouette(ctx: CanvasRenderingContext2D, shapes: Path2D[], hooves: Path2D[], fill: string, rim: number) {
+function silhouette(
+  ctx: CanvasRenderingContext2D,
+  shapes: Path2D[],
+  hooves: Path2D[],
+  fill: string | CanvasGradient,
+  rim: number,
+) {
   ctx.lineJoin = 'round'
   ctx.strokeStyle = RIM
   ctx.lineWidth = rim
@@ -347,7 +417,10 @@ function legShape(leg: Leg, gait: Gait | null, rise: number) {
   hoof.moveTo(h[0].x, h[0].y)
   for (const q of h.slice(1)) hoof.lineTo(q.x, q.y)
   hoof.closePath()
-  return { limb, hoof }
+  // where the white inside of the leg shows below the belly: behind the forearm, in front of the gaskin
+  const inner = leg.fore ? lerp(mid, joint, 0.5) : lerp(mid, joint, 0.3)
+  inner.x += leg.fore ? -0.025 : 0.035
+  return { limb, hoof, inner }
 }
 
 /** Two-bone reach from `a` toward `target`: the middle joint, and the end (the target, or as near as the
