@@ -1228,3 +1228,16 @@ while the animated page had moved on.
 - **The deer is a buck silhouette (2026-09-25, later).** `deer.ts`: one flat grey shape from bezier paths (deep chest, jointed legs posed by two-bone IK, ears, an 8-point forward-curving rack, a hanging tail with a white edge), a dark rim, far legs/ear/antler in shade, a soft ground shadow; a four-beat lateral walk, 32 strides per loop, stride = its speed across the view, so planted hooves hold still; head nod twice a stride; under reduced motion it stands square.
   Evidence: `npm run build`, `oxlint`, `tsc -b` clean; 286 passed, 1 skipped; real engine (empty scratch `CAMTRAP_DATA_DIR`, that process only) in headless Edge at 2000x1340 and 1280x800, 2x crops of the deer across the walk at 13 and 27 m, and the reduced-motion still.
 - **The deer is coloured, and reduced motion no longer stops the scene (2026-09-25, later).** The researcher: "the deer supposed to have color. why its white", and it stood still on their own PC. `deer.ts`: a tawny summer coat (vertical gradient `#7a4828` head, `#8a5530` saddle, `#b47a48` flank, `#a06c42` lower legs), far legs and ear in shade `#5e3a22`; warm white `#ece6da` belly band, inner legs, throat patch, chin/muzzle band, eye ring (close up only) and tail underside, each clipped to its shape; antlers in their own pass in bone `#d9ccae` / `#9d9178`; hooves `#2a2420`, black nose and eye. `RangeScene.tsx`: many university PCs have Windows "Animation effects" off by policy, which WebView2 reports as `prefers-reduced-motion`, so that mode now runs the loop at half speed with the camera's sway, dolly and pan cut to a quarter, instead of the still frame above; normal mode unchanged, still paused while hidden. Evidence: `npm run build`, `oxlint`, `tsc -b` clean; 289 passed, 1 skipped; real engine (empty scratch `CAMTRAP_DATA_DIR`, that process only) in headless Edge at 2000x1340 and 1280x800, 2x crops across the walk at 13 and 27 m, and a reduced-motion clip (15.4 to 13.1 m over 4.5 s, the deer walking).
+
+### The app's own icon on its taskbar button (2026-09-25)
+
+The taskbar showed the Python logo. Root cause: `win_icon.apply()` found the window by title the moment
+pywebview's WinForms `BrowserForm.__init__` created the handle and sent WM_SETICON; a few lines later the same
+constructor set `self.Icon` from python.exe (no `icon=` given to `webview.start`), replacing ours, and apply()
+had already reported success. Now `webview.start(..., icon=camtrap-measure.ico)` builds the form with our icon,
+and `apply(window)` sets `window.native.Icon` on the form's own thread once shown (no title search, so a second
+copy cannot be confused with this one). The installer stamps `System.AppUserModel.ID = SIU.CamTrapMeasure` on
+its shortcuts so a pinned button keeps the icon; existing shortcuts get it on an installer rerun. App-side
+icon/identity failures now reach logs\launcher.log through CAMTRAP_LAUNCHER_LOG. Evidence: a live dev run's
+taskbar button showed the amber reticle beside the installed app's Python logo; form.Icon handle == the
+window's big icon (Alt-Tab). 290 passed.
