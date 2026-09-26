@@ -1225,3 +1225,5 @@ Evidence: `npm run build` and `oxlint` clean; 286 passed, 1 skipped. Screenshots
 DevTools protocol at 2000x1340, 1620x900 and 1280x800, at two moments of the loop, and with reduced motion
 emulated: text legible over the scene at every size; with reduced motion the page shows the 16.5 m still
 while the animated page had moved on.
+- **The deer is a buck silhouette (2026-09-25, later).** `deer.ts`: one flat grey shape from bezier paths (deep chest, jointed legs posed by two-bone IK, ears, an 8-point forward-curving rack, a hanging tail with a white edge), a dark rim, far legs/ear/antler in shade, a soft ground shadow; a four-beat lateral walk, 32 strides per loop, stride = its speed across the view, so planted hooves hold still; head nod twice a stride; under reduced motion it stands square.
+  Evidence: `npm run build`, `oxlint`, `tsc -b` clean; 286 passed, 1 skipped; real engine (empty scratch `CAMTRAP_DATA_DIR`, that process only) in headless Edge at 2000x1340 and 1280x800, 2x crops of the deer across the walk at 13 and 27 m, and the reduced-motion still.

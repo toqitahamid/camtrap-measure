@@ -1,6 +1,7 @@
 /* The sign-in screen's backdrop: what the app does, drawn as a camera trap sees it. A ground plane runs
    to the horizon with range rings at 5, 10, 20 and 40 m around the camera; a deer walks a slow loop
-   through them, and a dashed line and a readout give its distance as it goes.
+   through them, and a dashed line and a readout give its distance as it goes. The deer itself, and its
+   walk, are drawn in deer.ts.
 
    A plain 2D canvas and a pinhole projection written here, no 3D library. The camera sways and dollies
    a little on a 24 s loop; the deer's loop has the same period, so the whole scene repeats seamlessly.
@@ -11,8 +12,10 @@
    text always reads on the plain sky and the ground fills the rest of the panel at any window size. */
 
 import { useEffect, useRef, type RefObject } from 'react'
+import { drawDeer } from './deer'
 
 const LOOP_S = 24 // one full loop of the scene, seconds
+const STRIDES = 32 // walking strides per loop (1.33 a second); a whole number, so the loop stays seamless
 const STILL_T = 14 // the moment drawn when motion is reduced: deer mid-field, about 16 m away
 const FRAME_MS = 1000 / 30
 const GAP_PX = 96 // from the bottom of `below` to the horizon
@@ -25,7 +28,6 @@ const RINGS = [5, 10, 20, 40]
 const BG = '#0b0d0f'
 const AMBER = '232, 161, 60' // --amber as rgb, for rgba() with an alpha
 const GRID = '138, 146, 156' // --dim as rgb
-const DEER = '#aeb5bd'
 const GROT = "'Space Grotesk', 'Inter', system-ui, sans-serif"
 const MONO = "ui-monospace, 'Cascadia Mono', Consolas, monospace"
 
@@ -38,12 +40,16 @@ function cameraAt(t: number) {
 }
 
 /** Where the deer is at time t, on the ground (x across, z away from the camera trap at the origin).
-    `spread` is the widest bearing either side, radians, so a narrow panel keeps the deer in frame. */
+    `spread` is the widest bearing either side, radians, so a narrow panel keeps the deer in frame.
+    `across` is its speed across the camera's view (m/s, + to the right): the deer is drawn side on, so
+    this is the part of its walk its legs show. */
 function deerAt(t: number, spread: number) {
-  const w = (2 * Math.PI * t) / LOOP_S
+  const k = (2 * Math.PI) / LOOP_S
+  const w = k * t
   const r = 20 + 7 * Math.sin(w) // 13 to 27 m
   const bearing = spread * Math.cos(w)
-  return { x: r * Math.sin(bearing), z: r * Math.cos(bearing), r, heading: Math.sign(-Math.sin(w)) || 1 }
+  const across = -r * spread * k * Math.sin(w) // r times the rate the bearing turns
+  return { x: r * Math.sin(bearing), z: r * Math.cos(bearing), r, across, heading: Math.sign(-Math.sin(w)) || 1 }
 }
 
 export default function RangeScene({ below }: { below?: RefObject<HTMLElement | null> }) {
@@ -63,7 +69,7 @@ export default function RangeScene({ below }: { below?: RefObject<HTMLElement | 
     let raf = 0
     let shown = { r: 0, at: -1 } // the readout changes a few times a second, like an instrument
 
-    const frame = () => draw(ctx, w, h, hy, t, shown)
+    const frame = () => draw(ctx, w, h, hy, t, shown, reduce.matches)
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1
@@ -120,7 +126,8 @@ export default function RangeScene({ below }: { below?: RefObject<HTMLElement | 
   return <canvas ref={ref} className="range-scene" aria-hidden="true" />
 }
 
-/** One frame. Pure drawing: everything it shows follows from t, the canvas size and the horizon. */
+/** One frame. Pure drawing: everything it shows follows from t, the canvas size and the horizon.
+    `still` (reduced motion) draws the deer standing instead of mid-stride. */
 function draw(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -128,6 +135,7 @@ function draw(
   hy: number,
   t: number,
   shown: { r: number; at: number },
+  still: boolean,
 ) {
   if (w === 0 || h === 0) return
   const f = ((h - hy) * NEAR_M) / EYE_M // focal length, px: the NEAR_M ground line sits on the bottom edge
@@ -261,7 +269,11 @@ function draw(
     ctx.lineWidth = 1.2
     ctx.stroke()
 
-    drawDeer(ctx, fs.x, fs.y, scale, deer.heading)
+    // One stride covers the ground the deer crosses in 1/STRIDES of the loop, so planted hooves hold still.
+    const gait = still
+      ? null
+      : { phase: ((t * STRIDES) / LOOP_S) % 1, stride: (Math.abs(deer.across) * LOOP_S) / STRIDES }
+    drawDeer(ctx, fs.x, fs.y, scale, deer.heading, gait)
 
     // reticle: the app's corner brackets around the animal
     const arm = Math.max(6, 0.28 * scale)
@@ -310,68 +322,3 @@ function draw(
 }
 
 const lerp = (a: Pt, b: Pt, k: number): Pt => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, z: a.z + (b.z - a.z) * k })
-
-/** A white-tailed deer buck in profile, feet at (x, y), `scale` px per metre, facing right when dir is 1. */
-function drawDeer(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, dir: number) {
-  ctx.save()
-  ctx.translate(x, y)
-  ctx.scale(scale * dir, -scale) // metres, y up
-  ctx.fillStyle = DEER
-  ctx.strokeStyle = DEER
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-
-  // body, neck and head as one outline, starting at the rump and going round clockwise
-  ctx.beginPath()
-  ctx.moveTo(-0.6, 0.86)
-  ctx.quadraticCurveTo(-0.5, 0.99, -0.2, 0.96) // rump to back
-  ctx.lineTo(0.28, 0.99) // withers
-  ctx.quadraticCurveTo(0.42, 1.12, 0.55, 1.36) // top of the neck
-  ctx.lineTo(0.63, 1.4) // poll
-  ctx.quadraticCurveTo(0.74, 1.35, 0.88, 1.22) // forehead to nose
-  ctx.lineTo(0.85, 1.18)
-  ctx.quadraticCurveTo(0.72, 1.18, 0.64, 1.17) // jaw
-  ctx.quadraticCurveTo(0.5, 1.0, 0.44, 0.82) // throat to chest
-  ctx.quadraticCurveTo(0.42, 0.66, 0.3, 0.63) // brisket
-  ctx.quadraticCurveTo(0, 0.6, -0.36, 0.64) // belly
-  ctx.quadraticCurveTo(-0.58, 0.66, -0.6, 0.86) // haunch
-  ctx.fill()
-
-  // ear, then a small rack sweeping forward
-  ctx.beginPath()
-  ctx.moveTo(0.56, 1.36)
-  ctx.lineTo(0.45, 1.48)
-  ctx.lineTo(0.6, 1.41)
-  ctx.fill()
-  ctx.lineWidth = 0.03
-  ctx.beginPath()
-  ctx.moveTo(0.63, 1.4)
-  ctx.quadraticCurveTo(0.56, 1.62, 0.8, 1.66)
-  ctx.moveTo(0.64, 1.58)
-  ctx.lineTo(0.66, 1.7)
-  ctx.moveTo(0.73, 1.64)
-  ctx.lineTo(0.76, 1.75)
-  ctx.stroke()
-
-  // legs: forelegs straight, hind legs bent at the hock
-  ctx.lineWidth = 0.055
-  ctx.beginPath()
-  ctx.moveTo(0.34, 0.68)
-  ctx.lineTo(0.37, 0.01)
-  ctx.moveTo(0.24, 0.66)
-  ctx.lineTo(0.2, 0.01)
-  ctx.moveTo(-0.44, 0.7)
-  ctx.lineTo(-0.52, 0.34)
-  ctx.lineTo(-0.46, 0.01)
-  ctx.moveTo(-0.32, 0.66)
-  ctx.lineTo(-0.38, 0.34)
-  ctx.lineTo(-0.32, 0.01)
-  ctx.stroke()
-
-  // the white tail, raised
-  ctx.fillStyle = '#f3f4f5'
-  ctx.beginPath()
-  ctx.ellipse(-0.64, 0.95, 0.1, 0.045, 0.9, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.restore()
-}
