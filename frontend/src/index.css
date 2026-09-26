@@ -1155,12 +1155,50 @@ td.num {
   border-right: 1px solid var(--line);
   overflow: hidden;
 }
+/* The ranging scene (RangeScene.tsx) fills the panel behind the text. It puts its horizon under the
+   headline and paragraph, so they always read on the plain sky. */
+.range-scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.brand > :not(.range-scene) {
+  position: relative;
+  z-index: 1;
+}
+.brand-copy {
+  max-width: 460px;
+  margin-bottom: auto;
+  margin-top: clamp(40px, 9vh, 120px);
+}
 .brand h1 {
   font-family: var(--grot);
-  font-size: 42px;
+  font-size: clamp(42px, 3.4vw, 56px);
   font-weight: 600;
-  line-height: 1.1;
+  line-height: 1.08;
   letter-spacing: -0.025em;
+}
+.brand-foot {
+  color: var(--dim); /* 6:1 on the panel; --ghost was under 2:1 */
+  line-height: 1.7;
+}
+/* The credit is one line when the panel is wide enough, else two, breaking after "Research". */
+.brand {
+  container: brand / inline-size;
+}
+.brand-foot > span {
+  display: block;
+}
+.brand-foot > .foot-sep {
+  display: none;
+}
+@container brand (min-width: 640px) {
+  .brand-foot > span,
+  .brand-foot > .foot-sep {
+    display: inline;
+  }
 }
 .form {
   flex: 1;
@@ -1168,10 +1206,46 @@ td.num {
   align-items: center;
   justify-content: center;
   padding: 40px;
+  position: relative;
+  background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(232, 161, 60, 0.05), transparent 70%);
 }
-.form > div {
+/* a faint dot grid around the card, fading out toward the window edges, so the card sits on a surface */
+.form::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(138, 146, 156, 0.16) 1px, transparent 1.5px);
+  background-size: 22px 22px;
+  background-position: center;
+  mask-image: radial-gradient(ellipse 55% 55% at 50% 50%, #000 20%, transparent 100%);
+}
+.signin-card {
+  position: relative;
   width: 100%;
-  max-width: 372px;
+  max-width: 420px;
+  padding: 34px 38px 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--pane);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.signin-card .cap {
+  color: var(--dim); /* labels meet AA on the card */
+}
+.steps {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 22px;
+}
+.steps span {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--edge);
+}
+.steps span.on {
+  background: var(--amber);
 }
 .input {
   width: 100%;

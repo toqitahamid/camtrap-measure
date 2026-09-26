@@ -4,9 +4,10 @@
 
 import Help from './Help'
 import Icon from './Icon'
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import Measure from './Measure'
+import RangeScene from './RangeScene'
 import Results from './Results'
 import TableView from './TableView'
 import {
@@ -72,6 +73,7 @@ export default function App() {
   const [notice, setNotice] = useState<{ text: string; kind: 'warn' | 'error' | 'done' } | null>(null)
   const [busy, setBusy] = useState(false)
   const [codeSentTo, setCodeSentTo] = useState<string | null>(null)
+  const copyRef = useRef<HTMLDivElement>(null) // the sign-in text; the scene's horizon sits under it
 
   const [section, setSection] = useState<Section>('measure')
   const [picked, setPicked] = useState<Scope>({ site: '', flag: '', folder: '', method: '' })
@@ -268,13 +270,14 @@ export default function App() {
     return (
       <div className="signin">
         <div className="brand">
+          <RangeScene below={copyRef} />
           <div className="row" style={{ gap: 11 }}>
             <span style={{ color: 'var(--amber)', display: 'flex' }}>
               <Icon name="mark" size={26} width={1.6} />
             </span>
             <span className="wordmark" style={{ fontSize: 15 }}>CAMTRAP MEASURE</span>
           </div>
-          <div style={{ maxWidth: 430 }}>
+          <div className="brand-copy" ref={copyRef}>
             <h1>How far away<br />was that deer?</h1>
             <p className="dim" style={{ marginTop: 20, fontSize: 15, lineHeight: 1.65 }}>
               Point it at a folder of camera-trap photos. It finds each animal, reads the ground distance against the
@@ -282,45 +285,54 @@ export default function App() {
               with the numbers on the picture where you can check them.
             </p>
           </div>
-          <span className="mono tiny" style={{ color: 'var(--ghost)' }}>
-            Southern Illinois University · white-tailed deer distance survey
-          </span>
+          <div className="mono tiny brand-foot">
+            <span>BASE Lab · Center for Wildlife Sustainability Research</span>
+            <span className="foot-sep"> · </span>
+            <span>Southern Illinois University Carbondale</span>
+          </div>
         </div>
 
         <div className="form">
-          {codeSentTo === null ? (
-            <form key="email" onSubmit={sendCode}>
-              <div className="cap">Step 1 of 2</div>
-              <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Sign in</h2>
-              <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
-                Use the FlagLabel account you label with. There is no password: a one-time code is emailed to you.
-              </p>
-              {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
-              <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Email</label>
-              <input className="input" name="email" type="email" placeholder="you@siu.edu" required autoFocus />
-              <button type="submit" className="btn btn-amber btn-wide" style={{ height: 40, marginTop: 14, fontSize: 14 }} disabled={busy}>
-                {busy ? 'Sending…' : 'Email me a code'}
-              </button>
-            </form>
-          ) : (
-            <form key="code" onSubmit={login}>
-              <div className="cap">Step 2 of 2</div>
-              <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Enter the code</h2>
-              <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
-                Sent to {codeSentTo}. Check the spam folder if it takes a minute.
-              </p>
-              {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
-              <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Code from the email</label>
-              <input className="input mono" name="code" inputMode="numeric" autoComplete="one-time-code" required autoFocus
-                     style={{ letterSpacing: '0.4em', fontSize: 17 }} />
-              <button type="submit" className="btn btn-amber btn-wide" style={{ height: 40, marginTop: 14, fontSize: 14 }} disabled={busy}>
-                {busy ? 'Signing in…' : 'Sign in'}
-              </button>
-              <button type="button" className="btn btn-wide" style={{ marginTop: 8 }} onClick={() => setCodeSentTo(null)} disabled={busy}>
-                Use a different email
-              </button>
-            </form>
-          )}
+          <div className="signin-card">
+            {/* two bars: which step of the two this is */}
+            <div className="steps" aria-hidden="true">
+              <span className="on" />
+              <span className={codeSentTo === null ? '' : 'on'} />
+            </div>
+            {codeSentTo === null ? (
+              <form key="email" onSubmit={sendCode}>
+                <div className="cap">Step 1 of 2</div>
+                <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Sign in</h2>
+                <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
+                  Use the FlagLabel account you label with. There is no password: a one-time code is emailed to you.
+                </p>
+                {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
+                <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Email</label>
+                <input className="input" name="email" type="email" placeholder="you@siu.edu" required autoFocus />
+                <button type="submit" className="btn btn-amber btn-wide" style={{ height: 40, marginTop: 14, fontSize: 14 }} disabled={busy}>
+                  {busy ? 'Sending…' : 'Email me a code'}
+                </button>
+              </form>
+            ) : (
+              <form key="code" onSubmit={login}>
+                <div className="cap">Step 2 of 2</div>
+                <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Enter the code</h2>
+                <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
+                  Sent to {codeSentTo}. Check the spam folder if it takes a minute.
+                </p>
+                {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
+                <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Code from the email</label>
+                <input className="input mono" name="code" inputMode="numeric" autoComplete="one-time-code" required autoFocus
+                       style={{ letterSpacing: '0.4em', fontSize: 17 }} />
+                <button type="submit" className="btn btn-amber btn-wide" style={{ height: 40, marginTop: 14, fontSize: 14 }} disabled={busy}>
+                  {busy ? 'Signing in…' : 'Sign in'}
+                </button>
+                <button type="button" className="btn btn-wide" style={{ marginTop: 8 }} onClick={() => setCodeSentTo(null)} disabled={busy}>
+                  Use a different email
+                </button>
+              </form>
+            )}
+            </div>
         </div>
       </div>
     )

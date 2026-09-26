@@ -1195,3 +1195,33 @@ line started a script in a path with a space with `-FromTemp -Yes`; the old unqu
 and never ran it. Its data-folder lines (extracted) gave the file's `data`, else the default, and put the file
 in the app's removal list. Afterwards none of the three user variables and no uninstall key were on this PC,
 as before the run. **Not run:** the whole installer and uninstaller.
+
+## The sign-in screen shows what the app does (2026-09-25)
+
+The researcher, with a screenshot at 2373x1591: improve the sign-in window, add some 3D animation. The left panel
+was mostly empty, the form floated in black, and the footer (`--ghost` on the panel, 1.9:1) was barely visible.
+
+- **`RangeScene.tsx`**, behind the headline: a ground plane seen from a camera trap, range rings at 5, 10, 20 and
+  40 m, and a buck walking a slow loop (13 to 27 m) with the app's corner-bracket reticle, a dashed line along the
+  ground and a readout (distance and a 90% interval, updated four times a second). A plain 2D canvas with a
+  pinhole projection written in the file; no three.js or other new dependency. The camera sways, dollies and pans
+  slightly; everything repeats on one 24 s loop. At most 30 frames a second, devicePixelRatio handled, stopped
+  while the window is hidden. Under `prefers-reduced-motion: reduce` it draws one still frame (the deer at 16.5 m).
+  Decoration only: `aria-hidden`.
+- **Text stays on plain sky.** The horizon sits 96 px under the headline and paragraph (measured, clamped to 45 to
+  72% of the panel), so it follows the text at any window size. Ring labels hide when they would overlap the deer
+  or its readout; the readout moves to the left of the reticle near the right edge; the ground fades to the panel
+  colour behind the footer.
+- **The form is a card** (pane background, border, shadow) with a two-bar step indicator, on a faint dot grid.
+  Its labels use `--dim` (5.7:1 on the card; `--faint` was 3.0:1). No text, API call or state changed in the form.
+- **Footer credit**, at the researcher's request: "BASE Lab · Center for Wildlife Sustainability Research ·
+  Southern Illinois University Carbondale", replacing "Southern Illinois University · white-tailed deer distance
+  survey". `--dim` (6.2:1). One line when the panel's content is at least 640 px wide (a container query),
+  otherwise two lines breaking after "Research". Text only. No other place in the frontend names the institution
+  (the only other hit is the `you@siu.edu` placeholder); the installer's publisher string is separate and unchanged.
+
+Evidence: `npm run build` and `oxlint` clean; 286 passed, 1 skipped. Screenshots of the real engine
+(`CAMTRAP_DATA_DIR` pointed at an empty scratch folder for that process only) in headless Edge through the
+DevTools protocol at 2000x1340, 1620x900 and 1280x800, at two moments of the loop, and with reduced motion
+emulated: text legible over the scene at every size; with reduced motion the page shows the 16.5 m still
+while the animated page had moved on.
