@@ -1,15 +1,17 @@
 import Icon from './Icon'
 import { useMemo, useState } from 'react'
 import {
+  NONE,
   STATE_LABEL,
   band,
   clock,
   lead,
+  linesUp,
   metres,
   photoSrc,
   plural,
   state,
-  thousands,
+  sure,
   type Det,
   type Folder,
   type Methods,
@@ -24,12 +26,12 @@ const animal = (r: Row): Det | null => lead(r) ?? r.detections[0] ?? null
 
 /** The engine words every reason it holds; matching its words is how the table knows which number went wrong.
     ponytail: string matching, because the thresholds (MIN_INLIERS, LOW_CONF) live in the engine and the
-    window is never told them — move to a machine-readable reason code if a third caller needs this. */
+    window is never told them. Move to a machine-readable reason code if a third caller needs this. */
 const because = (reasons: string[], word: string) => reasons.some((why) => why.includes(word))
 const weakBox = (d: Det | null) => !!d && because(d.reasons, 'confidence')
 const unsure = (d: Det | null) => !!d && because(d.reasons, 'unsure')
 // alignment is the photo's, not a box's, so this one reads the photo's reasons
-const weakFit = (r: Row) => because(r.reasons, 'align') || because(r.reasons, 'poor match')
+const weakFit = (r: Row) => r.measured && linesUp(r) !== 'Good'
 
 const TONE: Record<State, string> = {
   clean: 'var(--ok)',
@@ -47,16 +49,16 @@ const FILTERS = {
 type Filter = keyof typeof FILTERS
 
 type SortKey = 'name' | 'time' | 'species' | 'dist' | 'band' | 'conf' | 'align' | 'status'
-/* ponytail: the header follows the approved mockup and the .tr grid template in index.css — dist, 90%, conf,
-   align — not the ticket's prose order; the column widths (74 / 100 / 58 / 74) are cut for exactly this. */
+/* ponytail: the header follows the approved mockup and the .tr grid template in index.css (dist, 90%, conf,
+   align), not the ticket's prose order; the column widths (74 / 100 / 58 / 74) are cut for exactly this. */
 const COLUMNS: { key: SortKey; label: string; num?: true }[] = [
   { key: 'name', label: 'File' },
   { key: 'time', label: 'Time' },
   { key: 'species', label: 'Species' },
-  { key: 'dist', label: 'Dist m', num: true },
-  { key: 'band', label: '90% m', num: true },
-  { key: 'conf', label: 'Conf', num: true },
-  { key: 'align', label: 'Align', num: true },
+  { key: 'dist', label: 'Metres', num: true },
+  { key: 'band', label: '90% range', num: true },
+  { key: 'conf', label: 'Sure', num: true },
+  { key: 'align', label: 'Lines up', num: true },
   { key: 'status', label: 'Status' },
 ]
 
@@ -73,14 +75,14 @@ const SORT: Record<SortKey, (r: Row) => string | number | null> = {
   status: (r) => STATUS_ORDER[state(r)],
 }
 
-const dist = (d: Det | null) => (d && d.distance_m !== null ? d.distance_m.toFixed(1) : '—') // the heading carries the unit
-const interval = (d: Det | null) => (band(d) === '—' ? 'no interval' : `${band(d)} m`)
+const dist = (d: Det | null) => (d && d.distance_m !== null ? d.distance_m.toFixed(1) : NONE) // the heading carries the unit
+const interval = (d: Det | null) => (band(d) === NONE ? 'no range' : `${band(d)} m`)
 const RULER_M = 25
 const pct = (m: number) => `${Math.max(0, Math.min(100, (m / RULER_M) * 100))}%`
-const fix = (n: number | null) => (n === null ? '—' : n.toFixed(1))
+const fix = (n: number | null) => (n === null ? NONE : n.toFixed(1))
 
 /** Every JPEG in the chosen folder as one sortable row, beside the photo the selected row was measured on.
-    Sorting and filtering are done here over the listing the shell already holds — nothing is refetched. */
+    Sorting and filtering are done here over the listing the shell already holds; nothing is refetched. */
 export default function TableView({
   scope,
   folder,
@@ -96,7 +98,7 @@ export default function TableView({
   busy: boolean
   onMeasure: (paths: string[]) => void
   onOpen: (path: string) => void
-  // ponytail: optional because the ticket's signature stops above — the shell hands the folder-listing
+  // ponytail: optional because the ticket's signature stops above; the shell hands the folder-listing
   // failure over so the table says why there are no rows instead of blaming the user for not picking one.
   error?: string | null
 }) {
@@ -170,17 +172,17 @@ export default function TableView({
             <input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find a file…" aria-label="Find a file" />
           </label>
           <div className="spacer" />
-          <span className="mono tiny faint">
+          <span className="tiny faint">
             {plural(rows.length, 'row')} · {plural(animals, 'animal')}
           </span>
           <a
             className="btn btn-sm"
             href={`/api/export.csv?site=${encodeURIComponent(scope.site)}`}
             download
-            title={`Every measured row stored for ${scope.site || 'this camera'} — the CSV is scoped to the camera, not to the filter above`}
+            title={`Every measured photo of ${scope.site || 'every camera'}, not only this folder`}
           >
             <Icon name="download" size={12} />
-            {/* the CSV is the camera's, not this folder's or this filter's — say so rather than imply a count */}
+            {/* the CSV is the camera's, not this folder's or this filter's: say so rather than imply a count */}
             Export {scope.site || 'all cameras'}
           </a>
         </div>
@@ -207,12 +209,12 @@ export default function TableView({
         {folder === null && error ? (
           <div className="empty">
             <p className="notice notice-error">{error}</p>
-            <p className="faint small">Fix the path in the bar above, or use Browse… to pick the folder.</p>
+            <p className="faint small">Fix the folder in the bar above, or press Browse…</p>
           </div>
         ) : folder === null ? (
           <div className="empty">
-            <p className="dim">No photo folder chosen yet.</p>
-            <p className="faint small">Pick this camera's folder in the bar above — every JPEG in it lands here, measured or not.</p>
+            <p className="dim">No folder chosen.</p>
+            <p className="faint small">Choose a photo folder in the bar above.</p>
           </div>
         ) : all.length === 0 ? (
           <div className="empty">
@@ -298,23 +300,24 @@ export default function TableView({
                         >
                           <Icon name="check" size={9} width={3.6} />
                         </button>
-                        <span className="mono small ellipsis">{r.name}</span>
+                        <span className="small ellipsis">{r.name}</span>
                         <span className="mono small dim">{clock(r.captured_at)}</span>
                         <span
                           className="small ellipsis"
                           style={{ color: unsure(d) ? 'var(--bad)' : d ? undefined : 'var(--faint)' }}
                         >
-                          {d ? d.species : r.measured ? 'no animal' : '—'}
+                          {d ? d.species : r.measured ? 'no animal' : NONE}
                         </span>
                         <span className="num" style={{ fontWeight: 600, color: d?.distance_m == null ? 'var(--faint)' : undefined }}>
                           {dist(d)}
                         </span>
                         <span className="num small dim">{band(lead(r))}</span>
                         <span className="num small" style={{ color: weakBox(d) ? 'var(--bad)' : d ? 'var(--dim)' : 'var(--faint)' }}>
-                          {d ? d.confidence.toFixed(2) : '—'}
+                          {d ? sure(d) : NONE}
                         </span>
-                        <span className="num small" style={{ color: weakFit(r) ? 'var(--bad)' : r.match_score === null ? 'var(--faint)' : 'var(--dim)' }}>
-                          {r.match_score === null ? '—' : thousands(r.match_score)}
+                        <span className="num small" style={{ color: weakFit(r) ? 'var(--bad)' : r.measured ? 'var(--dim)' : 'var(--faint)' }}
+                              title={r.match_score === null ? undefined : plural(r.match_score, 'matching point')}>
+                          {r.measured ? linesUp(r) : NONE}
                         </span>
                         {r.measured ? (
                           <span className="row small" style={{ color: TONE[s], gap: 6 }}>
@@ -344,17 +347,17 @@ export default function TableView({
                     <span>No distance among these rows yet</span>
                   ) : (
                     <>
-                      <span className="mono">median {fix(median)} m</span>
+                      <span>median {fix(median)} m</span>
                       <span style={{ color: 'var(--line)' }}>·</span>
-                      <span className="mono">mean {fix(mean)} m</span>
+                      <span>mean {fix(mean)} m</span>
                       <span style={{ color: 'var(--line)' }}>·</span>
-                      <span className="mono">
-                        range {fix(ms[0])} – {fix(ms[ms.length - 1])} m
+                      <span>
+                        range {fix(ms[0])} to {fix(ms[ms.length - 1])} m
                       </span>
                     </>
                   )}
                   <div className="spacer" />
-                  <span>Click a heading to sort · click a row to see the photo</span>
+                  <span>Click a heading to sort</span>
                 </div>
               </>
             )}
@@ -365,7 +368,7 @@ export default function TableView({
       <div className="pane pane-r" style={{ width: 372, flex: 'none' }}>
         <div className="pane-head">
           <span className="cap">Preview</span>
-          <span className="mono tiny dim ellipsis">{cur?.name}</span>
+          <span className="tiny dim ellipsis">{cur?.name}</span>
           <div className="spacer" />
           <button className="btn btn-sm" disabled={cur === null} onClick={() => cur && onOpen(cur.path)}>
             Open in Measure
@@ -375,8 +378,7 @@ export default function TableView({
 
         {cur === null ? (
           <div className="empty">
-            <p className="dim">No row picked.</p>
-            <p className="faint small">Click a row to see its photo and the box each distance was read from.</p>
+            <p className="dim">Click a row to see its photo.</p>
           </div>
         ) : (
           <>
@@ -403,10 +405,10 @@ export default function TableView({
                   m
                 </span>
                 <div className="spacer" />
-                <span className="mono small">{interval(shot)}</span>
+                <span className="small">{interval(shot)}</span>
               </div>
 
-              {/* ponytail: the ruler stops at 25 m — past that a camera-trap distance is guesswork, so a farther
+              {/* ponytail: the ruler stops at 25 m; past that a camera-trap distance is guesswork, so a farther
                   animal pins to the end rather than squashing every near one into the first centimetre. */}
               <div className="scale" style={{ marginTop: 14 }}>
                 <div className="rule" />
@@ -415,7 +417,7 @@ export default function TableView({
                 )}
                 {shot && shot.distance_m !== null && <div className="tick" style={{ left: pct(shot.distance_m) }} />}
               </div>
-              <div className="row mono tiny faint" style={{ justifyContent: 'space-between' }}>
+              <div className="row tiny faint" style={{ justifyContent: 'space-between' }}>
                 <span>0</span>
                 <span>5</span>
                 <span>10</span>
@@ -427,14 +429,14 @@ export default function TableView({
               <div className="kv" style={{ marginTop: 18 }}>
                 <span className="cap">Species</span>
                 <span>{animal(cur)?.species ?? (cur.measured ? 'no animal' : 'not measured')}</span>
-                <span className="cap">Measured against</span>
-                <span>{cur.flag_image ?? '—'}</span>
-                <span className="cap">Alignment</span>
+                <span className="cap">Flag photo</span>
+                <span>{cur.flag_image ?? NONE}</span>
+                <span className="cap">Lines up with flag photo</span>
                 <span style={{ color: weakFit(cur) ? 'var(--bad)' : undefined }}>
-                  {cur.match_score === null ? 'did not align' : plural(cur.match_score, 'match point')}
+                  {cur.measured ? linesUp(cur) : NONE}
                 </span>
-                <span className="cap">Read at</span>
-                <span>{cur.method ? methods.methods[cur.method]?.label ?? cur.method : '—'}</span>
+                <span className="cap">Distance read at</span>
+                <span>{cur.method ? methods.methods[cur.method]?.label ?? cur.method : NONE}</span>
               </div>
 
               {cur.reasons.length > 0 && (

@@ -18,7 +18,7 @@ function Message({ icon, title, line, action }: { icon: 'warn' | 'density'; titl
         </span>
         <div className="stack" style={{ justifyItems: 'center' }}>
           <b className="grot">{title}</b>
-          <span className="small dim">{line}</span>
+          {line && <span className="small dim">{line}</span>}
         </div>
         {action}
       </div>
@@ -63,18 +63,19 @@ const MODEL_NAME: Record<string, string> = { 'half-normal': 'Half-normal', 'haza
 
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 
-/** Where a camera's numbers came from, in one line: the days from its flag photo to its last photo, the view
-    from its flag calibration. Shown whether or not a number was typed over them, so the found value stays in view. */
+/** Where a camera's numbers came from, in one short line: the dates its active days run between, and a warning
+    when the field of view is a guess. Shown whether or not a number was typed over them. The full source (which
+    flag calibration) is in the cell's tooltip. */
 function found(c: SurveyCamera): string {
   const parts = []
   const d = c.days_source
   if (d && d.days !== null) {
-    const start = d.from_kind === 'flag' ? `flag photo ${shortDay(d.from)}` : d.from_kind === 'photo' ? `first photo ${shortDay(d.from)}` : shortDay(d.from)
-    const end = d.to_kind === 'photo' ? `last photo ${shortDay(d.to)}` : 'the To date'
-    parts.push(`${+d.days.toFixed(1)} days, ${start} to ${end}`)
+    const start = d.from_kind === 'flag' ? `${shortDay(d.from)} (flag photo)` : d.from_kind === 'photo' ? `${shortDay(d.from)} (first photo)` : shortDay(d.from)
+    const end = d.to_kind === 'photo' ? `${shortDay(d.to)} (last photo)` : 'the To date'
+    parts.push(`${start} to ${end}`)
   }
-  parts.push(c.fov_source ? `View ${c.fov_default}° from the ${c.fov_source}` : `View unknown, ${c.fov_default}° is a guess`)
-  return `Found: ${parts.join('. ')}.`
+  if (!c.fov_source) parts.push(`field of view unknown, ${c.fov_default}° is a guess`)
+  return parts.length ? `${parts.join('. ')}.` : ''
 }
 
 /** Round a density for reading: two significant figures below 10, whole numbers above. */
@@ -115,19 +116,19 @@ function DetectionChart({ r }: { r: Result }) {
       {edr !== undefined && (
         <g>
           <line x1={x(edr)} x2={x(edr)} y1={pad.t} y2={H - pad.b} stroke="var(--faint)" strokeDasharray="3 4" />
-          <text x={x(edr) + 5} y={pad.t + 10} fontSize={10} fill="var(--dim)" fontFamily="var(--mono)">
-            {`radius ${edr.toFixed(1)} m`}
+          <text x={x(edr) + 5} y={pad.t + 10} fontSize={12} fill="var(--dim)" fontFamily="var(--sans)">
+            {`detection radius ${edr.toFixed(1)} m`}
           </text>
         </g>
       )}
       <path d={line} fill="none" stroke="var(--text)" strokeWidth={2} strokeLinejoin="round" />
       {ticks.map((m) => (
-        <text key={m} x={x(m)} y={H - 6} fontSize={10} fill="var(--faint)" fontFamily="var(--mono)"
+        <text key={m} x={x(m)} y={H - 6} fontSize={12} fill="var(--faint)" fontFamily="var(--sans)"
               textAnchor={m === 0 ? 'start' : 'middle'}>
           {m}
         </text>
       ))}
-      <text x={W - pad.r} y={H - 6} fontSize={10} fill="var(--faint)" fontFamily="var(--mono)" textAnchor="end">
+      <text x={W - pad.r} y={H - 6} fontSize={12} fill="var(--faint)" fontFamily="var(--sans)" textAnchor="end">
         {`${w} m`}
       </text>
     </svg>
@@ -228,14 +229,14 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
       <div className="field" style={{ width: 132, minWidth: 106 }}>
         <span className="cap">Captured from</span>
         <div className="field-val">
-          <input className="bare mono" style={{ fontSize: 12 }} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <input className="bare" style={{ fontSize: 12 }} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </div>
       </div>
       <div className="sep" />
       <div className="field" style={{ width: 132, minWidth: 106 }}>
         <span className="cap">To</span>
         <div className="field-val">
-          <input className="bare mono" style={{ fontSize: 12 }} type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <input className="bare" style={{ fontSize: 12 }} type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
       </div>
       <div className="sep" />
@@ -255,8 +256,8 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
         <div className="sheet">
           <Message
             icon="warn"
-            title="The engine is not answering"
-            line={`The density comes from the engine, and it could not be reached: ${error}.`}
+            title="The app is not answering"
+            line={`Try again, or restart the app. (${error})`}
             action={
               <button className="btn" onClick={() => setAttempt(attempt + 1)}>
                 <Icon name="sync" size={13} />
@@ -272,8 +273,8 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
       <>
         {filters}
         <div className="sheet">
-          <Message icon="density" title="No photo folder chosen"
-                   line="Pick a folder in MEASURE, or set Photos to everything measured." />
+          <Message icon="density" title="No folder chosen"
+                   line="Pick a folder in MEASURE, or set Photos to Everything measured." />
         </div>
       </>
     )
@@ -282,7 +283,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
       <>
         {filters}
         <div className="sheet">
-          <Message icon="density" title="Working out the density…" line="Fitting the distances and counting the camera days." />
+          <Message icon="density" title="Working out the density…" line="" />
         </div>
       </>
     )
@@ -292,7 +293,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
         {filters}
         <div className="sheet">
           <Message icon="density" title="Nothing measured in this selection"
-                   line="Measure a folder in MEASURE, or widen the camera and dates above." />
+                   line="Measure a folder in MEASURE, or widen the filters above." />
         </div>
       </>
     )
@@ -325,9 +326,9 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
           </div>
           <span className="tiny faint">
             {r.interval_gaps > 0
-              ? `Blank uses ${r.interval_default_s} s, from ${plural(r.interval_gaps, 'gap')} between photos.`
-              : `Blank uses ${r.interval_default_s} s. Time between photos in a burst or time-lapse.`}
-            {r.interval_s > 3 && ' Longer than the 0.25 to 3 s the method suggests.'}
+              ? `Blank uses ${r.interval_default_s} s, found from the photos.`
+              : `Blank uses ${r.interval_default_s} s.`}
+            {r.interval_s > 3 && ' Longer than the usual 0.25 to 3 s.'}
           </span>
         </div>
 
@@ -342,7 +343,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
             </span>
           </div>
           <span className="tiny faint">
-            {autoW === null ? 'Set once deer are measured.' : `Blank uses ${autoW} m. 95% of deer are closer than that.`}
+            {autoW === null ? 'Set once deer are measured.' : `Blank uses ${autoW} m.`}
           </span>
         </div>
 
@@ -355,13 +356,13 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
               <tr>
                 <th style={{ paddingLeft: 0 }}>Camera</th>
                 <th className="num">Active days</th>
-                <th className="num" style={{ paddingRight: 0 }}>View °</th>
+                <th className="num" style={{ paddingRight: 0 }}>Field of view °</th>
               </tr>
             </thead>
             <tbody>
               {r.cameras.map((c) => [
                 <tr key={c.site}>
-                  <td className="mono" style={{ paddingLeft: 0, fontSize: 12 }} title={c.model ?? undefined}>
+                  <td style={{ paddingLeft: 0, fontSize: 12 }} title={c.model ?? undefined}>
                     {c.site}
                   </td>
                   <td className="num">
@@ -372,7 +373,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
                   </td>
                   <td className="num" style={{ paddingRight: 0, whiteSpace: 'nowrap' }}>
                     {!c.fov_checked && (
-                      <span className="tiny warn" title="No flag calibration gives this camera's view, so 42 degrees is a guess">
+                      <span className="tiny warn" title="No flag photo gives this camera's field of view, so 42 degrees is a guess">
                         check{' '}
                       </span>
                     )}
@@ -382,14 +383,15 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
                   </td>
                 </tr>,
                 <tr key={`${c.site}-found`}>
-                  <td colSpan={3} className="tiny faint" style={{ padding: '0 0 9px', borderTop: 0, lineHeight: 1.5 }}>
+                  <td colSpan={3} className="tiny faint" style={{ padding: '0 0 9px', borderTop: 0, lineHeight: 1.5 }}
+                      title={c.fov_source ? `Field of view from the ${c.fov_source}` : undefined}>
                     {found(c)}
                   </td>
                 </tr>,
               ])}
             </tbody>
           </table>
-          <span className="tiny faint">Saved on this computer. Blank puts the first value back.</span>
+          <span className="tiny faint">Clear a box to go back to the found value.</span>
         </div>
 
         {saveError && <p className="notice notice-error">Not saved: {saveError}</p>}
@@ -398,11 +400,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
           <b className="grot">
             Uses {thousands(r.used)} of {thousands(r.deer)} deer
           </b>
-          {out.length > 0 && <span className="small dim">{out.join(', ')}</span>}
-          <span className="small dim">
-            {thousands(r.photos.at_moments)} photos at snapshot moments of {thousands(r.photos.photos)}
-            {r.photos.undated > 0 && `, ${r.photos.undated} without a time kept`}
-          </span>
+          {out.length > 0 && <span className="small dim">Left out: {out.join(', ')}</span>}
         </div>
 
         <div className="stack" style={{ gap: 6 }}>
@@ -412,7 +410,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
               Export for R Distance
             </a>
             <span className="tiny faint" style={{ textAlign: 'center' }}>
-              <span className="mono">{exportName}</span> <Help topic="rExport" align="right" />
+              {exportName} <Help topic="rExport" align="right" />
             </span>
           </div>
       </div>
@@ -430,8 +428,8 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
             title="No deer measured"
             line={
               r.deer > 0
-                ? 'Every deer here needs a look or is beyond the truncation distance, so none can be used.'
-                : 'A density needs measured white-tailed deer. Measure a folder, or widen the camera and dates above.'
+                ? 'Every deer here needs a look or is beyond the truncation distance.'
+                : 'Measure a folder with deer, or widen the filters above.'
             }
           />
         </div>
@@ -440,36 +438,20 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
 
   const f = r.fit
   const d = r.density
+  const model = f ? (MODEL_NAME[f.model] ?? f.model) : null
+  // One sentence a student can put in a methods section; every number in it is on this screen.
+  const howToReport = f && d
+    ? `Deer density was estimated by camera-trap distance sampling (Howe et al. 2017) with a ${model?.toLowerCase()} ` +
+      `detection function${f.other ? ' chosen by AIC' : ''}, a truncation distance of ${r.truncation_m} m and a ` +
+      `${r.interval_s} s snapshot interval: ${perKm2(d.per_km2)} deer per km² (90% CI ${perKm2(d.lo)} to ` +
+      `${perKm2(d.hi)}, by bootstrap), from ${thousands(r.used)} deer at ${plural(r.cameras.length, 'camera')}.`
+    : null
   return (
     <>
       {filters}
       <div className="sheet">
         {setup}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="card" style={{ flex: 'none' }}>
-            <div className="pane-head">
-              <span className="cap">Detection function</span>
-              {f && (
-                <span className="small faint">
-                  {MODEL_NAME[f.model] ?? f.model}, σ {f.sigma.toFixed(1)} m{f.b !== null && `, b ${f.b.toFixed(1)}`}
-                </span>
-              )}
-              <div className="spacer" />
-              {f && (
-                <span className="mono tiny faint">
-                  AIC {f.aic.toFixed(1)}
-                  {f.other && ` vs ${f.other.aic.toFixed(1)} ${f.other.model}`}
-                </span>
-              )}
-            </div>
-            <div style={{ padding: '14px 16px 10px' }}>
-              <DetectionChart r={r} />
-              <span className="tiny faint">
-                Bars: deer at each distance. Line: the fitted curve. Fewer deer far away were missed, not absent.
-              </span>
-            </div>
-          </div>
-
+        <div className="scroll" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="card" style={{ flex: 'none' }}>
             <div className="pane-head">
               <span className="cap">Density</span>
@@ -488,7 +470,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
               {r.too_few && (
                 <div className="notice notice-warn row" style={{ gap: 7 }}>
                   <Icon name="warn" />
-                  Too few for a density: {r.used} deer. 60 to 80 is the usual minimum.
+                  Only {r.used} deer. A density needs about 60 to 80.
                 </div>
               )}
               {d && (
@@ -499,14 +481,14 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
                       <span className="dim" style={{ fontSize: 14 }}> deer per km²</span>
                     </b>
                     <span className="small dim">
-                      90% range {perKm2(d.lo)} to {perKm2(d.hi)} <Help topic="densityRange" />
+                      90% confidence interval {perKm2(d.lo)} to {perKm2(d.hi)} <Help topic="densityRange" />
                     </span>
                   </div>
-                  <span className="tiny faint">Includes distance measurement error.</span>
-                  <div className="kv" style={{ maxWidth: 360 }}>
-                    <span className="small dim">Detection probability P</span>
+                  <span className="small dim">The estimated number of deer per square kilometre around these cameras.</span>
+                  <div className="kv" style={{ maxWidth: 380 }}>
+                    <span className="small dim">Detection probability <Help topic="detectionProb" /></span>
                     <span>{d.p.toFixed(3)}</span>
-                    <span className="small dim">Effective detection radius</span>
+                    <span className="small dim">Effective detection radius <Help topic="edr" /></span>
                     <span>{d.edr_m.toFixed(1)} m</span>
                     <span className="small dim">Deer used</span>
                     <span>{thousands(r.used)}</span>
@@ -517,6 +499,62 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
               )}
             </div>
           </div>
+
+          <div className="card" style={{ flex: 'none' }}>
+            <div className="pane-head">
+              <span className="cap">Detection function</span>
+              <Help topic="detectionFunction" />
+            </div>
+            <div style={{ padding: '14px 16px 10px' }}>
+              <DetectionChart r={r} />
+              <span className="tiny faint">Bars: deer counted at each distance. Line: the fitted detection function.</span>
+            </div>
+          </div>
+
+          {/* The model-selection numbers a thesis reports, folded away: nobody acts on them day to day. */}
+          {f && (
+            <details className="card" style={{ flex: 'none' }}>
+              <summary className="pane-head" style={{ cursor: 'pointer' }}>
+                <span className="cap">Details for your report</span>
+                <Help topic="reportDetails" />
+                <div className="spacer" />
+                <span className="faint"><Icon name="down" size={12} width={2.4} /></span>
+              </summary>
+              <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+                <div className="kv" style={{ maxWidth: 380 }}>
+                  <span className="small dim">Model</span>
+                  <span>{model}</span>
+                  <span className="small dim">σ (scale)</span>
+                  <span>{f.sigma.toFixed(1)} m</span>
+                  {f.b !== null && (
+                    <>
+                      <span className="small dim">b (shape)</span>
+                      <span>{f.b.toFixed(1)}</span>
+                    </>
+                  )}
+                  <span className="small dim">AIC</span>
+                  <span>{f.aic.toFixed(1)}</span>
+                  {f.other && (
+                    <>
+                      <span className="small dim">AIC, {MODEL_NAME[f.other.model] ?? f.other.model}</span>
+                      <span>{f.other.aic.toFixed(1)}</span>
+                    </>
+                  )}
+                  <span className="small dim">Photos at snapshot moments</span>
+                  <span>
+                    {thousands(r.photos.at_moments)} of {thousands(r.photos.photos)}
+                    {r.photos.undated > 0 && `, ${r.photos.undated} without a time`}
+                  </span>
+                </div>
+                {howToReport && (
+                  <div className="stack" style={{ gap: 4 }}>
+                    <span className="cap">How to report this</span>
+                    <span className="small" style={{ lineHeight: 1.6, userSelect: 'text' }}>{howToReport}</span>
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
         </div>
       </div>
     </>

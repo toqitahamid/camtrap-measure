@@ -1,22 +1,21 @@
-/* The question mark that sits beside a field and explains it in plain words.
+/* The question mark that sits beside a field and explains it in plain words, and the About panel in the
+   header, which opens the same way.
 
    A popover rather than a browser tooltip: a `title=` attribute waits a second, cannot be read on a
-   touchscreen, and vanishes the moment the pointer moves — none of which suits an explanation someone
+   touchscreen, and vanishes the moment the pointer moves. None of that suits an explanation someone
    is trying to read. This one opens on click and stays until it is closed.
 
    The words themselves are in helpText.ts, never here. */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import Icon from './Icon'
 import { HELP } from './helpText'
 
-export default function Help({ topic, align = 'left' }: { topic: keyof typeof HELP; align?: 'left' | 'right' }) {
+/** Open state for a popover that clicking elsewhere, or pressing Escape, puts away: the two things everyone tries first. */
+function usePopover() {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLSpanElement | null>(null)
-  const t = HELP[topic]
-
-  // Clicking anywhere else, or pressing Escape, puts it away — the two things everyone tries first.
   useEffect(() => {
     if (!open) return
     const away = (e: MouseEvent) => {
@@ -30,6 +29,12 @@ export default function Help({ topic, align = 'left' }: { topic: keyof typeof HE
       document.removeEventListener('keydown', key)
     }
   }, [open])
+  return { open, setOpen, box }
+}
+
+export default function Help({ topic, align = 'left' }: { topic: keyof typeof HELP; align?: 'left' | 'right' }) {
+  const { open, setOpen, box } = usePopover()
+  const t = HELP[topic]
 
   return (
     <span className="help" ref={box}>
@@ -51,6 +56,29 @@ export default function Help({ topic, align = 'left' }: { topic: keyof typeof HE
           {t.body.map((line, i) => (
             <span key={i}>{line}</span>
           ))}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** The header's About button: a small panel of name and value pairs, for the details nobody acts on day to day. */
+export function About({ rows }: { rows: [string, ReactNode][] }) {
+  const { open, setOpen, box } = usePopover()
+  return (
+    <span className="help" ref={box}>
+      <button type="button" className="btn btn-sm" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        About
+      </button>
+      {open && (
+        <span className="help-pop help-pop-right" role="dialog" aria-label="About" style={{ top: 30, width: 380 }}>
+          <b className="grot">CamTrap Measure</b>
+          <span className="kv">
+            {rows.map(([k, v]) => [
+              <span key={`${k}-k`} className="dim">{k}</span>,
+              <span key={`${k}-v`} style={{ overflowWrap: 'anywhere' }}>{v}</span>,
+            ])}
+          </span>
         </span>
       )}
     </span>

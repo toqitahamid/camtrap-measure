@@ -2,9 +2,9 @@
    which flag photo, which folder, which method. The sections render what the engine returns; the shell
    owns nothing but the scope, the folder listing and the run. */
 
-import Help from './Help'
+import Help, { About } from './Help'
 import Icon from './Icon'
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import Measure from './Measure'
 import RangeScene from './RangeScene'
@@ -25,28 +25,21 @@ import {
   type Status,
 } from './ui'
 
-/* The two bottom bars say two things and no more: what the app is doing right now, and which models are
-   doing it. Precision, batch size and the rest moved into the "What the app is doing" popover — a
+/* The two bottom bars say one thing: what the app is doing right now, or what went wrong. The version,
+   the models, the graphics card and what is loaded live in the header's About panel (2026-09-29): a
    technician reads this bar to know the run is alive, not to debug it. */
 
-/** The plain sentence for a run's current stage, naming the models the engine says are loaded. */
-const doing = (phase: string, loaded: string[]): string => {
-  const names = loaded.join(' + ')
-  if (phase === 'loading the models') return names ? `Loading ${names}…` : 'Loading models…'
-  if (phase === 'finding animals') return names ? `Finding animals with ${names}` : 'Finding animals'
-  if (phase === 'measuring distances') return names ? `Measuring distances with ${names}` : 'Measuring distances'
+/** The plain sentence for a run's current stage. */
+const doing = (phase: string): string => {
+  if (phase === 'loading the models') return 'Loading models…'
+  if (phase === 'finding animals') return 'Finding animals'
+  if (phase === 'measuring distances') return 'Measuring distances'
   if (phase === 'finished') return 'Finishing up…'
   return 'Measuring'
 }
 
-/** The card's own name — the answer to "is it really using the GPU". '' when the engine named neither. */
+/** The card's own name, the answer to "is it really using the GPU". '' when the engine named neither. */
 const card = (inf: Inference): string => inf.gpu ?? inf.device ?? ''
-
-/** The same name as a phrase for the running bar; the no-GPU wording is already a sentence of its own. */
-const runningOn = (inf: Inference): string => {
-  const name = card(inf)
-  return !name || name.toLowerCase().startsWith('cpu') ? name : `on ${name}`
-}
 
 /** What a camera with no labelled flag photo says when hovered. */
 const NOT_LABELLED = 'Label its flag photo in FlagLabel, then press Sync.'
@@ -117,7 +110,7 @@ export default function App() {
           setStatus(s)
           setCameras(c)
         })
-        .catch((e) => setNotice({ text: `Engine unreachable: ${e}`, kind: 'error' })),
+        .catch((e) => setNotice({ text: `The app is not answering. Restart it. (${e})`, kind: 'error' })),
     [],
   )
   useEffect(() => {
@@ -155,7 +148,7 @@ export default function App() {
         setFolderError(null)
         setListing({ of: [path, site, flag, method].join('\u0000'), data: await r.json() })
       })
-      .catch((e) => live && setFolderError(`Engine unreachable: ${e}`))
+      .catch((e) => live && setFolderError(`The app is not answering. Restart it. (${e})`))
     return () => {
       live = false
     }
@@ -271,7 +264,7 @@ export default function App() {
     await refresh()
   }
 
-  if (!status) return <p className="empty dim">{notice ? notice.text : 'Starting the engine…'}</p>
+  if (!status) return <p className="empty dim">{notice ? notice.text : 'Starting…'}</p>
 
   if (!status.signed_in) {
     return (
@@ -287,12 +280,11 @@ export default function App() {
           <div className="brand-copy" ref={copyRef}>
             <h1>How far away<br />was that deer?</h1>
             <p className="dim" style={{ marginTop: 20, fontSize: 15, lineHeight: 1.65 }}>
-              Point it at a folder of camera-trap photos. It finds each animal, reads the ground distance against the
-              flag photo you labelled in FlagLabel, and gives you a distance and its 90% interval, photo by photo,
-              with the numbers on the picture where you can check them.
+              Choose a folder of camera-trap photos. The app finds each deer and tells you how far away it was,
+              using the flag photo you labelled in FlagLabel.
             </p>
           </div>
-          <div className="mono tiny brand-foot">
+          <div className="tiny brand-foot">
             <span>BASE Lab · Center for Wildlife Sustainability Research</span>
             <span className="foot-sep"> · </span>
             <span>Southern Illinois University Carbondale</span>
@@ -311,7 +303,7 @@ export default function App() {
                 <div className="cap">Step 1 of 2</div>
                 <h2 className="grot" style={{ margin: '9px 0 0', fontSize: 26, letterSpacing: '-0.02em' }}>Sign in</h2>
                 <p className="dim small" style={{ margin: '10px 0 0', lineHeight: 1.6 }}>
-                  Use the FlagLabel account you label with. There is no password: a one-time code is emailed to you.
+                  Use your FlagLabel email. We send you a code, no password needed.
                 </p>
                 {notice && <p className={`notice notice-${notice.kind}`} style={{ marginTop: 18 }}>{notice.text}</p>}
                 <label className="cap" style={{ display: 'block', margin: '24px 0 7px' }}>Email</label>
@@ -350,13 +342,20 @@ export default function App() {
   const measured = folder ? folder.rows.filter((r) => r.measured).length : 0
   const flagged = folder ? folder.rows.filter((r) => r.reasons.length > 0).length : 0
   const ready = inf.status === 'ready'
-  // one string, so the header can both show it and keep it whole in the tooltip when the window
-  // is too narrow to draw all of it
-  const syncNote =
-    (status.last_sync
-      ? `synced ${new Date(status.last_sync).toLocaleTimeString(undefined, { hour12: false })}`
-      : 'never synced') +
-    ` · ${status.annotations} flag photos · ${usable.length}/${cameras.length} cameras labelled`
+  // Just when: that is what decides whether to press Sync. The counts are in About.
+  const syncNote = status.last_sync
+    ? `Synced ${new Date(status.last_sync).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}`
+    : 'Not synced yet'
+  const about: [string, ReactNode][] = [
+    ['Version', build ? `v${build.version}${build.commit ? ` (${build.commit})` : ''}` : 'unknown'],
+    ['Models', inf.backend === 'real' ? (inf.weights ?? 'unknown') : 'none installed, numbers are made up'],
+    ['Graphics card', card(inf) || 'unknown'],
+    ['Loaded now', inf.status === 'loading' ? 'loading…' : inf.loaded?.length ? inf.loaded.join(', ') : 'nothing, they load when you press Measure'],
+    ['Settings', inf.fidelity === 'fast' ? 'quick, not the published settings' : 'published settings'],
+    ['Last sync', when(status.last_sync)],
+    ['Flag photos', String(status.annotations)],
+    ['Cameras labelled', `${usable.length} of ${cameras.length}`],
+  ]
 
   return (
     <div className="app">
@@ -364,12 +363,6 @@ export default function App() {
         <header className="topbar">
           <span style={{ color: 'var(--amber)', display: 'flex' }}><Icon name="mark" size={19} width={1.7} /></span>
           <span className="wordmark">CAMTRAP MEASURE</span>
-          {build && (
-            <span className="mono" style={{ fontSize: 10, color: 'var(--faint)' }}
-                  title="The version this computer runs; the launcher updates it at every start">
-              v{build.version}{build.commit && ` (${build.commit})`}
-            </span>
-          )}
 
           <div className="tabs">
             {SECTIONS.map((t) => (
@@ -386,7 +379,7 @@ export default function App() {
           </div>
 
           <div className="spacer" />
-          <span className="mono tiny sync ellipsis" style={{ color: 'var(--faint)' }} title={syncNote}>
+          <span className="tiny sync ellipsis" style={{ color: 'var(--faint)' }} title={syncNote}>
             {syncNote}
           </span>
           <button className="btn" onClick={sync} disabled={busy}>
@@ -394,6 +387,7 @@ export default function App() {
             {busy ? 'Syncing…' : 'Sync'}
           </button>
           <Help topic="sync" align="right" />
+          <About rows={about} />
           <div className="sep" style={{ margin: '12px 2px' }} />
           <button className="rail-foot" title={`${status.email}. Sign out`}
                   onClick={() => post('/api/logout').then(refresh)}>
@@ -434,9 +428,9 @@ export default function App() {
               <span className="cap">Flag photo <Help topic="flag" /></span>
               <span className="field-val">
                 <span style={{ color: 'var(--amber)', display: 'flex' }}><Icon name="flag" size={13} width={1.8} /></span>
-                <select className="bare mono" style={{ fontSize: 12 }} value={scope.flag}
+                <select className="bare" style={{ fontSize: 12 }} value={scope.flag}
                         onChange={(e) => setPicked((s) => ({ ...s, flag: e.target.value }))} disabled={flags.length === 0}>
-                  {flags.length === 0 && <option value="">—</option>}
+                  {flags.length === 0 && <option value="">None</option>}
                   {flags.map((f) => (
                     <option key={f.image_name} value={f.image_name} disabled={!f.ok} title={f.reason ?? undefined}>
                       {f.image_name}{f.captured_at ? ` · ${new Date(f.captured_at).toLocaleDateString()}` : ''}
@@ -484,7 +478,7 @@ export default function App() {
             <div className="spacer" />
             <label className="check tiny" style={{ alignItems: 'center' }}>
               <input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />
-              Re-measure photos that already have a number
+              Redo measured photos
               <Help topic="rerun" align="right" />
             </label>
             {running ? (
@@ -540,32 +534,23 @@ export default function App() {
               <span className="spin" style={{ color: 'var(--amber)', display: 'flex' }}>
                 <Icon name="spinner" size={14} width={2.2} />
               </span>
-              {/* the stage and the models doing it, not just "measuring": the detector looks at every
-                  photo before a single distance is read, and on a full card that first pass is most of
-                  the wait */}
-              <span style={{ fontWeight: 500 }}>
-                {doing(run.phase, (inf.backend === 'real' && inf.loaded) || [])}
-              </span>
-              <span className="mono" style={{ color: 'var(--text-2)' }}>
+              {/* the stage, not just "measuring": the detector looks at every photo before a single
+                  distance is read, and on a full card that first pass is most of the wait */}
+              <span style={{ fontWeight: 500 }}>{doing(run.phase)}</span>
+              <span style={{ color: 'var(--text-2)' }}>
                 {run.phase_total ? `${run.phase_done} / ${run.phase_total}` : `${run.done} / ${run.total}`} photos
               </span>
               <span style={{ color: 'var(--line)' }}>·</span>
-              <span className="mono dim">{plural(run.detections, 'animal')}</span>
+              <span className="dim">{plural(run.detections, 'animal')}</span>
               {run.eta_s !== null && (
                 <>
                   <span style={{ color: 'var(--line)' }}>·</span>
-                  <span className="mono dim">about {duration(run.eta_s)} left</span>
+                  <span className="dim">about {duration(run.eta_s)} left</span>
                 </>
               )}
               <div className="spacer" />
-              {/* the card by name, once: "is it really using the GPU" is the one technical question
-                  worth answering while a run is on screen */}
-              <span className="mono tiny" style={{ color: 'var(--faint)' }}>
-                {inf.backend !== 'real' ? 'made-up numbers (no models installed)' : runningOn(inf)}
-              </span>
-              {inf.fidelity === 'fast' && (
-                <span className="warn tiny">⚠ fast settings, not the published pipeline</span>
-              )}
+              {inf.backend !== 'real' && <span className="warn tiny">Test mode: made-up numbers</span>}
+              {inf.fidelity === 'fast' && <span className="warn tiny">⚠ Quick settings are on. See About.</span>}
             </div>
           </div>
         ) : (
@@ -577,55 +562,30 @@ export default function App() {
                 </span>
                 <span>
                   {inf.download
-                    ? `Downloading model weights ${inf.download.done_gb.toFixed(1)} / ${inf.download.total_gb.toFixed(1)} GB, one time only`
+                    ? `Downloading models, ${inf.download.done_gb.toFixed(1)} of ${inf.download.total_gb.toFixed(1)} GB. One time only.`
                     : 'Loading models…'}
                 </span>
               </>
             ) : inf.status === 'error' ? (
               <>
                 <span className="warn" style={{ display: 'flex' }}><Icon name="warn" size={12} /></span>
-                <span className="warn">Models unavailable: {inf.error}</span>
+                <span className="warn">The models could not load: {inf.error}</span>
               </>
             ) : (
               <>
                 <span className="dot" style={{ color: 'var(--ok)' }} />
                 <span>Ready</span>
                 <Help topic="models" />
-                {inf.backend === 'real' ? (
-                  <>
-                    {card(inf) && (
-                      <>
-                        <span style={{ color: 'var(--line)' }}>·</span>
-                        <span className="mono">{card(inf)}</span>
-                      </>
-                    )}
-                    {inf.weights && <span className="mono dim">{inf.weights}</span>}
-                    {/* the models are loaded per run and dropped after it, so an idle app really is
-                        holding nothing - say so, rather than leaving the technician to guess */}
-                    <span className="mono dim">
-                      {inf.loaded?.length
-                        ? `${inf.loaded.join(' + ')} still loaded`
-                        : 'models load when you press Measure'}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ color: 'var(--line)' }}>·</span>
-                    <span className="mono">made-up numbers (no models installed)</span>
-                  </>
-                )}
                 {/* the published settings are the default; when they are not in use it must be on screen */}
-                {inf.fidelity === 'fast' && (
-                  <span className="warn">⚠ fast settings, not the published pipeline</span>
-                )}
+                {inf.fidelity === 'fast' && <span className="warn">⚠ Quick settings are on. See About.</span>}
                 {inf.warning && <span className="warn">⚠ {inf.warning}</span>}
               </>
             )}
             <div className="spacer" />
-            {run?.status === 'error' && <span className="warn">Run failed: {run.error}</span>}
+            {run?.status === 'error' && <span className="warn">Measuring failed: {run.error}</span>}
             {folder && (
               <>
-                <span className="mono">{measured} / {folder.total} measured</span>
+                <span>{measured} of {folder.total} measured</span>
                 {flagged > 0 && (
                   <>
                     <span style={{ color: 'var(--line)' }}>·</span>
@@ -635,7 +595,7 @@ export default function App() {
                 {folder.unreadable > 0 && (
                   <>
                     <span style={{ color: 'var(--line)' }}>·</span>
-                    <span className="mono">{plural(folder.unreadable, 'unreadable file')}</span>
+                    <span>{plural(folder.unreadable, 'unreadable file')}</span>
                   </>
                 )}
               </>

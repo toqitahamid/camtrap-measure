@@ -34,8 +34,11 @@
 
   --text: #e8eaed;
   --text-2: #c7ccd2;
-  --dim: #8a929c;
-  --faint: #5c646e;
+  /* Every text colour reaches WCAG AA (4.5:1) on the lightest surface it sits on, --raised; --disabled reaches
+     3:1 so a disabled control looks disabled but can still be read (2026-09-29). --ghost is for lines only. */
+  --dim: #a3abb5;
+  --faint: #848c96;
+  --disabled: #6a727c;
   --ghost: #3a4048;
 
   --amber: #e8a13c;
@@ -45,7 +48,7 @@
 
   --ok: #7fb069;
   --ok-bg: #16241a;
-  --bad: #d6544a;
+  --bad: #e36a60;
   --bad-bg: #1e1613;
   --bad-line: #3a2a26;
   --info: #6aa9ff;
@@ -119,7 +122,7 @@ option {
   color: var(--text);
 }
 option:disabled {
-  color: var(--ghost);
+  color: var(--disabled);
 }
 
 /* Type ------------------------------------------------------------------- */
@@ -132,12 +135,10 @@ option:disabled {
   font-variant-numeric: tabular-nums;
 }
 .cap {
-  font-family: var(--grot);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--faint);
+  letter-spacing: 0.01em;
+  color: var(--dim);
 }
 .dim {
   color: var(--dim);
@@ -149,7 +150,7 @@ option:disabled {
   font-size: 12px;
 }
 .tiny {
-  font-size: 11px;
+  font-size: 12px; /* nothing on screen is smaller than 12px (2026-09-29) */
 }
 .warn {
   color: var(--bad);
@@ -158,6 +159,11 @@ option:disabled {
   text-align: right;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
+}
+/* a column heading over numbers lines up with them but is a label, so it stays in the reading face */
+th.num,
+.th.num {
+  font-family: var(--sans);
 }
 .ellipsis {
   overflow: hidden;
@@ -231,10 +237,9 @@ option:disabled {
   border-radius: 3px;
   background: none;
   color: var(--dim);
-  font-family: var(--grot);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   cursor: pointer;
 }
 .tab:hover:not(:disabled) {
@@ -246,7 +251,7 @@ option:disabled {
   font-weight: 700;
 }
 .tab:disabled {
-  color: #31373e;
+  color: var(--disabled);
   cursor: default;
 }
 /* the account, kept round so it reads as a person rather than another control */
@@ -262,7 +267,7 @@ option:disabled {
   align-items: center;
   justify-content: center;
   font-family: var(--grot);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -364,7 +369,7 @@ option:disabled {
   appearance: none;
 }
 .bare:disabled {
-  color: var(--ghost);
+  color: var(--disabled);
   cursor: default;
 }
 .path {
@@ -379,7 +384,7 @@ option:disabled {
   color: var(--text-2);
 }
 .path::placeholder {
-  color: #4a5058;
+  color: var(--faint);
 }
 
 .statusbar {
@@ -391,11 +396,11 @@ option:disabled {
   padding: 0 14px;
   background: var(--pane);
   border-top: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--faint);
+  font-size: 12px;
+  color: var(--dim);
 }
 .statusbar .mono {
-  font-size: 11px;
+  font-size: 12px;
 }
 .runbar {
   flex: none;
@@ -498,7 +503,7 @@ option:disabled {
   background: #22272e;
 }
 .btn:disabled {
-  color: #4a5058;
+  color: var(--disabled);
   border-color: #23282f;
   background: #16191d;
   cursor: default;
@@ -518,9 +523,9 @@ option:disabled {
   color: #e8a08f;
 }
 .btn-sm {
-  height: 24px;
+  height: 26px;
   padding: 0 9px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .btn-icon {
   width: var(--ctl);
@@ -539,7 +544,7 @@ option:disabled {
   border-radius: var(--r-sm);
   background: none;
   color: var(--dim);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
 }
@@ -589,7 +594,7 @@ option:disabled {
   color: var(--text);
 }
 .find input::placeholder {
-  color: #4a5058;
+  color: var(--faint);
 }
 
 .pill {
@@ -598,7 +603,7 @@ option:disabled {
   gap: 6px;
   padding: 3px 9px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 .pill-clean {
@@ -843,9 +848,8 @@ progress::-webkit-progress-value {
   border-radius: 3px 3px 0 0;
   background: var(--ok);
   color: #0c1409;
-  font-family: var(--grot);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   white-space: nowrap;
 }
 .bbox-flagged .tag {
@@ -946,7 +950,7 @@ progress::-webkit-progress-value {
   background: var(--ok);
   color: #0c1409;
   font-family: var(--grot);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -964,8 +968,8 @@ progress::-webkit-progress-value {
 }
 .kv > :nth-child(even) {
   text-align: right;
-  font-family: var(--mono);
-  font-size: 12px;
+  font-weight: 500;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1014,12 +1018,10 @@ progress::-webkit-progress-value {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-family: var(--grot);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--faint);
+  letter-spacing: 0.01em;
+  color: var(--dim);
   border: 0;
   background: none;
   padding: 0;
@@ -1095,8 +1097,7 @@ progress::-webkit-progress-value {
   min-height: 1px;
 }
 .hist span {
-  font-family: var(--mono);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--faint);
   text-align: center;
 }
@@ -1107,12 +1108,10 @@ table {
 }
 th {
   text-align: left;
-  font-family: var(--grot);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--faint);
+  letter-spacing: 0.01em;
+  color: var(--dim);
   padding: 0 12px 8px;
 }
 td {

@@ -1,11 +1,11 @@
 /* RESULTS: what the measured photos add up to, and the file the researcher takes away. The filters on this
-   screen are the export's filters — one query string feeds both, so the file can never disagree with the
+   screen are the export's filters: one query string feeds both, so the file can never disagree with the
    numbers above it. Nothing here writes: the engine is asked, the answer is drawn. */
 
 import Help from './Help'
 import Icon from './Icon'
 import { useEffect, useState, type ReactNode } from 'react'
-import { plural, post, thousands, type Camera, type Summary } from './ui'
+import { NONE, plural, post, thousands, type Camera, type Summary } from './ui'
 
 type Bin = Summary['histogram'][number]
 
@@ -13,7 +13,7 @@ type Bin = Summary['histogram'][number]
 const SITE = 'site:'
 
 /** ponytail: the engine sends binned counts, not the distances themselves, so the honest "median" is the bin
-    the middle measurement falls in — a single interpolated number would claim a precision we were not given. */
+    the middle measurement falls in; a single interpolated number would claim a precision we were not given. */
 function medianBin(bins: Bin[]): Bin | null {
   const total = bins.reduce((n, b) => n + b.n, 0)
   let seen = 0
@@ -28,7 +28,7 @@ function medianBin(bins: Bin[]): Bin | null {
 const spanDays = (from: string, to: string) =>
   Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1)
 
-/** Nothing to draw: one card, one honest line, and a way out where there is one. The card only — the caller
+/** Nothing to draw: one card, one short line, and a way out where there is one. The card only; the caller
     owns the sheet, because a sheet with nothing measured in it may still carry the clear panel beside it. */
 function Message({ icon, title, line, action }: { icon: 'warn' | 'results'; title: string; line: string; action?: ReactNode }) {
   return (
@@ -39,7 +39,7 @@ function Message({ icon, title, line, action }: { icon: 'warn' | 'results'; titl
         </span>
         <div className="stack" style={{ justifyItems: 'center' }}>
           <b className="grot">{title}</b>
-          <span className="small dim">{line}</span>
+          {line && <span className="small dim">{line}</span>}
         </div>
         {action}
       </div>
@@ -55,7 +55,8 @@ export default function Results({ site, cameras, folder, onClear }: {
 }) {
   // The screen answers for the folder in the bar, not for everything this computer has ever measured:
   // otherwise a fresh window shows the last run's numbers over photos the researcher has not opened.
-  const [where, setWhere] = useState<'folder' | 'all'>('folder')
+  // With no folder chosen there is nothing to answer for, so it starts on everything (2026-09-29).
+  const [where, setWhere] = useState<'folder' | 'all'>(folder ? 'folder' : 'all')
   const onlyFolder = where === 'folder'
   // The shell's camera is the default; a local pick holds until the shell is pointed at another camera.
   const [pick, setPick] = useState<{ shell: string; value: string } | null>(null)
@@ -191,14 +192,14 @@ export default function Results({ site, cameras, folder, onClear }: {
       <div className="field" style={{ width: 132, minWidth: 106 }}>
         <span className="cap">Captured from</span>
         <div className="field-val">
-          <input className="bare mono" style={{ fontSize: 12 }} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <input className="bare" style={{ fontSize: 12 }} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </div>
       </div>
       <div className="sep" />
       <div className="field" style={{ width: 132, minWidth: 106 }}>
         <span className="cap">To</span>
         <div className="field-val">
-          <input className="bare mono" style={{ fontSize: 12 }} type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <input className="bare" style={{ fontSize: 12 }} type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
       </div>
       <div className="sep" />
@@ -220,7 +221,7 @@ export default function Results({ site, cameras, folder, onClear }: {
   /* Clearing is the one thing on this screen that writes. It clears the CAMERA, never the filters above
      it: a date range or a species tick is a way of looking, not a way of choosing what to delete, and a
      button that quietly meant "the 43 rows currently on screen" would be the wrong button. By the same
-     reasoning these buttons do not hide when the filters show nothing — they answer for the store. */
+     reasoning these buttons do not hide when the filters show nothing: they answer for the store. */
   const clearBox = stored > 0 && (
     <div className="stack" style={{ gap: 8 }}>
       {/* One camera only: a site in the filter is a way of reading the numbers, not a thing to delete. */}
@@ -238,7 +239,7 @@ export default function Results({ site, cameras, folder, onClear }: {
         >
           <Icon name="trash" size={14} width={2} />
           {confirmClear
-            ? `Clear every measurement for ${oneCamera}. Click again`
+            ? `Click again to clear ${oneCamera}`
             : `Clear ${oneCamera}'s measurements`}
         </button>
       )}
@@ -258,11 +259,11 @@ export default function Results({ site, cameras, folder, onClear }: {
       >
         <Icon name="trash" size={14} width={2} />
         {confirmAll
-          ? 'Clear EVERY measurement on this computer. Click again'
+          ? 'Click again to clear ALL measurements'
           : 'Clear all measurements'}
       </button>
       <span className="tiny faint" style={{ textAlign: 'center' }}>
-        Your photos and everything synced are kept <Help topic="clearCamera" align="right" />
+        Your photos are kept <Help topic="clearCamera" align="right" />
       </span>
     </div>
   )
@@ -275,7 +276,7 @@ export default function Results({ site, cameras, folder, onClear }: {
       </div>
       <div className="scroll" style={{ padding: 16, display: 'grid', gap: 14, alignContent: 'start' }}>
         <p className="small dim" style={{ lineHeight: 1.6 }}>
-          {plural(stored, 'photo')} measured on this computer, whatever the filters above are showing.
+          {plural(stored, 'photo')} measured on this computer.
         </p>
         {clearBox}
       </div>
@@ -289,8 +290,8 @@ export default function Results({ site, cameras, folder, onClear }: {
         <div className="sheet">
           <Message
             icon="warn"
-            title="The engine is not answering"
-            line={`These numbers come from the engine, and it could not be reached: ${error}.`}
+            title="The app is not answering"
+            line={`Try again, or restart the app. (${error})`}
             action={
               <button className="btn" onClick={() => setAttempt(attempt + 1)}>
                 <Icon name="sync" size={13} />
@@ -308,8 +309,8 @@ export default function Results({ site, cameras, folder, onClear }: {
         <div className="sheet">
           <Message
             icon="results"
-            title="No photo folder chosen"
-            line="These are the results for one folder of photos. Pick a folder in MEASURE, or set Photos to everything measured to see every result on this computer."
+            title="No folder chosen"
+            line="Pick a folder in MEASURE, or set Photos to Everything measured."
           />
           {clearCard}
         </div>
@@ -320,7 +321,7 @@ export default function Results({ site, cameras, folder, onClear }: {
       <>
         {filters}
         <div className="sheet">
-          <Message icon="results" title="Reading the results…" line="Counting what has been measured in this selection." />
+          <Message icon="results" title="Reading the results…" line="" />
         </div>
       </>
     )
@@ -334,8 +335,8 @@ export default function Results({ site, cameras, folder, onClear }: {
             title={onlyFolder ? 'Nothing measured in this folder yet' : 'Nothing measured in this selection'}
             line={
               onlyFolder
-                ? 'Measure this folder in MEASURE, or set Photos to everything measured.'
-                : 'Measure a folder in MEASURE, or widen the camera and dates above.'
+                ? 'Measure it in MEASURE, or set Photos to Everything measured.'
+                : 'Measure a folder in MEASURE, or widen the filters above.'
             }
           />
           {clearCard}
@@ -349,7 +350,7 @@ export default function Results({ site, cameras, folder, onClear }: {
   const mid = medianBin(bins)
   const binWidth = bins.length > 0 ? bins[0].hi - bins[0].lo : 0
   const bad = summary.suspicious > 0
-  // Suspicious rows are counted inside `deer`, so what the file will hold is one subtraction, not a guess.
+  // Rows that need a look are counted inside `deer`, so what the file will hold is one subtraction, not a guess.
   const exported = includeSuspicious ? summary.deer : summary.deer - summary.suspicious
   // Bars compare cameras against each other, so the camera whose animals stand furthest off fills the width.
   const widest = Math.max(1, ...summary.cameras.map((c) => c.median_m ?? 0))
@@ -385,7 +386,7 @@ export default function Results({ site, cameras, folder, onClear }: {
     setSaving(true)
     const r = await fetch(`/api/export/split?${q}`, { method: 'POST' }).catch(() => null)
     setSaving(false)
-    if (r === null) return setSaveNote('The engine could not be reached.')
+    if (r === null) return setSaveNote('The app is not answering. Try again.')
     const body = await r.json()
     if (!r.ok) return setSaveNote(body.detail ?? `Saving failed (${r.status})`)
     setSaved({ folder: body.folder, count: body.count })
@@ -411,14 +412,14 @@ export default function Results({ site, cameras, folder, onClear }: {
               <b>{thousands(summary.detections)}</b>
             </div>
             <div className="card tile">
-              {/* ponytail: with every species kept this repeats Animals — true, and clearer than hiding the tile. */}
+              {/* ponytail: with every species kept this repeats Animals: true, and clearer than hiding the tile. */}
               <div className="cap">{allSpecies ? 'All species' : 'Deer'}</div>
               <b>{thousands(summary.deer)}</b>
             </div>
             <div className="card tile">
               <div className="cap">Median distance</div>
               <b>
-                {mid ? `${mid.lo}–${mid.hi}` : '—'}
+                {mid ? `${mid.lo}–${mid.hi}` : NONE}
                 <span className="dim" style={{ fontSize: 14 }}> m</span>
               </b>
             </div>
@@ -436,19 +437,10 @@ export default function Results({ site, cameras, folder, onClear }: {
                   {binWidth} m bins · {plural(measured, 'measurement')}
                 </span>
               )}
-              <div className="spacer" />
-              {mid && (
-                <span className="mono tiny faint">
-                  median in the {mid.lo}–{mid.hi} m bin
-                </span>
-              )}
             </div>
             <div style={{ padding: '16px 16px 10px' }}>
               {bins.length === 0 ? (
-                <p className="small dim">
-                  No distances in this selection. An animal enters the histogram once the ground could be read under it. The
-                  rows that need a look say why it could not.
-                </p>
+                <p className="small dim">No distances here yet.</p>
               ) : (
                 <div className="hist">
                   {bins.map((b, i) => (
@@ -469,7 +461,7 @@ export default function Results({ site, cameras, folder, onClear }: {
             <div className="pane-head">
               <span className="cap">By camera</span>
               <div className="spacer" />
-              <span className="small faint">click a camera to see only its numbers</span>
+              <span className="small faint">Click a camera to show only it</span>
             </div>
             <div className="scroll" style={{ padding: '12px 2px 0' }}>
               <table>
@@ -489,7 +481,7 @@ export default function Results({ site, cameras, folder, onClear }: {
                     <tr key={c.site}>
                       <td>
                         <button
-                          className="bare mono"
+                          className="bare"
                           title={c.site === camera ? 'Show every camera again' : `Show only ${c.site}`}
                           onClick={() => chooseCamera(c.site === camera ? '' : c.site)}
                         >
@@ -499,7 +491,7 @@ export default function Results({ site, cameras, folder, onClear }: {
                       <td className="num">{thousands(c.photos)}</td>
                       <td className="num">{thousands(c.detections)}</td>
                       <td className="num">{thousands(c.deer)}</td>
-                      <td className="num">{c.median_m ?? '—'}</td>
+                      <td className="num">{c.median_m ?? NONE}</td>
                       <td className={c.suspicious > 0 ? 'num warn' : 'num faint'}>{c.suspicious}</td>
                       <td>
                         {c.median_m === null ? (
@@ -529,32 +521,21 @@ export default function Results({ site, cameras, folder, onClear }: {
           {/* Scrolls rather than clips: on a short window the panel is taller than the card, and what fell
               off the bottom used to be the clear buttons. */}
           <div className="scroll" style={{ padding: 16, display: 'grid', gap: 14, alignContent: 'start' }}>
-            <p className="small dim" style={{ lineHeight: 1.6 }}>
-              One row per animal, with its distance, the 90% interval and the flag photo it was measured against. Columns and
-              units are written into the file's header lines.
-            </p>
+            <p className="small dim" style={{ lineHeight: 1.6 }}>One row per animal, with its distance and 90% range.</p>
 
             <label className="check">
               <input type="checkbox" checked={allSpecies} onChange={(e) => setAllSpecies(e.target.checked)} />
-              <span>
-                Write every species the detector named.
-                <br />
-                <span className="faint">Unticked, the file keeps white-tailed deer and unsure only.</span>
-              </span>
+              <span>Include other animals</span>
             </label>
             <label className="check">
               <input type="checkbox" checked={includeSuspicious} onChange={(e) => setIncludeSuspicious(e.target.checked)} />
-              <span>
-                Write the {plural(summary.suspicious, 'row')} that need{summary.suspicious === 1 ? 's' : ''} a look.
-                <br />
-                <span className="faint">Each one carries its reason in the flag column.</span>
-              </span>
+              <span>Include rows that need a look ({summary.suspicious})</span>
             </label>
 
             {!includeSuspicious && bad && (
               <div className="notice notice-warn row" style={{ gap: 7 }}>
                 <Icon name="warn" />
-                {plural(summary.suspicious, 'row')} will be left out
+                {summary.suspicious === 1 ? '1 row that needs a look is left out' : `${summary.suspicious} rows that need a look are left out`}
               </div>
             )}
 
@@ -599,7 +580,7 @@ export default function Results({ site, cameras, folder, onClear }: {
                   <Icon name="folder" size={15} width={2} />
                   {saving ? 'Saving…' : typedTo !== null ? 'Save files' : 'Choose a folder and save'}
                 </button>
-                <span className="mono tiny faint" style={{ textAlign: 'center' }}>
+                <span className="tiny faint" style={{ textAlign: 'center' }}>
                   {splitName}, …
                 </span>
                 {saved && (
@@ -626,13 +607,13 @@ export default function Results({ site, cameras, folder, onClear }: {
                   <Icon name="download" size={15} width={2} />
                   Download CSV
                 </a>
-                <span className="mono tiny faint" style={{ textAlign: 'center' }}>
+                <span className="tiny faint" style={{ textAlign: 'center' }}>
                   {fileName}
                 </span>
               </>
             ) : (
               <p className="small faint" style={{ textAlign: 'center' }}>
-                No rows to write: everything in this selection is filtered out.
+                Nothing to export with these filters.
               </p>
             )}
 
@@ -646,7 +627,7 @@ export default function Results({ site, cameras, folder, onClear }: {
               In this selection
             </div>
             <div className="kv">
-              <span className="small dim">Rows exported</span>
+              <span className="small dim">Rows in the file</span>
               <span>{thousands(exported)}</span>
               <span className="small dim">Cameras</span>
               <span>{summary.cameras.length}</span>

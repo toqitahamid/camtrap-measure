@@ -1,5 +1,5 @@
 /* What every part of the window shares: the engine's JSON as types, the few formatters that must agree
-   across the three sections, and the icon set. No state, no fetching — those live where they are used. */
+   across the sections. No state, no fetching: those live where they are used. */
 
 export type Inference = {
   status: 'loading' | 'ready' | 'error'
@@ -133,10 +133,13 @@ export const post = (url: string, body?: unknown) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 
+/** What an empty cell shows. Not an em dash: the researcher asked for none on screen (2026-09-29). */
+export const NONE = '–'
+
 export const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : 'never')
-export const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
+export const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : NONE)
 export const clock = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleTimeString(undefined, { hour12: false }) : '—'
+  iso ? new Date(iso).toLocaleTimeString(undefined, { hour12: false }) : NONE
 export const stamp = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : 'no capture date')
 export const duration = (s: number) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`)
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -148,9 +151,9 @@ export const lead = (r: Row): Det | null =>
     (best, d) => (d.distance_m === null ? best : best === null || d.distance_m < (best.distance_m ?? Infinity) ? d : best),
     null,
   )
-export const metres = (d: Det | null) => (d && d.distance_m !== null ? `${d.distance_m.toFixed(1)} m` : '—')
+export const metres = (d: Det | null) => (d && d.distance_m !== null ? `${d.distance_m.toFixed(1)} m` : NONE)
 export const band = (d: Det | null) =>
-  d && d.q05_m !== null && d.q95_m !== null ? `${d.q05_m.toFixed(1)}–${d.q95_m.toFixed(1)}` : '—'
+  d && d.q05_m !== null && d.q95_m !== null ? `${d.q05_m.toFixed(1)}–${d.q95_m.toFixed(1)}` : NONE
 
 /** measured and clean · measured and worth a look · never measured · measured against another flag photo */
 export type State = 'clean' | 'flagged' | 'empty' | 'new' | 'stale'
@@ -162,12 +165,21 @@ export function state(r: Row): State {
   return r.detections.length === 0 ? 'empty' : 'clean'
 }
 export const STATE_LABEL: Record<State, string> = {
-  clean: 'Clean',
+  clean: 'Looks fine',
   flagged: 'Needs a look',
-  empty: 'Empty frame',
+  empty: 'No animal',
   new: 'Not measured',
-  stale: 'Answer out of date',
+  stale: 'Out of date',
 }
+
+/** Whether the photo lined up with its flag photo, in the words the screen uses. The engine's two alignment
+    reasons are the only ones that name the flag photo, so matching that is how the window knows which one it is. */
+export function linesUp(r: Row): 'Good' | 'Check' | 'No' {
+  if (r.match_score === null) return 'No'
+  return r.reasons.some((why) => why.includes('flag photo')) ? 'Check' : 'Good'
+}
+/** How sure the detector is that a box holds an animal, as a percentage. */
+export const sure = (d: Det) => `${Math.round(d.confidence * 100)}%`
 
 export const photoSrc = (path: string, size: 'thumb' | 'full') =>
   `/api/photo?size=${size}&path=${encodeURIComponent(path)}`

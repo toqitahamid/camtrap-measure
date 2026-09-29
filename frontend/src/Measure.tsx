@@ -1,4 +1,4 @@
-/* MEASURE — the folder as a list, one frame at a time, and the number the run read from it.
+/* MEASURE: the folder as a list, one frame at a time, and the number the run read from it.
    The shell owns the bars, the run and the folder listing; this section only renders what
    /api/folder returned and asks for the photos the user picked to be measured. */
 
@@ -6,16 +6,19 @@ import Help from './Help'
 import Icon from './Icon'
 import { useEffect, useRef, useState } from 'react'
 import {
+  NONE,
   STATE_LABEL,
   band,
   clock,
   flagSrc,
   lead,
+  linesUp,
   metres,
   photoSrc,
   plural,
   stamp,
   state,
+  sure,
   type Det,
   type Folder,
   type Methods,
@@ -52,7 +55,7 @@ function note(r: Row): string {
     case 'new':
       return `${time} · not measured`
     case 'stale':
-      return `${time} · answer out of date`
+      return `${time} · out of date`
     default:
       return time
   }
@@ -61,7 +64,7 @@ function note(r: Row): string {
 /* The ruler runs 0–25 m: past that a camera-trap distance is guesswork anyway. */
 const SCALE_M = 25
 const pct = (m: number) => Math.min(100, Math.max(0, (m / SCALE_M) * 100))
-const interval = (d: Det) => (d.q05_m === null || d.q95_m === null ? '—' : `${band(d)} m`)
+const interval = (d: Det) => (d.q05_m === null || d.q95_m === null ? NONE : `${band(d)} m`)
 
 export default function Measure({
   scope,
@@ -81,7 +84,7 @@ export default function Measure({
   running: boolean // a run is actually in flight; `busy` is also true while the models load
   onMeasure: (paths: string[]) => void
   onClear: (what: { path?: string; site?: string; everything?: boolean }) => void
-  // ponytail: optional because the ticket's signature stops above — the shell hands these over when the table
+  // ponytail: optional because the ticket's signature stops above; the shell hands these over when the table
   // opens a row here, and when the folder listing itself failed. Omitting them changes nothing.
   focus?: string | null
   error?: string | null
@@ -107,7 +110,7 @@ export default function Measure({
   useEffect(() => {
     seen.current?.scrollIntoView({ block: 'nearest' })
   }, [cur?.path])
-  const methodLabel = (m: string | null) => (m ? (methods.methods[m]?.label ?? m) : '—')
+  const methodLabel = (m: string | null) => (m ? (methods.methods[m]?.label ?? m) : NONE)
 
   const go = (r: Row) => {
     setPath(r.path)
@@ -156,7 +159,7 @@ export default function Measure({
       <div className="pane pane-l" style={{ width: 304, flex: 'none' }}>
         <div className="pane-head">
           <span className="cap">Photos</span>
-          <span className="mono tiny faint">{rows.length}</span>
+          <span className="tiny faint">{rows.length}</span>
         </div>
         {rows.length > 0 && (
           <div className="row" style={{ gap: 3, padding: '8px 11px', borderBottom: '1px solid var(--hair)' }}>
@@ -173,7 +176,7 @@ export default function Measure({
           </div>
         ) : folder === null ? (
           <div className="empty">
-            <p className="dim small">No folder chosen yet. Pick the folder of camera-trap photos in the bar above.</p>
+            <p className="dim small">No folder chosen.</p>
           </div>
         ) : rows.length === 0 ? (
           <div className="empty">
@@ -184,7 +187,7 @@ export default function Measure({
           </div>
         ) : list.length === 0 ? (
           <div className="empty">
-            <p className="dim small">No photo is {view === 'new' ? 'still unmeasured' : 'flagged for a look'}. Every one of the {rows.length} is fine.</p>
+            <p className="dim small">No photo {view === 'new' ? 'is still unmeasured' : 'needs a look'}.</p>
             <button className="btn btn-sm" onClick={() => setView('all')}>Show all {rows.length}</button>
           </div>
         ) : (
@@ -213,7 +216,7 @@ export default function Measure({
                 >
                   <img className="thumb" src={photoSrc(r.path, 'thumb')} alt="" loading="lazy" />
                   <span className="item-text">
-                    <span className="mono small">{r.name}</span>
+                    <span className="small">{r.name}</span>
                     <span className={`tiny ${rst === 'flagged' ? 'warn' : 'faint'}`}>{note(r)}</span>
                   </span>
                   {r.measured && d && <span className="grot" style={{ fontWeight: 600 }}>{metres(d)}</span>}
@@ -245,19 +248,19 @@ export default function Measure({
       <div className="viewer">
         {!cur ? (
           <div className="stage">
-            <p className="dim small">{folder === null ? 'Choose a folder to see its photos here.' : 'Nothing to show.'}</p>
+            <p className="dim small">{folder === null ? 'Choose a photo folder in the bar above to start.' : 'Nothing to show.'}</p>
           </div>
         ) : (
           <>
             <div className="pane-head" style={{ background: 'var(--pane)' }}>
-              <span className="mono small">{cur.name}</span>
+              <span className="small">{cur.name}</span>
               <span className="small faint">{stamp(cur.captured_at)}</span>
               <div className="spacer" />
               <button
                 className="btn btn-sm"
                 aria-pressed={showFlag}
                 disabled={!against}
-                title="Show the frame every distance in this photo is read against"
+                title="Show the flag photo this photo is measured against"
                 style={{ color: showFlag ? 'var(--amber)' : undefined }}
                 onClick={() => setShowFlag((f) => !f)}
               >
@@ -274,7 +277,7 @@ export default function Measure({
                 <Icon name="table" size={12} />
                 Boxes
               </button>
-              <span className="mono tiny faint">{pos(at + 1)} / {pos(list.length)}</span>
+              <span className="tiny faint">{pos(at + 1)} / {pos(list.length)}</span>
               <button className="btn btn-sm btn-icon" aria-label="Previous photo (left arrow)" disabled={at === 0} onClick={() => step(-1)}>
                 <Icon name="left" size={13} width={2.3} />
               </button>
@@ -299,11 +302,11 @@ export default function Measure({
                     onMouseLeave={() => setHot(null)}
                   >
                     <span className="tag">{i + 1} · {d.species} · {metres(d)}</span>
-                    {/* the dashed line sits where the ground was read — the distance is that line's, not the box's */}
+                    {/* the dashed line sits where the ground was read: the distance is that line's, not the box's */}
                     <span className="foot" />
                   </div>
                 ))}
-                {showFlag && <span className="frame-note">Flag photo {against}. Every distance is read against this frame</span>}
+                {showFlag && <span className="frame-note">Flag photo {against}</span>}
               </div>
             </div>
           </>
@@ -327,9 +330,7 @@ export default function Measure({
         {!cur ? (
           <div className="empty">
             <p className="dim small">
-              {folder === null
-                ? 'Nothing is measured yet. Pick a camera, a flag photo and a folder in the bar above.'
-                : 'Select a photo on the left to see its measurement.'}
+              {folder === null ? '' : 'Pick a photo on the left.'}
             </p>
           </div>
         ) : running && !cur.measured ? (
@@ -337,19 +338,13 @@ export default function Measure({
           <div className="empty">
             <span className="spin" style={{ color: 'var(--amber)' }}><Icon name="spinner" size={30} width={1.8} /></span>
             <div className="grot" style={{ fontSize: 14, fontWeight: 600 }}>Measuring…</div>
-            <p className="dim small" style={{ lineHeight: 1.55 }}>
-              Detecting animals, then aligning the frame to <span className="mono">{against}</span> to read the ground distance.
-              Distances appear here as each photo finishes.
-            </p>
+            <p className="dim small" style={{ lineHeight: 1.55 }}>The distance appears here when this photo is done.</p>
           </div>
         ) : !cur.measured ? (
           <div className="empty">
             <span style={{ color: 'var(--edge)' }}><Icon name="mark" size={42} width={1.4} /></span>
             <div>
               <div className="grot" style={{ fontSize: 15, fontWeight: 600 }}>Not measured yet</div>
-              <p className="dim small" style={{ marginTop: 7, lineHeight: 1.55 }}>
-                This photo has no distance. Measure it on its own to check one frame, or run the whole folder from the bar above.
-              </p>
             </div>
             <button className="btn btn-amber btn-wide" style={{ height: 34, fontSize: 13 }} onClick={() => onMeasure([cur.path])}>
               <Icon name="measure" size={15} width={2.1} />
@@ -357,10 +352,10 @@ export default function Measure({
             </button>
             <div className="kv" style={{ width: '100%', textAlign: 'left', paddingTop: 6, borderTop: '1px solid var(--hair)' }}>
               <span className="cap">Camera</span>
-              <span>{scope.site || '—'}</span>
-              <span className="cap">Will measure against</span>
-              <span>{against || '—'}</span>
-              <span className="cap">Read at <Help topic="method" /></span>
+              <span>{scope.site || NONE}</span>
+              <span className="cap">Flag photo</span>
+              <span>{against || NONE}</span>
+              <span className="cap">Distance read at <Help topic="method" /></span>
               <span>{methodLabel(scope.method)}</span>
             </div>
           </div>
@@ -371,8 +366,8 @@ export default function Measure({
                 {best === null || best.distance_m === null ? (
                   <p className="dim small">
                     {cur.detections.length === 0
-                      ? 'No animal was detected in this photo.'
-                      : 'An animal was found, but no distance could be read from this frame.'}
+                      ? 'No animal in this photo.'
+                      : 'An animal was found, but no distance could be read.'}
                   </p>
                 ) : (
                   <>
@@ -382,8 +377,8 @@ export default function Measure({
                       <Help topic="distance" />
                       <div className="spacer" />
                       <div style={{ textAlign: 'right' }}>
-                        <div className="cap">90% between <Help topic="interval" align="right" /></div>
-                        <div className="mono small" style={{ color: 'var(--text-2)' }}>{interval(best)}</div>
+                        <div className="cap">90% range <Help topic="interval" align="right" /></div>
+                        <div className="small" style={{ color: 'var(--text-2)' }}>{interval(best)}</div>
                       </div>
                     </div>
                     <div style={{ marginTop: 18 }}>
@@ -395,7 +390,7 @@ export default function Measure({
                         <div className="tick" style={{ left: `${pct(best.distance_m)}%` }} />
                         <div className="ticks" />
                       </div>
-                      <div className="mono faint" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
+                      <div className="faint" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                         {[0, 5, 10, 15, 20, 25].map((m) => (
                           <span key={m}>{m === SCALE_M ? `${m} m` : m}</span>
                         ))}
@@ -423,7 +418,7 @@ export default function Measure({
                         <span className="n">{i + 1}</span>
                         <span style={{ flex: 1, minWidth: 0 }}>
                           <span className="ellipsis" style={{ display: 'block' }}>{d.species}</span>
-                          <span className="mono tiny faint" style={{ display: 'block' }}>box confidence {d.confidence.toFixed(2)}</span>
+                          <span className="tiny faint" style={{ display: 'block' }}>{sure(d)} sure it is an animal</span>
                         </span>
                         <span className="grot" style={{ fontSize: 15, fontWeight: 600 }}>{metres(d)}</span>
                       </button>
@@ -433,17 +428,18 @@ export default function Measure({
               )}
 
               {/* ponytail: the design also showed when the photo was measured, but a Row carries no measured-at
-                  timestamp — left out rather than faked from the capture time. */}
+                  timestamp, so it is left out rather than faked from the capture time. */}
               <div className="kv" style={{ padding: '14px 16px', borderTop: '1px solid var(--hair)' }}>
                 <span className="cap">Camera</span>
-                <span>{againstSite || '—'}</span>
-                <span className="cap">Measured against <Help topic="flag" /></span>
-                <span>{cur.flag_image ?? '—'}</span>
-                <span className="cap">Alignment <Help topic="alignment" /></span>
-                <span className={cur.match_score === null ? 'warn' : undefined}>
-                  {cur.match_score === null ? 'no alignment' : plural(cur.match_score, 'point')}
+                <span>{againstSite || NONE}</span>
+                <span className="cap">Flag photo <Help topic="flag" /></span>
+                <span>{cur.flag_image ?? NONE}</span>
+                <span className="cap">Lines up with flag photo <Help topic="alignment" /></span>
+                <span className={linesUp(cur) === 'Good' ? undefined : 'warn'}
+                      title={cur.match_score === null ? undefined : plural(cur.match_score, 'matching point')}>
+                  {linesUp(cur)}
                 </span>
-                <span className="cap">Read at</span>
+                <span className="cap">Distance read at</span>
                 <span>{methodLabel(cur.method)}</span>
               </div>
             </div>
@@ -451,9 +447,8 @@ export default function Measure({
             <div className="stack" style={{ padding: '14px 16px', borderTop: '1px solid var(--line)', gap: 9 }}>
               <button className="btn btn-amber btn-wide" disabled={busy} onClick={() => onMeasure([cur.path])}>
                 <Icon name="sync" />
-                Measure {cur.name} again
+                Measure this photo again
               </button>
-              <span className="tiny faint" style={{ textAlign: 'center' }}>Uses the flag photo and method set in the bar above</span>
               {cur.measured && (
                 <button
                   className="btn btn-wide"
@@ -467,12 +462,12 @@ export default function Measure({
                   onBlur={() => setConfirmClear(false)}
                 >
                   <Icon name="trash" />
-                  {confirmClear ? `Clear it. Click again to confirm` : `Clear this photo's measurement`}
+                  {confirmClear ? 'Click again to clear' : 'Clear this measurement'}
                 </button>
               )}
               {cur.measured && (
                 <span className="tiny faint" style={{ textAlign: 'center' }}>
-                  The photo itself is never deleted <Help topic="clearPhoto" align="right" />
+                  The photo is kept <Help topic="clearPhoto" align="right" />
                 </span>
               )}
             </div>

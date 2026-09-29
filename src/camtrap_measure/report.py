@@ -132,7 +132,7 @@ DET_KEYS = ("idx", "x1", "y1", "x2", "y2", "species", "confidence", "distance_m"
             "method", "match_score")
 
 
-UNREADABLE = "this file could not be read — it may be truncated or not really a JPEG"
+UNREADABLE = "this file could not be read. It may be damaged or not a real JPEG."
 
 # Folders `folder()` has listed since the engine started. The photo endpoint serves their JPEGs as well as
 # measured ones: the list, the table and the frame show a folder before anything in it has been measured, and
