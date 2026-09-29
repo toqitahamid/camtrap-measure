@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calibration, density, dialogs, inference, measure, report, store
+from . import calibration, density, dialogs, inference, measure, report, store, updates
 from . import supabase_ro as sb
 
 __version__ = version("camtrap-measure")
@@ -200,6 +200,32 @@ def run_status():
 def cancel_run():
     """Stop after the photo in flight. Finished photos keep their answers; Measure again continues."""
     return measure.cancel()
+
+
+@app.get("/api/update")
+def update_status():
+    """Is a newer version fetched and waiting for the next start? The launcher writes it (see updates.py)."""
+    return {**updates.waiting(), "can_restart": updates.can_restart()}
+
+
+def _leave_soon() -> None:
+    """End this process the way closing the window does, once the answer below has reached the window."""
+    from .main import shutdown
+
+    threading.Timer(0.5, shutdown).start()
+
+
+@app.post("/api/update/restart")
+def restart_to_update():
+    """Start the launcher again (it waits for this process, then applies the update), and close."""
+    if measure.current and measure.current["status"] == "running":
+        raise HTTPException(409, "Finish or stop the run first.")
+    try:
+        updates.relaunch()
+    except (RuntimeError, OSError) as e:
+        raise HTTPException(400, str(e))
+    _leave_soon()
+    return {"restarting": True}
 
 
 @app.get("/api/methods")
