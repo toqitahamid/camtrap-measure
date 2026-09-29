@@ -671,10 +671,11 @@ th.num,
   color: var(--amber);
   background: var(--amber-bg);
 }
+/* Placed by Help.tsx against the window (position: fixed), so a scrolling panel cannot clip it. */
 .help-pop {
-  position: absolute;
-  top: 22px;
+  position: fixed;
   z-index: 60;
+  max-width: calc(100vw - 16px);
   display: grid;
   gap: 7px;
   width: 300px;
@@ -691,12 +692,6 @@ th.num,
   white-space: normal;
   box-shadow: 0 10px 30px rgb(0 0 0 / 55%);
   cursor: default;
-}
-.help-pop-left {
-  left: -6px;
-}
-.help-pop-right {
-  right: -6px;
 }
 .help-pop b {
   color: var(--text);
