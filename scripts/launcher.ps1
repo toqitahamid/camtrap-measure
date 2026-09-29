@@ -105,7 +105,14 @@ function App-Window($rootId) {
     # later with nothing on screen in between. The process list is read only when such a window exists.
     $candidates = [CamTrap.Win]::Visible($Title)
     if ($candidates.Count -eq 0) { return [IntPtr]::Zero }
-    $tree = Tree-Ids $rootId
+    try {
+        $tree = Tree-Ids $rootId
+    } catch {
+        # A machine whose process list cannot be read still gets a start: any visible window of the title.
+        if (-not $script:TreeFailed) { Log "could not read the process list ($($_.Exception.Message)) - any visible $Title window counts" }
+        $script:TreeFailed = $true
+        return $candidates[0].Key
+    }
     foreach ($c in $candidates) { if ($tree.ContainsKey($c.Value)) { return $c.Key } }
     return [IntPtr]::Zero
 }
