@@ -1287,3 +1287,55 @@ DENSITY section after RESULTS shows both.
 
 Evidence: 305 passed, 1 skipped; `npm run build` and oxlint clean; real engine on the workstation store: 37 of 38
 deer, hazard-rate (AIC 176.2 vs 177.1), 7.6 deer/km², 90% range 6.1 to 11, P 0.606, radius 10.1 m.
+
+## The survey inputs come from the images; one photo per snapshot moment (2026-09-28, later)
+
+The researcher: "instead of relying on seth, can you get the information from the image itself". All three
+inputs of the density now come from the photos and the flag calibrations. Each can still be typed over, and the
+screen says where each one came from. This replaces the defaults in "Distance sampling (2026-09-28)" above.
+
+- **A burst was counted once per photo (bug).** Every photo counted as a snapshot moment. The dept's BTC-7E stamps
+  whole seconds and fires three-shot bursts inside one second, re-firing 2 to 7 s later while the deer stays
+  (MAS_CAM01: 08:40:56, :03 x3, :06 x3, :08 x3, :15). So a deer counted three times at one moment. Now the
+  snapshot moments are fixed times every t seconds on the capture clock. Howe et al. 2017 fix the moments in
+  advance "as specific times of day", so they cannot follow the animals. Each camera's photos are grouped by
+  floor(time / t), and only the first photo of each moment counts (by capture time, then file name). This applies
+  to the estimate and the R file alike, through the one `survey()` both call. Photos with no capture time cannot
+  be placed on the grid, so they are all kept and counted. The screen and the file header say
+  "N photos at snapshot moments of M". On the workstation store: 13 of 38 photos, 12 deer used where there were 37.
+- **t from the photos.** Take the gaps between a camera's consecutive distinct capture seconds, 60 s or less (one
+  sequence), pooled over the cameras in the filter. t is their median, rounded to a whole second, at least 1. The
+  screen says "from N gaps between photos". What the docs say: Howe et al. 2017 suggest t from 0.25 to 3 s, lower
+  for fast or rare animals and fast-triggering cameras. The camera must be able to fire again at once or after a
+  minimal delay, since effort assumes a photo could be taken at every moment. The Distance camera-trap vignette
+  says nothing on choosing t. Neither gives a rule for reading t from still photos, so the median re-fire gap
+  stands. It is the camera's own cycle while a deer stays, and a whole-second median is robust to bursts that
+  straddle a second boundary. A t above 3 s gets a note on screen. Workstation: 3 s from 12 gaps.
+- **Active days = the deployment.** The flag photos are the service visits (MAS_CAM01: 19 Dec 2025 and
+  1 Apr 2026, photos in Jan 2026). A deployment starts at the latest flag photo taken on or before the camera's
+  first photo. It ends at the last DateTimeOriginal of any JPEG in the camera's photo folders (the folders its
+  measured photos sit in, measured or not). Days are fractional. A date filter cuts both ends, because the deer
+  outside it are not counted either. With no flag photo before the first photo, the old first-to-last-photo rule
+  stands. The folder scan reads DateTimeOriginal only and is cached per folder, keyed by file count and newest
+  mtime, so a re-render does not reopen the JPEGs (1 s cold, 5 ms warm here).
+- **Field of view from the flag calibration.** The fit stores f (pixels) and cx. View = 2 atan((W/2)/f). The fit
+  used the latest usable calibration on or before the camera's first photo, else its latest. W = 2 cx, the width
+  of the image the fit was made in. The brief said W from the photo, else 2 cx. We use 2 cx because f is in the
+  fitted image's pixels, whatever size a survey photo or the cached flag photo is. Reading the cached flag file
+  gave 0 degrees on a test store whose flag photo is a 2 px stub, and would be wrong for any resized copy. For the
+  dept's 1920 px photos the two are the same. The 42 degree "check" stays only for a camera with no usable
+  calibration. Workstation: MAS_CAM01 35.5 (f 3001), MAS_CAM04 34.1 (f 3130), measured against the 38 to
+  41 degrees the spec sheets disagree on.
+- **The Browning EXIF strings are not decoded.** UserComment reads "C[P] R0S1 T25F:P0000 MAS01 M1" and
+  ImageDescription reads "P00[805:793] TT[534] E[144:0142]G[000:0x00] BV[111:0] IR[X:F:34]". There is no
+  documented source for either: not ExifTool, not Browning, not the forums found. "MAS01" looks like the camera
+  name typed into the camera, and "T25F" like a temperature. Nothing reads them.
+
+Evidence: 313 passed, 1 skipped (23 in test_density.py). The new tests cover: view from f; deployment days from a
+flag photo plus a folder scan of temp JPEGs written with PIL EXIF; the cached scan; a three-photo burst counting
+once; the suggested t from MAS_CAM01's own stamps (5 s from 4 gaps); the old triple counting gone (5 of 11
+photos); the R file holding the deduplicated deer. `npm run build` and oxlint clean. Real engine on the
+workstation store: t 3 s (12 gaps); MAS_CAM01 33.79 days (flag 19 Dec 13:41 to last photo 22 Jan 08:41) at 35.5
+degrees; MAS_CAM04 29.5 days (flag 20 Dec 08:57 to last photo 18 Jan 20:59) at 34.1 degrees. Hazard-rate (AIC
+55.9 vs 56.3); 0.22 deer/km², 90% range 0.15 to 0.35, P 0.678, radius 9.9 m, 12 deer: too few, and the screen
+says so. The earlier 7.6 deer/km² counted every burst photo over one and two active days.

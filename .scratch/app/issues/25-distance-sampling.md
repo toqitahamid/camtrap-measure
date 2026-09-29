@@ -63,3 +63,18 @@ which the camera operated") and passes the field of view as `sample_fraction = v
 file folds θ/360 into Effort instead, as the ticket says, because each camera may have its own lens; the header
 says to leave `sample_fraction` at 1. The two give the same density when every camera shares one lens. `Area` is
 0: `dht2` then reports density only. Units: `convert_units("meter", NULL, "square kilometer")`, as in the vignette.
+
+## Follow-up (2026-09-28, later): the inputs from the images; one photo per snapshot moment
+
+The researcher asked for the three survey inputs to come from the images, not from Seth. Done; each can still
+be typed over. Details and reasons are in CONTEXT.md, "The survey inputs come from the images".
+- Snapshot interval: the median gap between a camera's distinct capture seconds (gaps of 60 s or less, pooled),
+  whole seconds, at least 1. Workstation: 3 s from 12 gaps.
+- Active days: from the flag photo of the setup visit to the last photo in the camera's folders, fractional,
+  cut by the date filter. Workstation: MAS_CAM01 33.79, MAS_CAM04 29.5.
+- Field of view: 2 atan(cx / f) from the flag calibration fit. Workstation: 35.5 and 34.1 degrees.
+- Bug fixed: every photo counted as a snapshot moment, so a three-shot burst counted its deer three times. Only
+  the first photo of each t-second moment counts now, in the estimate and the R file.
+- Live: 0.22 deer/km² (90% range 0.15 to 0.35) from 12 deer, down from 7.6 at one and two active days with
+  every burst photo counted.
+- 313 passed, 1 skipped.
