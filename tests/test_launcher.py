@@ -179,7 +179,8 @@ def test_the_process_names_itself_to_windows():
 def test_main_builds_the_window_with_its_icon_and_sets_it_again_once_shown():
     main = text(ROOT / "src" / "camtrap_measure" / "main.py")
     assert "win_icon.identify()" in main  # before the window: Windows reads it when making the taskbar button
-    assert "webview.start(_wear_icon, (dialogs.window,), icon=str(win_icon.ICON))" in main
+    assert "webview.start(_bring_up, (dialogs.window,), icon=str(win_icon.ICON))" in main
+    assert "wear_icon(window)" in main  # _bring_up dresses the window once it is shown (tests/test_startup.py)
 
 
 def test_the_shortcuts_carry_the_same_taskbar_identity_as_the_process():
