@@ -287,9 +287,11 @@ def _density_scope(site, date_from, date_to, folder) -> tuple[list[dict], list[d
 def density_estimate(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
                      folder: str | None = None):
     """Deer per km² with a 90% interval, the detection function and the survey setup it used. White-tailed deer
-    only; suspicious rows never enter. The settings are the saved ones (POST /api/density/settings)."""
+    only; suspicious rows never enter. The survey setup comes from the images (flag calibrations, capture times,
+    the photo folders) unless a saved setting overrides it (POST /api/density/settings)."""
     rows, photos = _density_scope(site, _iso(date_from), _iso(date_to), folder)
-    return density.estimate(rows, photos, density.settings())
+    filters = {"date_from": _iso(date_from), "date_to": _iso(date_to)}
+    return density.estimate(rows, photos, density.settings(), density.facts(photos), filters)
 
 
 class CameraSetup(BaseModel):
@@ -321,7 +323,7 @@ def density_export(site: str | None = None, date_from: date | None = None, date_
     rows, photos = _density_scope(site, _iso(date_from), _iso(date_to), folder)
     filters = {"site": site, "date_from": _iso(date_from), "date_to": _iso(date_to), "folder": folder}
     name = f"camtrap-measure_distance_{site or 'all'}_{date_from or 'start'}_{date_to or 'end'}.csv"
-    return Response(density.export_csv(rows, photos, density.settings(), filters),
+    return Response(density.export_csv(rows, photos, density.settings(), filters, density.facts(photos)),
                     media_type="text/csv; charset=utf-8", headers={"content-disposition": f'attachment; filename="{name}"'})
 
 

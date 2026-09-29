@@ -8,24 +8,30 @@ inside the circle of radius w is seen, and
 
     D = n / (π w² P Σ_k (T_k / t)(θ_k / 2π))      deer per m²
 
-Every photo is a snapshot moment and every deer box one animal; availability is taken as 1 (a deer in view at a
-moment is a deer the camera could see). The 90% interval bootstraps cameras (deer, with fewer than three
+Snapshot moments are fixed times t seconds apart; only the first photo in each moment counts, and every deer box
+in it is one animal; availability is taken as 1 (a deer in view at a moment is a deer the camera could see).
+The survey inputs come from the images: t from the gaps between a camera's photos, the active days from the flag
+photo of the visit that set the camera up to the last photo on its card, the field of view from the focal
+length the flag calibration fitted. The 90% interval bootstraps cameras (deer, with fewer than three
 cameras), redraws each deer's distance inside its own 90% band, and refits — so it carries the distance
 measurement error as well as the sampling error. Seeded: the same inputs give the same interval.
 
-Everything below the settings helpers is pure: rows and photos in, numbers out, testable without the store.
+Everything below the settings helpers is pure (rows, photos and `facts` in, numbers out) except `folder_last` and
+`facts`, which read the photo folders, the synced calibrations and the cached flag photos.
 """
 
 import csv
 import io
+import json
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from ntpath import basename  # splits on / and \ alike, as in report.py
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import minimize, minimize_scalar
 
-from . import report, store
+from . import calibration, measure, report, store
 
 SPECIES = "white-tailed deer"
 DEFAULT_INTERVAL_S = 2.0
@@ -85,25 +91,74 @@ def save_settings(change: dict) -> dict:
 
 # --- what goes in ---------------------------------------------------------------------------------------------
 
-def deer_rows(rows: list[dict], photos: list[dict]) -> tuple[list[dict], dict]:
+def _at(captured_at: str) -> datetime:
+    return datetime.fromisoformat(captured_at)
+
+
+def _seconds(captured_at: str) -> float:
+    """Capture time as seconds on one fixed clock. The camera's time has no zone and none is needed: only
+    differences and the snapshot grid are read from it, and every photo of a camera shares its clock."""
+    return (_at(captured_at) - datetime(1970, 1, 1)).total_seconds()
+
+
+def snapshot_photos(photos: list[dict], interval_s: float) -> tuple[set[str], dict]:
+    """The photos taken at snapshot moments, and how many there were of how many.
+    Snapshot moments are fixed times every t seconds (Howe et al. 2017 fix them in advance, so they cannot
+    follow the animals). A camera's photos are grouped by the moment slot floor(time / t) and only the first of
+    each slot counts, by capture time then file name: a three-shot burst inside one second is one moment, not
+    three deer. Photos without a capture time cannot be placed on the grid, so they are all kept and counted."""
+    kept, undated = set(), 0
+    slots: dict[tuple[str, int], str] = {}
+    for p in sorted(photos, key=lambda p: (p["captured_at"] or "", basename(p["path"]))):
+        if not p["captured_at"]:
+            kept.add(p["path"])
+            undated += 1
+            continue
+        slots.setdefault((p["site"], math.floor(_seconds(p["captured_at"]) / interval_s)), p["path"])
+    kept |= set(slots.values())
+    return kept, {"photos": len(photos), "at_moments": len(kept), "undated": undated}
+
+
+def suggested_interval(photos: list[dict]) -> tuple[float | None, int]:
+    """(t, gaps it came from). The gaps are between consecutive distinct capture seconds of one camera, inside a
+    sequence (60 s or less); t is their median rounded to a whole second, at least 1. None without any gap.
+    The camera stamps whole seconds, so a burst inside one second shows no gap; the gaps left are the times the
+    camera fired again while the deer stayed, which is how often it could take a photo."""
+    gaps = []
+    by_site: dict[str, set[float]] = {}
+    for p in photos:
+        if p["captured_at"]:
+            by_site.setdefault(p["site"], set()).add(_seconds(p["captured_at"]))
+    for secs in by_site.values():
+        s = sorted(secs)
+        gaps += [b - a for a, b in zip(s, s[1:]) if b - a <= 60]
+    if not gaps:
+        return None, 0
+    return float(max(1, round(float(np.median(gaps))))), len(gaps)
+
+
+def deer_rows(rows: list[dict], photos: list[dict], moments: set[str] | None = None) -> tuple[list[dict], dict]:
     """The deer rows a density may use, and the counts the screen explains them with.
     A photo measured with both methods has rows under each; only the method it was last measured with counts,
-    or every deer in it would count twice. Of the deer-like rows (white-tailed deer and unsure), the suspicious
-    ones never enter — that includes every row without a distance, and every unsure animal."""
+    or every deer in it would count twice. Given `moments`, only deer in photos at snapshot moments count. Of the
+    deer-like rows left (white-tailed deer and unsure), the suspicious ones never enter: that includes every row
+    without a distance, and every unsure animal."""
     current = {p["path"]: p["method"] for p in photos}
     mine = [r for r in rows if r["method"] == current.get(r["path"], r["method"])]
     deer = [r for r in mine if r["species"] in report.DEER]
-    clean = [r for r in deer if not report.reasons(r) and r["species"] == SPECIES and r["distance_m"] is not None]
-    return clean, {"deer": len(deer), "suspicious": len(deer) - len(clean)}
+    timed = [r for r in deer if moments is None or r["path"] in moments]
+    clean = [r for r in timed if not report.reasons(r) and r["species"] == SPECIES and r["distance_m"] is not None]
+    return clean, {"deer": len(deer), "between_moments": len(deer) - len(timed), "suspicious": len(timed) - len(clean)}
 
 
 def _day(captured_at: str) -> date:
-    return datetime.fromisoformat(captured_at).date()
+    return _at(captured_at).date()
 
 
 def default_days(photos: list[dict]) -> dict[str, int | None]:
     """Active days per camera: first to last photo, whole calendar days counted inclusively. None for a camera
-    with no dated photo — there is nothing to count from, and the screen asks for the number."""
+    with no dated photo: there is nothing to count from, and the screen asks for the number. The fallback for a
+    camera with no flag photo before its first photo (see `deployment`)."""
     spans: dict[str, list[date]] = {}
     for p in photos:
         spans.setdefault(p["site"], [])
@@ -112,21 +167,85 @@ def default_days(photos: list[dict]) -> dict[str, int | None]:
     return {s: ((max(d) - min(d)).days + 1 if d else None) for s, d in spans.items()}
 
 
-def camera_setup(photos: list[dict], saved: dict) -> list[dict]:
-    """One line per camera in scope: its active days and field of view, saved value over default."""
-    days = default_days(photos)
-    models = {}
+def deployment(site: str, photos: list[dict], calibrations: list[dict], folder_last: str | None,
+               date_from: str | None = None, date_to: str | None = None) -> dict | None:
+    """How long one camera was out, read from the photos themselves: from the flag photo taken when it was set
+    up to the last photo on its card. {days, from, from_kind, flag, to, to_kind}; None with no dated photo.
+    The flag photos are the service visits, so the deployment starts at the latest one taken on or before the
+    camera's first photo, and ends at the last capture time anywhere in its folder (measured or not). A date
+    filter cuts both ends, because the deer outside it are not counted either. Fractional days: a card pulled at
+    noon ran half that day. Without a flag photo before the first photo, the first-to-last-photo rule stands."""
+    dated = sorted(p["captured_at"] for p in photos if p["site"] == site and p["captured_at"])
+    if not dated:
+        return None
+    first = dated[0]
+    flags = sorted((c["captured_at"], c["image_name"]) for c in calibrations
+                   if c["site"] == site and c["captured_at"] and c["captured_at"] <= first)
+    if not flags:
+        return {"days": default_days([p for p in photos if p["site"] == site])[site], "from": first,
+                "from_kind": "photo", "flag": None, "to": dated[-1], "to_kind": "photo"}
+    start, flag = flags[-1]
+    end = max(dated[-1], folder_last or dated[-1])
+    out = {"from": start, "from_kind": "flag", "flag": flag, "to": end, "to_kind": "photo"}
+    if date_from and date_from > start[:10]:
+        out.update({"from": f"{date_from}T00:00:00", "from_kind": "filter", "flag": None})
+    if date_to and date_to < end[:10]:
+        out.update({"to": (datetime.fromisoformat(date_to) + timedelta(days=1)).isoformat(), "to_kind": "filter"})
+    out["days"] = round(max(0.0, _seconds(out["to"]) - _seconds(out["from"])) / 86_400, 2) or None
+    return out
+
+
+def calibration_fov(site: str, first: str | None, calibrations: list[dict]) -> dict | None:
+    """The camera's horizontal field of view measured from its flag calibration: 2 atan((W/2) / f), with f the
+    fitted focal length in pixels and W = 2 cx, the width of the image the fit was made in (its principal point
+    is the image centre). Both come out of the same fit, so they are in the same pixels whatever size the survey
+    photos or the cached flag photo are. Uses the latest usable calibration on or before the camera's first
+    photo, else its latest usable one. {fov_deg, flag}; None when no calibration of this camera has one."""
+    fitted = []
+    for c in calibrations:
+        if c["site"] != site or not c["ok"] or not c.get("model"):
+            continue
+        m = json.loads(c["model"])
+        f = (m.get("params") or {}).get("f")
+        w = 2 * (m.get("cx") or 0)
+        if f and w:
+            fitted.append((c["captured_at"] or "", c["image_name"], math.degrees(2 * math.atan(w / 2 / f))))
+    if not fitted:
+        return None
+    fitted.sort()
+    before = [x for x in fitted if first and x[0] and x[0] <= first]
+    _, image, fov = (before or fitted)[-1]
+    return {"fov_deg": round(fov, 1), "flag": image}
+
+
+def camera_setup(photos: list[dict], saved: dict, facts: dict | None = None, date_from: str | None = None,
+                 date_to: str | None = None) -> list[dict]:
+    """One line per camera in scope: its active days and field of view, saved value over what the photos say,
+    and where each number came from."""
+    facts = facts or {}
+    cals, last = facts.get("calibrations", []), facts.get("folder_last", {})
+    models, firsts = {}, {}
     for p in photos:
         models.setdefault(p["site"], (p.get("make") or "", p.get("model") or ""))
+        if p["captured_at"] and (p["site"] not in firsts or p["captured_at"] < firsts[p["site"]]):
+            firsts[p["site"]] = p["captured_at"]
     out = []
-    for site in sorted(days):
+    for site in sorted(models):
         own = saved.get(site) or {}
+        dep = deployment(site, photos, cals, last.get(site), date_from, date_to)
+        measured = calibration_fov(site, firsts.get(site), cals)
         known = FOV_BY_MODEL.get(models[site])
-        fov = own.get("fov_deg") or known or DEFAULT_FOV_DEG
+        if measured:
+            fov_default, fov_source = measured["fov_deg"], f"flag calibration {measured['flag']}"
+        elif known:
+            fov_default, fov_source = known, "camera model"
+        else:
+            fov_default, fov_source = DEFAULT_FOV_DEG, None
+        days_default = dep["days"] if dep else None
         out.append({"site": site, "model": " ".join(m for m in models[site] if m) or None,
-                    "active_days": own.get("active_days") or days[site], "active_days_default": days[site],
-                    "fov_deg": fov, "fov_default": known or DEFAULT_FOV_DEG,
-                    "fov_checked": bool(own.get("fov_deg")) or known is not None})
+                    "active_days": own.get("active_days") or days_default, "active_days_default": days_default,
+                    "days_source": dep, "fov_deg": own.get("fov_deg") or fov_default, "fov_default": fov_default,
+                    "fov_source": fov_source, "fov_checked": bool(own.get("fov_deg")) or fov_source is not None})
     return out
 
 
@@ -140,6 +259,60 @@ def default_truncation(distances: list[float]) -> float | None:
 def effort(cams: list[dict], interval_s: float) -> dict[str, float]:
     """Per camera: snapshot moments (active seconds / interval) × the fraction of the circle it sees."""
     return {c["site"]: c["active_days"] * 86_400 / interval_s * c["fov_deg"] / 360 for c in cams if c["active_days"]}
+
+
+# --- reading the photo folders (the only part here that touches the disk) -------------------------------------
+
+# folder → ((file count, newest mtime), last capture time). A folder's last photo is read once, and read again
+# only when a file is added, removed or changed: re-rendering the screen must not reopen a thousand JPEGs.
+_FOLDER_LAST: dict[Path, tuple[tuple[int, float], str | None]] = {}
+
+
+def folder_last(folder: Path) -> str | None:
+    """The latest DateTimeOriginal of any JPEG directly in the folder, measured or not; None if none has one."""
+    try:
+        files = measure.jpegs(folder)
+        key = (len(files), max((f.stat().st_mtime for f in files), default=0.0))
+    except (ValueError, OSError):  # the card's folder moved or the share dropped: the measured photos still say something
+        return None
+    hit = _FOLDER_LAST.get(folder)
+    if hit and hit[0] == key:
+        return hit[1]
+    stamps = [t for t in (calibration.read_exif(f)["captured_at"] for f in files) if t]
+    _FOLDER_LAST[folder] = (key, max(stamps) if stamps else None)
+    return _FOLDER_LAST[folder][1]
+
+
+def facts(photos: list[dict]) -> dict:
+    """What the photos on disk and the synced calibrations say about the survey: the calibrations, and each
+    camera's last capture time over its photo folders (the folders its measured photos sit in)."""
+    cals = store.calibrations()
+    last: dict[str, str | None] = {}
+    for site in {p["site"] for p in photos}:
+        stamps = [folder_last(d) for d in {Path(p["path"]).parent for p in photos if p["site"] == site}]
+        last[site] = max((s for s in stamps if s), default=None)
+    return {"calibrations": cals, "folder_last": last}
+
+
+def survey(rows: list[dict], photos: list[dict], saved: dict, facts: dict | None = None,
+           filters: dict | None = None) -> dict:
+    """The one reading of the inputs that the screen and the R file share, so they cannot disagree: cameras and
+    their effort, the photos at snapshot moments, and the deer inside and beyond w."""
+    filters = filters or {}
+    t_suggested, gaps = suggested_interval(photos)
+    interval_default = t_suggested or DEFAULT_INTERVAL_S
+    interval_s = saved["interval_s"] or interval_default
+    moments, photo_counts = snapshot_photos(photos, interval_s)
+    deer, counts = deer_rows(rows, photos, moments)
+    cams = camera_setup(photos, saved["cameras"], facts, filters.get("date_from"), filters.get("date_to"))
+    efforts = effort(cams, interval_s)
+    dated = [d for d in deer if d["site"] in efforts]  # a camera with no active days is out, with its deer
+    auto_w = default_truncation([d["distance_m"] for d in dated])
+    w = saved["truncation_m"] or auto_w
+    return {"interval_s": interval_s, "interval_default_s": interval_default, "interval_gaps": gaps,
+            "photos": photo_counts, "counts": counts, "cams": cams, "efforts": efforts, "deer": deer,
+            "w": w, "auto_w": auto_w, "inside": [d for d in dated if w and d["distance_m"] <= w],
+            "beyond": [d for d in dated if not (w and d["distance_m"] <= w)]}
 
 
 # --- detection function ---------------------------------------------------------------------------------------
@@ -276,22 +449,20 @@ def _bins(r: np.ndarray, w: float) -> tuple[list[dict], float]:
     return [{"lo": round(i * width, 2), "hi": round((i + 1) * width, 2), "n": int(c)} for i, c in enumerate(counts)], width
 
 
-def estimate(rows: list[dict], photos: list[dict], saved: dict, reps: int | None = None) -> dict:
-    """Everything the DENSITY screen draws, from the rows and photos in its filters and the saved settings."""
-    deer, counts = deer_rows(rows, photos)
-    cams = camera_setup(photos, saved["cameras"])
-    interval_s = saved["interval_s"] or DEFAULT_INTERVAL_S
-    efforts = effort(cams, interval_s)
-    dated = [d for d in deer if d["site"] in efforts]  # a camera with no active days is out, with its deer
-    auto_w = default_truncation([d["distance_m"] for d in dated])
-    w = saved["truncation_m"] or auto_w
-    inside = [d for d in dated if w and d["distance_m"] <= w]
-    beyond = [d for d in dated if not (w and d["distance_m"] <= w)]
-    # used + beyond + suspicious + no_days_deer = deer, so the line on screen adds up
-    out = {"species": SPECIES, "deer": counts["deer"], "suspicious": counts["suspicious"], "beyond": len(beyond),
-           "no_days": sum(1 for c in cams if not c["active_days"]), "no_days_deer": len(deer) - len(dated),
-           "used": len(inside), "interval_s": interval_s, "interval_default_s": DEFAULT_INTERVAL_S,
-           "truncation_m": w, "truncation_default_m": auto_w, "cameras": cams,
+def estimate(rows: list[dict], photos: list[dict], saved: dict, facts: dict | None = None,
+             filters: dict | None = None, reps: int | None = None) -> dict:
+    """Everything the DENSITY screen draws, from the rows and photos in its filters, what the photos on disk and
+    the flag calibrations say (`facts`), and the saved settings."""
+    s = survey(rows, photos, saved, facts, filters)
+    cams, efforts, inside, beyond, w, counts = s["cams"], s["efforts"], s["inside"], s["beyond"], s["w"], s["counts"]
+    dated = inside + beyond
+    # used + beyond + suspicious + between_moments + no_days_deer = deer, so the line on screen adds up
+    out = {"species": SPECIES, "deer": counts["deer"], "suspicious": counts["suspicious"],
+           "between_moments": counts["between_moments"], "beyond": len(beyond),
+           "no_days": sum(1 for c in cams if not c["active_days"]), "no_days_deer": len(s["deer"]) - len(dated),
+           "used": len(inside), "interval_s": s["interval_s"], "interval_default_s": s["interval_default_s"],
+           "interval_gaps": s["interval_gaps"], "photos": s["photos"],
+           "truncation_m": w, "truncation_default_m": s["auto_w"], "cameras": cams,
            "effort": round(sum(efforts.values()), 2), "min_deer": MIN_DEER, "too_few": len(inside) < MIN_DEER,
            "fit": None, "bins": [], "curve": [], "density": None}
     if not inside:
@@ -301,7 +472,7 @@ def estimate(rows: list[dict], photos: list[dict], saved: dict, reps: int | None
     chosen, other = fit(r, w)
     p = detection_p(chosen, w)
     d_m2 = density(len(r), p, w, sum(efforts.values()))
-    ci = bootstrap(inside + beyond, efforts, w, chosen, reps or BOOTSTRAPS)
+    ci = bootstrap(dated, efforts, w, chosen, reps or BOOTSTRAPS)
     bins, width = _bins(r, w)
     xs = np.linspace(0, w, 61)
     curve = pdf(chosen, w, xs) * len(r) * width  # expected deer per bin, so the curve sits on the bars
@@ -319,6 +490,8 @@ R_HEADER = """\
 # CamTrap Measure: camera-trap distance sampling flat file for R's Distance package; {when}
 # filters: site={site}; from={date_from}; to={date_to}; folder={folder}; species=white-tailed deer, suspicious rows left out
 # snapshot interval t = {interval} s; truncation w = {w} m; one row per deer within w, one row with distance NA per camera with no deer
+# snapshot moments every t s on the capture clock: {at_moments} of {photos} photos are the first in their moment and only their deer are here
+#   (a burst of photos inside one moment is one snapshot, not one deer per photo; photos with no capture time are all kept)
 # Region.Label: one stratum; Area: 0, so dht2 reports density only; Sample.Label: camera
 # Effort: that camera's snapshot moments (active seconds / t) times the fraction of the circle it sees (field of view / 360)
 #   The field of view is already in Effort, so leave sample_fraction at 1. (The package's camera-trap example keeps Effort as
@@ -334,20 +507,16 @@ R_HEADER = """\
 R_COLUMNS = ["Region.Label", "Area", "Sample.Label", "Effort", "object", "distance", "size", "photo", "timestamp"]
 
 
-def export_csv(rows: list[dict], photos: list[dict], saved: dict, filters: dict) -> str:
+def export_csv(rows: list[dict], photos: list[dict], saved: dict, filters: dict, facts: dict | None = None) -> str:
     """The flat file: the same deer, cameras, effort and truncation as the screen, in the Distance package's columns."""
-    deer, _ = deer_rows(rows, photos)
-    cams = camera_setup(photos, saved["cameras"])
-    interval_s = saved["interval_s"] or DEFAULT_INTERVAL_S
-    efforts = effort(cams, interval_s)
-    deer = [d for d in deer if d["site"] in efforts]
-    w = saved["truncation_m"] or default_truncation([d["distance_m"] for d in deer])
-    inside = [d for d in deer if w and d["distance_m"] <= w]
+    s = survey(rows, photos, saved, facts, filters)
+    efforts, inside, w = s["efforts"], s["inside"], s["w"]
     buf = io.StringIO()
     buf.write(R_HEADER.format(when=datetime.now().astimezone().isoformat(timespec="seconds"),
                               site=filters.get("site") or "all", date_from=filters.get("date_from") or "start",
                               date_to=filters.get("date_to") or "end", folder=filters.get("folder") or "all",
-                              interval=f"{interval_s:g}", w=f"{w:g}" if w else "NA"))
+                              interval=f"{s['interval_s']:g}", w=f"{w:g}" if w else "NA",
+                              at_moments=s["photos"]["at_moments"], photos=s["photos"]["photos"]))
     out = csv.writer(buf, lineterminator="\n")
     out.writerow(R_COLUMNS)
     obj = 0

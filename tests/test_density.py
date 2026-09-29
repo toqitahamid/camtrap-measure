@@ -4,6 +4,7 @@ has to come back to it. Then the rules the screen and the R file rely on: trunca
 the seeded interval, and which rows may enter at all."""
 
 import csv
+import json
 import math
 
 import numpy as np
@@ -12,6 +13,7 @@ from scipy.integrate import quad
 
 from camtrap_measure import density, report, store
 
+from tests.conftest import jpeg
 from tests.test_report import measured  # noqa: F401  (fixture: a scripted folder measured through the API)
 
 SAVED = {"interval_s": None, "truncation_m": None, "cameras": {}}
@@ -167,7 +169,7 @@ def test_suspicious_non_deer_and_other_method_rows_stay_out():
             det("CAM00", 5.5, idx=0, method="sam3")]  # the same deer under the method this photo is not on now
     used, counts = density.deer_rows(rows, photos)
     assert [r["idx"] for r in used] == [0] and used[0]["method"] == "md"
-    assert counts == {"deer": 5, "suspicious": 4}  # the raccoon is not a deer; the other four need a look
+    assert counts == {"deer": 5, "between_moments": 0, "suspicious": 4}  # the raccoon is not a deer; the other four need a look
     res = density.estimate(rows, photos, SAVED, reps=10)
     assert res["deer"] == res["used"] + res["beyond"] + res["suspicious"] + res["no_days_deer"]
 
@@ -212,7 +214,8 @@ def test_api_reads_saved_settings_and_exports(measured, monkeypatch):  # noqa: F
     assert res["interval_s"] == 5 and res["cameras"][0]["fov_deg"] == 55 and res["cameras"][0]["fov_checked"]
     assert store.config()["density"]["cameras"] == {"TON_CAM02": {"fov_deg": 55}}
     measured.post("/api/density/settings", json={"cameras": {"TON_CAM02": {"fov_deg": None}}})
-    assert measured.get("/api/density").json()["cameras"][0]["fov_deg"] == 42.0
+    cam = measured.get("/api/density").json()["cameras"][0]  # back to what the flag calibration measured
+    assert cam["fov_deg"] == cam["fov_default"] and cam["fov_source"] == "flag calibration IMG_5304.JPG"
     assert measured.post("/api/density/settings", json={"interval_s": -1}).status_code == 400
     csv_r = measured.get("/api/density.csv")
     assert csv_r.status_code == 200 and csv_r.headers["content-type"].startswith("text/csv")
@@ -226,3 +229,116 @@ def test_saving_density_settings_keeps_the_installer_config():
     assert store.config() == {"hf_token": "hf_x", "weights_from": "bundle",
                               "density": {"interval_s": None, "truncation_m": 25, "cameras": {}}}
     assert report.DEER >= {density.SPECIES}
+
+
+# --- the survey inputs, read from the images (2026-09-28, later) ----------------------------------------------
+
+def cal(site="CAM00", image="FLAG_1.JPG", at="2025-12-19T13:41:48", f=3000.0, ok=True) -> dict:
+    """A synced calibration row as the store holds it: the fit's JSON carries f and cx in the flag image's pixels."""
+    model = json.dumps({"ok": True, "cx": 960.0, "cy": 540.0, "params": {"f": f, "h": 0.9}}) if ok else None
+    return {"site": site, "image_name": image, "captured_at": at, "ok": ok, "reason": None, "model": model}
+
+
+def photo(name: str, at: str | None, site: str = "CAM00", folder: str = "D:\cards\CAM00") -> dict:
+    return {"path": f"{folder}\{name}", "site": site, "captured_at": at, "make": "BROWNING", "model": "BTC-7E",
+            "method": "md"}
+
+
+def test_field_of_view_is_measured_from_the_flag_calibration():
+    """2 atan((W/2) / f) with W = 2 cx: f = 3000 px on a 1920 px image is 35.5 degrees, not the 42 guess."""
+    photos = [photo("IMG_1.JPG", "2026-01-22T08:40:56")]
+    cals = [cal(image="EARLY.JPG", at="2025-06-01T09:00:00", f=2000.0),
+            cal(image="SETUP.JPG", at="2025-12-19T13:41:48", f=3000.0),
+            cal(image="BROKEN.JPG", at="2026-01-01T09:00:00", ok=False),  # not usable: no fit to read
+            cal(image="LATER.JPG", at="2026-04-01T08:18:29", f=3135.0)]  # after the survey: a later visit
+    [cam] = density.camera_setup(photos, {}, {"calibrations": cals})
+    assert cam["fov_deg"] == pytest.approx(math.degrees(2 * math.atan(960 / 3000)), abs=0.05) == 35.5
+    assert cam["fov_source"] == "flag calibration SETUP.JPG" and cam["fov_checked"] is True
+    [cam] = density.camera_setup(photos, {}, {"calibrations": [cals[-1]]})  # nothing before the survey: the latest
+    assert cam["fov_source"] == "flag calibration LATER.JPG" and cam["fov_deg"] == 34.1
+    [cam] = density.camera_setup(photos, {}, {"calibrations": [cals[2]]})
+    assert cam["fov_deg"] == 42.0 and cam["fov_source"] is None and cam["fov_checked"] is False
+
+
+def test_active_days_run_from_the_setup_flag_photo_to_the_last_photo_in_the_folder(tmp_path, monkeypatch):
+    """The camera went out when its flag photo was taken and ran until the last photo on its card, measured or
+    not. Temp JPEGs with EXIF dates: only the first one was measured."""
+    for name, at in (("IMG_1.JPG", "2026:01:02 08:00:00"), ("IMG_2.JPG", "2026:01:10 06:00:00"),
+                     ("IMG_3.JPG", None)):
+        (tmp_path / name).write_bytes(jpeg(at))
+    photos = [photo("IMG_1.JPG", "2026-01-02T08:00:00", folder=str(tmp_path))]
+    cals = [cal(at="2025-12-19T12:00:00"), cal(image="NEXT.JPG", at="2026-04-01T08:00:00")]
+    last = density.folder_last(tmp_path)
+    assert last == "2026-01-10T06:00:00"
+    [cam] = density.camera_setup(photos, {}, {"calibrations": cals, "folder_last": {"CAM00": last}})
+    assert cam["active_days"] == pytest.approx(21.75)  # 19 Dec 12:00 to 10 Jan 06:00
+    src = cam["days_source"]
+    assert (src["from_kind"], src["flag"], src["to_kind"]) == ("flag", "FLAG_1.JPG", "photo")
+    # a date filter cuts both ends, since the deer outside it are not counted either
+    [cam] = density.camera_setup(photos, {}, {"calibrations": cals, "folder_last": {"CAM00": last}},
+                                 date_from="2026-01-01", date_to="2026-01-04")
+    assert cam["active_days"] == 4.0 and cam["days_source"]["from_kind"] == "filter"
+    # no flag photo before the first photo: first to last photo, whole days, as before
+    [cam] = density.camera_setup(photos, {}, {"calibrations": cals[1:], "folder_last": {"CAM00": last}})
+    assert cam["active_days"] == 1 and cam["days_source"]["from_kind"] == "photo"
+
+
+def test_the_folder_scan_is_cached_until_the_folder_changes(tmp_path, monkeypatch):
+    (tmp_path / "IMG_1.JPG").write_bytes(jpeg("2026:01:02 08:00:00"))
+    assert density.folder_last(tmp_path) == "2026-01-02T08:00:00"
+    monkeypatch.setattr(density.calibration, "read_exif", lambda p: pytest.fail("rescanned an unchanged folder"))
+    assert density.folder_last(tmp_path) == "2026-01-02T08:00:00"
+    monkeypatch.undo()
+    (tmp_path / "IMG_2.JPG").write_bytes(jpeg("2026:01:05 08:00:00"))
+    assert density.folder_last(tmp_path) == "2026-01-05T08:00:00"
+
+
+# The workstation's MAS_CAM01 card, as its EXIF has it: one-second stamps, three-shot bursts, re-triggers 2 to 7 s apart.
+BURSTS = ["08:40:56", "08:41:03", "08:41:03", "08:41:03", "08:41:06", "08:41:06", "08:41:06",
+          "08:41:08", "08:41:08", "08:41:08", "08:41:15"]
+
+
+def burst_survey():
+    photos = [photo(f"IMG_{1032 + i}.JPG", f"2026-01-22T{t}") for i, t in enumerate(BURSTS)]
+    rows = [det("CAM00", 8.0 + i / 10, idx=0, path=p["path"], captured_at=p["captured_at"])
+            for i, p in enumerate(photos)]
+    return rows, photos
+
+
+def test_the_snapshot_interval_is_suggested_from_the_gaps_between_photos():
+    _, photos = burst_survey()
+    far = [photo("IMG_9000.JPG", "2026-01-22T09:30:00")]  # a new visit an hour later: not a gap inside a sequence
+    assert density.suggested_interval(photos + far) == (5.0, 4)  # distinct seconds 56, 03, 06, 08, 15: gaps 7 3 2 7
+    assert density.suggested_interval(far) == (None, 0)
+    res = density.estimate(*burst_survey(), SAVED, reps=10)
+    assert res["interval_s"] == res["interval_default_s"] == 5.0 and res["interval_gaps"] == 4
+
+
+def test_a_burst_inside_one_moment_counts_once():
+    """Three photos in one second are one snapshot moment, so their deer counts once, not three times."""
+    photos = [photo(f"IMG_{i}.JPG", "2026-01-22T08:41:03") for i in (3, 1, 2)]
+    kept, counts = density.snapshot_photos(photos, 2.0)
+    assert kept == {photos[1]["path"]} and counts == {"photos": 3, "at_moments": 1, "undated": 0}  # first by name
+
+
+def test_the_old_triple_counting_is_gone():
+    """Before 2026-09-28 every photo was a moment: this card gave 11 deer. At t = 2 s the moments are 56, 02-03,
+    06-07, 08-09 and 14-15 s, five of them, and only their first photos' deer count."""
+    rows, photos = burst_survey()
+    res = density.estimate(rows, photos, {**SAVED, "interval_s": 2.0}, reps=10)
+    assert res["photos"] == {"photos": 11, "at_moments": 5, "undated": 0}
+    assert res["used"] + res["beyond"] == 5 and res["between_moments"] == 6
+    assert res["deer"] == res["used"] + res["beyond"] + res["between_moments"] + res["suspicious"] + res["no_days_deer"]
+
+
+def test_photos_without_a_capture_time_are_all_kept_and_counted():
+    photos = [photo("IMG_1.JPG", None), photo("IMG_2.JPG", None), photo("IMG_3.JPG", "2026-01-22T08:41:03")]
+    kept, counts = density.snapshot_photos(photos, 2.0)
+    assert len(kept) == 3 and counts["undated"] == 2
+
+
+def test_the_r_file_holds_the_same_deduplicated_deer():
+    rows, photos = burst_survey()
+    doc, out = read_r(density.export_csv(rows, photos, {**SAVED, "interval_s": 2.0, "truncation_m": 20.0}, {}))
+    assert [r["photo"] for r in out] == ["IMG_1032.JPG", "IMG_1033.JPG", "IMG_1036.JPG", "IMG_1039.JPG", "IMG_1042.JPG"]
+    assert any("5 of 11 photos" in line for line in doc)
