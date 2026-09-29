@@ -186,8 +186,11 @@ def fit_hazard_rate(r: np.ndarray, w: float, start: dict | None = None) -> dict 
               [(math.log(float(np.median(r))), b0) for b0 in (1.5, 3.0, 6.0)])
     best = None
     for x0 in starts:
-        res = minimize(lambda p: _nll("hazard-rate", r, w, math.exp(p[0]), p[1]), x0=list(x0), method="L-BFGS-B",
-                       bounds=[(math.log(w) - 7, math.log(w) + 5), (1.0, 20.0)])
+        # Nelder-Mead, not a gradient method: scipy's numeric gradient asks the array-API layer whether its input
+        # is a torch tensor, and while the model warmup is still importing torch that raises (seen on the first
+        # live run, 2026-09-28). Nelder-Mead never asks.
+        res = minimize(lambda p: _nll("hazard-rate", r, w, math.exp(p[0]), p[1]), x0=list(x0), method="Nelder-Mead",
+                       bounds=[(math.log(w) - 7, math.log(w) + 5), (1.0, 20.0)], options={"xatol": 1e-3, "fatol": 1e-4})
         if np.isfinite(res.fun) and (best is None or res.fun < best.fun):
             best = res
     if best is None:

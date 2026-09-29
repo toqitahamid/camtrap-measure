@@ -123,6 +123,18 @@ def test_field_of_view_comes_from_the_model_table_only(monkeypatch):
     assert cam["fov_deg"] == 41.0 and cam["fov_checked"] is True
 
 
+def test_fitting_works_while_torch_is_half_imported(monkeypatch):
+    """The model warmup imports torch on another thread. A gradient optimiser in scipy asks whether its input is a
+    torch tensor, and a half-imported torch has no Tensor yet: DENSITY answered 500 at startup (2026-09-28)."""
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))  # no Tensor, as mid-import
+    r = np.array([3.0, 4.5, 5.0, 6.2, 7.1, 8.0, 9.4, 10.2])
+    chosen, other = density.fit(r, 12.0)
+    assert {chosen["model"], other["model"]} == {"half-normal", "hazard-rate"}
+
+
 def test_the_interval_holds_the_estimate_and_is_the_same_every_time():
     rows, photos = survey(3.0, half_normal(6.0), cameras=6, seed=7)
     a = density.estimate(rows, photos, SAVED, reps=200)
