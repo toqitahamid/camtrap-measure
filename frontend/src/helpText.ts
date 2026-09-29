@@ -16,6 +16,7 @@ export const HELP: Record<string, Topic> = {
     body: [
       'Which camera took these photos.',
       'The app measures them against a flag photo from that same camera. Pick the wrong camera and you still get numbers, but they are wrong.',
+      'A camera marked "not labelled yet" has no marked flag photo. Label its flag photo in FlagLabel, then press Sync.',
     ],
   },
   flag: {
@@ -23,6 +24,14 @@ export const HELP: Record<string, Topic> = {
     body: [
       'The photo the app measures against. Someone stood a flag at known spots in front of this camera and took a picture.',
       'Any of them works. If the camera was moved, use one taken after the move.',
+      'Flag photos are added and marked in FlagLabel, not in this app. Press Sync to bring them here.',
+    ],
+  },
+  splitExport: {
+    title: 'One file per site or camera',
+    body: [
+      'Saves one file for each site or each camera into a folder you choose. Each file uses the same filters as this screen.',
+      'A file already in the folder is kept. The new one gets (2) added to its name.',
     ],
   },
   folder: {
@@ -145,8 +154,8 @@ export const HELP: Record<string, Topic> = {
   sync: {
     title: 'Sync',
     body: [
-      'Fetches the flag photos and their markings from FlagLabel.',
-      'Do it when a camera is missing from the list. It needs the internet. Measuring does not.',
+      'Fetches the flag photos and their markings from FlagLabel. Flag photos are added and marked there, not in this app.',
+      'Do it after labelling a camera in FlagLabel. It needs the internet. Measuring does not.',
     ],
   },
   models: {

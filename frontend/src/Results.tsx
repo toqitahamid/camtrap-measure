@@ -5,9 +5,12 @@
 import Help from './Help'
 import Icon from './Icon'
 import { useEffect, useState, type ReactNode } from 'react'
-import { plural, thousands, type Summary } from './ui'
+import { plural, post, thousands, type Camera, type Summary } from './ui'
 
 type Bin = Summary['histogram'][number]
+
+/** A site entry in the camera filter is "site:MAS"; every other value is one camera's name. */
+const SITE = 'site:'
 
 /** ponytail: the engine sends binned counts, not the distances themselves, so the honest "median" is the bin
     the middle measurement falls in — a single interpolated number would claim a precision we were not given. */
@@ -44,9 +47,9 @@ function Message({ icon, title, line, action }: { icon: 'warn' | 'results'; titl
   )
 }
 
-export default function Results({ site, sites, folder, onClear }: {
+export default function Results({ site, cameras, folder, onClear }: {
   site: string
-  sites: string[]
+  cameras: Camera[]
   folder: string
   onClear: (what: { path?: string; site?: string; everything?: boolean }) => void | Promise<void>
 }) {
@@ -58,6 +61,9 @@ export default function Results({ site, sites, folder, onClear }: {
   const [pick, setPick] = useState<{ shell: string; value: string } | null>(null)
   const camera = pick && pick.shell === site ? pick.value : site
   const chooseCamera = (value: string) => setPick({ shell: site, value })
+  // The filter holds either one camera or a whole site; the engine is asked for one or the other.
+  const surveySite = camera.startsWith(SITE) ? camera.slice(SITE.length) : ''
+  const oneCamera = surveySite ? '' : camera
 
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -74,10 +80,17 @@ export default function Results({ site, sites, folder, onClear }: {
   // of its own, and a browser confirm() blocks the whole WebView until it is answered.
   const [confirmClear, setConfirmClear] = useState(false)
   const [confirmAll, setConfirmAll] = useState(false)
+  // One combined file is a download; one per site or camera is saved by the engine into a chosen folder.
+  const [split, setSplit] = useState<'all' | 'site' | 'camera'>('all')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState<{ folder: string; count: number } | null>(null)
+  const [saveNote, setSaveNote] = useState<string | null>(null)
+  const [typedTo, setTypedTo] = useState<string | null>(null) // only where there is no native folder chooser
 
   // The one place the filters become a query: the summary reads it, the export link appends to it.
   const params = new URLSearchParams()
-  if (camera) params.set('site', camera)
+  if (oneCamera) params.set('site', oneCamera)
+  if (surveySite) params.set('survey_site', surveySite)
   if (from) params.set('date_from', from)
   if (to) params.set('date_to', to)
   if (allSpecies) params.set('all_species', 'true')
@@ -125,7 +138,12 @@ export default function Results({ site, sites, folder, onClear }: {
   }
 
   // A camera the shell points at but /api/cameras has not listed would otherwise render as a blank select.
-  const cameraOptions = camera && !sites.includes(camera) ? [camera, ...sites] : sites
+  const sites = cameras.map((c) => c.site)
+  const cameraOptions = oneCamera && !sites.includes(oneCamera) ? [oneCamera, ...sites] : sites
+  // A site with one camera is already in the list as that camera, so only sites with more get an entry.
+  const perSite = new Map<string, number>()
+  for (const c of cameras) perSite.set(c.survey_site, (perSite.get(c.survey_site) ?? 0) + 1)
+  const siteOptions = [...perSite].filter(([, n]) => n > 1).sort(([a], [b]) => a.localeCompare(b))
 
   const filters = (
     <div className="row" style={{ flex: 'none', gap: 6, padding: '9px 14px', borderBottom: '1px solid var(--line)', flexWrap: 'wrap', rowGap: 10 }}>
@@ -142,16 +160,27 @@ export default function Results({ site, sites, folder, onClear }: {
         </div>
       </div>
       <div className="sep" />
-      <div className="field" style={{ width: 168, minWidth: 134 }}>
+      <div className="field" style={{ width: 196, minWidth: 150 }}>
         <span className="cap">Camera</span>
         <div className="field-val">
           <select className="bare" value={camera} onChange={(e) => chooseCamera(e.target.value)}>
             <option value="">All cameras</option>
-            {cameraOptions.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
+            {siteOptions.length > 0 && (
+              <optgroup label="Sites">
+                {siteOptions.map(([s, n]) => (
+                  <option key={s} value={SITE + s}>
+                    {s}, all {n} cameras
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Cameras">
+              {cameraOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </optgroup>
           </select>
           <span className="chev">
             <Icon name="down" size={12} width={2.4} />
@@ -194,7 +223,8 @@ export default function Results({ site, sites, folder, onClear }: {
      reasoning these buttons do not hide when the filters show nothing — they answer for the store. */
   const clearBox = stored > 0 && (
     <div className="stack" style={{ gap: 8 }}>
-      {camera && (
+      {/* One camera only: a site in the filter is a way of reading the numbers, not a thing to delete. */}
+      {oneCamera && (
         <button
           className="btn"
           style={{ height: 32, fontSize: 12,
@@ -203,13 +233,13 @@ export default function Results({ site, sites, folder, onClear }: {
           onClick={() => {
             if (!confirmClear) return setConfirmClear(true)
             setConfirmClear(false)
-            clear({ site: camera })
+            clear({ site: oneCamera })
           }}
         >
           <Icon name="trash" size={14} width={2} />
           {confirmClear
-            ? `Clear every measurement for ${camera}. Click again`
-            : `Clear ${camera}'s measurements`}
+            ? `Clear every measurement for ${oneCamera}. Click again`
+            : `Clear ${oneCamera}'s measurements`}
         </button>
       )}
       {/* Every camera, every folder, everything this computer has measured. Asked for by name rather than
@@ -326,7 +356,45 @@ export default function Results({ site, sites, folder, onClear }: {
 
   const exportParams = new URLSearchParams(query)
   if (includeSuspicious) exportParams.set('include_suspicious', 'true')
-  const fileName = `camtrap-measure_${camera || 'all'}_${from || 'start'}_${to || 'end'}.csv`
+  const fileName = `camtrap-measure_${oneCamera || surveySite || 'all'}_${from || 'start'}_${to || 'end'}.csv`
+  // The first file's name, as an example of the rest: named like the combined file, by site or by camera.
+  const firstCamera = summary.cameras[0]?.site ?? ''
+  const firstKey = split === 'site' ? (cameras.find((c) => c.site === firstCamera)?.survey_site ?? firstCamera) : firstCamera
+  const splitName = `camtrap-measure_${firstKey}_${from || 'start'}_${to || 'end'}.csv`
+
+  /** Ask for a folder the way Browse does, then have the engine write one file per site or camera into it.
+      Where there is no native chooser, the folder is typed instead and this saves into what was typed. */
+  async function saveSplit() {
+    setSaved(null)
+    setSaveNote(null)
+    let dest = typedTo?.trim() ?? ''
+    if (typedTo === null) {
+      const r = await post('/api/folder/pick')
+      const body: { folder: string | null; reason: string | null } = await r.json()
+      if (!body.folder) {
+        if (body.reason?.includes('cannot open')) setTypedTo('') // no native chooser here: type the folder
+        setSaveNote(body.reason)
+        return
+      }
+      dest = body.folder
+    }
+    if (!dest) return setSaveNote('Type the folder to save the files in.')
+    const q = new URLSearchParams(exportParams)
+    q.set('by', split)
+    q.set('to', dest)
+    setSaving(true)
+    const r = await fetch(`/api/export/split?${q}`, { method: 'POST' }).catch(() => null)
+    setSaving(false)
+    if (r === null) return setSaveNote('The engine could not be reached.')
+    const body = await r.json()
+    if (!r.ok) return setSaveNote(body.detail ?? `Saving failed (${r.status})`)
+    setSaved({ folder: body.folder, count: body.count })
+  }
+
+  async function openSaved(path: string) {
+    const r = await post('/api/folder/open', { path })
+    if (!r.ok) setSaveNote((await r.json()).detail ?? 'The folder did not open.')
+  }
 
   return (
     <>
@@ -490,7 +558,64 @@ export default function Results({ site, sites, folder, onClear }: {
               </div>
             )}
 
-            {exported > 0 ? (
+            <div className="field">
+              <span className="cap">
+                Files <Help topic="splitExport" align="right" />
+              </span>
+              <div className="field-val">
+                <select
+                  className="bare"
+                  value={split}
+                  onChange={(e) => {
+                    setSplit(e.target.value === 'site' ? 'site' : e.target.value === 'camera' ? 'camera' : 'all')
+                    setSaved(null)
+                    setSaveNote(null)
+                  }}
+                >
+                  <option value="all">All combined (one file)</option>
+                  <option value="site">One file per site</option>
+                  <option value="camera">One file per camera</option>
+                </select>
+                <span className="chev">
+                  <Icon name="down" size={12} width={2.4} />
+                </span>
+              </div>
+            </div>
+
+            {exported > 0 && split !== 'all' ? (
+              <>
+                {typedTo !== null && (
+                  <input
+                    className="path"
+                    style={{ borderBottom: '1px solid var(--line)' }}
+                    value={typedTo}
+                    placeholder="Type or paste the folder to save in"
+                    spellCheck={false}
+                    onChange={(e) => setTypedTo(e.target.value)}
+                  />
+                )}
+                <button className="btn btn-amber btn-wide" style={{ height: 36, fontSize: 13 }} disabled={saving}
+                        onClick={() => void saveSplit()}>
+                  <Icon name="folder" size={15} width={2} />
+                  {saving ? 'Saving…' : typedTo !== null ? 'Save files' : 'Choose a folder and save'}
+                </button>
+                <span className="mono tiny faint" style={{ textAlign: 'center' }}>
+                  {splitName}, …
+                </span>
+                {saved && (
+                  <div className="notice stack" style={{ gap: 8 }}>
+                    <span>
+                      Saved {plural(saved.count, 'file')} to <span className="mono">{saved.folder}</span>
+                    </span>
+                    <button className="btn btn-sm" onClick={() => void openSaved(saved.folder)}>
+                      <Icon name="folder" size={12} width={1.8} />
+                      Open folder
+                    </button>
+                  </div>
+                )}
+                {saveNote && <div className="notice notice-warn">{saveNote}</div>}
+              </>
+            ) : exported > 0 ? (
               <>
                 <a
                   className="btn btn-amber btn-wide"

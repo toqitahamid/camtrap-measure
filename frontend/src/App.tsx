@@ -48,6 +48,9 @@ const runningOn = (inf: Inference): string => {
   return !name || name.toLowerCase().startsWith('cpu') ? name : `on ${name}`
 }
 
+/** What a camera with no labelled flag photo says when hovered. */
+const NOT_LABELLED = 'Label its flag photo in FlagLabel, then press Sync.'
+
 type Section = 'measure' | 'table' | 'results' | 'density'
 const SECTIONS: { id: Section; label: string; icon: 'measure' | 'table' | 'results' | 'density' }[] = [
   { id: 'measure', label: 'MEASURE', icon: 'measure' },
@@ -406,9 +409,21 @@ export default function App() {
               <span className="cap">Camera <Help topic="camera" /></span>
               <span className="field-val">
                 <select className="bare" value={scope.site} onChange={(e) => setPicked((s) => ({ ...s, site: e.target.value }))}
-                        disabled={usable.length === 0}>
-                  {usable.length === 0 && <option value="">Sync first</option>}
+                        disabled={cameras.length === 0}>
+                  {cameras.length === 0 && <option value="">Sync first</option>}
+                  {cameras.length > 0 && usable.length === 0 && <option value="">No camera labelled yet</option>}
                   {usable.map((c) => <option key={c.site} value={c.site}>{c.site}</option>)}
+                  {/* Listed, not hidden: someone looking for a camera must learn why it cannot be picked. Its flag
+                      photo is labelled in FlagLabel, never here, because this app only reads the cloud. */}
+                  {usable.length < cameras.length && (
+                    <optgroup label="Not labelled yet. Label in FlagLabel, then press Sync">
+                      {cameras.filter((c) => !usable.includes(c)).map((c) => (
+                        <option key={c.site} value={c.site} disabled title={NOT_LABELLED}>
+                          {c.site}, not labelled yet
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
                 <span className="chev"><Icon name="down" size={12} width={2.4} /></span>
               </span>
@@ -501,7 +516,7 @@ export default function App() {
                        error={shownError} onOpen={(p) => { setFocus(p); setSection('measure') }} />
           )}
           {section === 'results' && (
-            <Results site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder}
+            <Results site={scope.site} cameras={cameras} folder={scope.folder}
               onClear={clearResults} />
           )}
           {section === 'density' && (

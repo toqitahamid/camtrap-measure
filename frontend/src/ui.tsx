@@ -24,7 +24,8 @@ export type Status = {
   inference: Inference
 }
 export type Flag = { image_name: string; captured_at: string | null; ok: boolean; reason: string | null }
-export type Camera = { site: string; flags: Flag[] }
+// `site` is the camera's name (MAS_CAM01); `survey_site` the site it belongs to (MAS), as the engine reads it
+export type Camera = { site: string; survey_site: string; flags: Flag[] }
 export type Methods = { default: string; methods: Record<string, { label: string; hint: string }> }
 
 export type Det = {
