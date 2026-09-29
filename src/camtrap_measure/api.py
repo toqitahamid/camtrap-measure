@@ -78,7 +78,7 @@ def login_code(body: Email):
     except sb.AuthError as e:
         raise HTTPException(401, str(e))
     except sb.Offline:
-        raise HTTPException(503, "FlagLabel cloud not reachable — check the internet connection")
+        raise HTTPException(503, "FlagLabel cannot be reached. Check the internet connection.")
     return {"ok": True}
 
 
@@ -90,7 +90,7 @@ def login(body: Login):
     except sb.AuthError as e:
         raise HTTPException(401, str(e))
     except sb.Offline:
-        raise HTTPException(503, "FlagLabel cloud not reachable — check the internet connection")
+        raise HTTPException(503, "FlagLabel cannot be reached. Check the internet connection.")
     _remember(sess)
     return {"ok": True}
 
@@ -113,7 +113,7 @@ def _fit_changed(annotations: list[dict], token: str) -> list[dict]:
         except (sb.Offline, sb.AuthError):
             raise
         except Exception as e:  # storage 5xx/403 on one photo: red row, sync goes on
-            fits.append({**calibration.fit(a, None), "reason": f"{a['image_name']} could not be fetched from cloud storage ({e}) — try Sync again later."})
+            fits.append({**calibration.fit(a, None), "reason": f"{a['image_name']} could not be fetched from cloud storage ({e}). Try Sync again later."})
             continue
         if jpeg:
             store.save_ref(a["site"], a["image_name"], jpeg)  # the distance net aligns every photo to this flag photo
@@ -181,7 +181,7 @@ class RunRequest(BaseModel):
 def start_run(body: RunRequest):
     """Measure a folder — or the photos picked out of it — against one camera's flag photo. Progress via GET /api/run."""
     if inference.state["status"] != "ready":
-        raise HTTPException(503, inference.state["error"] or "Models are still loading — try again in a moment.")
+        raise HTTPException(503, inference.state["error"] or "The app is still starting. Try again in a moment.")
     try:
         return measure.start(body.folder, body.site, body.flag, body.method, body.rerun, body.photos)
     except ValueError as e:
@@ -221,7 +221,7 @@ def clear_results(site: str | None = None, path: str | None = None, everything: 
     """Forget measurements: one photo, one camera's worth, or all of them. The photos themselves are not
     touched, and neither is anything synced from FlagLabel — only the numbers this app recorded."""
     if measure.current and measure.current["status"] == "running":
-        raise HTTPException(409, "A run is in progress — stop it before clearing measurements.")
+        raise HTTPException(409, "Measuring is still running. Stop it before clearing measurements.")
     try:
         return store.clear_measurements(site=site, path=path, everything=everything)
     except ValueError as e:

@@ -31,7 +31,7 @@ def test_browse_returns_the_folder_the_user_chose(client, tmp_path, monkeypatch)
 
 def test_browse_without_a_native_window_asks_for_a_typed_path(client, monkeypatch):
     body = pick(client, monkeypatch, None)  # --no-window, or the page opened in a browser
-    assert body["folder"] is None and "type" in body["reason"] and "folder path" in body["reason"]
+    assert body["folder"] is None and "Type or paste" in body["reason"] and "folder path" in body["reason"]
 
 
 def test_cancelling_the_dialog_is_not_an_error(client, monkeypatch):
@@ -40,4 +40,4 @@ def test_cancelling_the_dialog_is_not_an_error(client, monkeypatch):
 
 def test_a_dialog_that_will_not_open_says_why(client, monkeypatch):
     body = pick(client, monkeypatch, FakeWindow(RuntimeError("no GUI toolkit")))
-    assert body["folder"] is None and "no GUI toolkit" in body["reason"] and "type the folder path" in body["reason"]
+    assert body["folder"] is None and "no GUI toolkit" in body["reason"] and "Type the folder path" in body["reason"]

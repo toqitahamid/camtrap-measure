@@ -97,7 +97,7 @@ def test_summary_suspicious_count_matches_what_the_export_leaves_out(measured):
     for all_species in (False, True):
         n = measured.get("/api/summary", params={"all_species": all_species}).json()["suspicious"]
         doc, _ = export(measured, all_species=all_species)
-        assert f"{n} suspicious rows excluded" in doc[0]
+        assert (f"{n} rows that need a look left out" if n != 1 else "1 row that needs a look left out") in doc[0]
     assert measured.get("/api/summary", params={"all_species": True}).json()["suspicious"] == 4  # + the weak raccoon
 
 
@@ -247,7 +247,7 @@ def test_export_defaults_to_deer_rows_without_suspicious_ones_and_documents_itse
     assert set(rows[0]) == {"photo", "camera", "site", "timestamp", "species", "distance_m", "q05_m", "q95_m", "confidence",
                             "method", "fidelity", "match_score", "flag"}  # fidelity: which settings made the number
     text = "\n".join(doc)
-    assert "3 suspicious rows excluded" in text and "metres" in text and "90%" in text
+    assert "3 rows that need a look left out" in text and "metres" in text and "90%" in text
     for col in ("distance_m", "q05_m", "q95_m", "confidence", "method", "fidelity", "flag", "timestamp"):
         assert col in text
 
@@ -259,7 +259,7 @@ def test_export_checkbox_includes_suspicious_rows_with_their_reason_in_the_flag_
     assert "confidence" in flags[("IMG_0002.JPG", "white-tailed deer")]
     assert "unsure" in flags[("IMG_0003.JPG", "unsure")]
     assert "flag photo" in flags[("IMG_0005.JPG", "white-tailed deer")]
-    assert "suspicious rows included" in "\n".join(doc)
+    assert "rows that need a look included" in "\n".join(doc)
 
 
 def test_export_all_species_toggle_adds_the_raccoon(measured):

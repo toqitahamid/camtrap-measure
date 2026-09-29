@@ -92,7 +92,7 @@ def test_a_run_in_progress_refuses_to_have_its_answers_pulled_out(synced, tmp_pa
     """Deleting rows a running job is still writing is a race with the store as the loser."""
     monkeypatch.setattr(api.measure, "current", {"status": "running"})
     r = synced.post("/api/results/clear", params={"site": "TON_CAM02"})
-    assert r.status_code == 409 and "run is in progress" in r.json()["detail"]
+    assert r.status_code == 409 and "still running" in r.json()["detail"]
 
 
 # --- the flag photo the window shows -------------------------------------------------------------

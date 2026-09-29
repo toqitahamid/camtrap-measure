@@ -25,7 +25,7 @@ def test_code_request_goes_to_the_cloud_and_offline_is_a_503(client, cloud):
     assert cloud["codes_sent"] == ["tech@dept.gov"]
     cloud["offline"] = True
     r = client.post("/api/login/code", json={"email": "tech@dept.gov"})
-    assert r.status_code == 503 and "not reachable" in r.json()["detail"]
+    assert r.status_code == 503 and "cannot be reached" in r.json()["detail"]
     r = client.post("/api/login", json={"email": "tech@dept.gov", "code": "123456"})
     assert r.status_code == 503 and client.get("/api/status").json()["signed_in"] is False
 
@@ -131,14 +131,14 @@ def test_unlabeled_flag_photo_is_unusable_and_names_it(cloud, synced):
     cloud["annotations"] = [{**ANN, "status": "empty", "data": None, "updated_at": "2026-07-01T00:00:00+00:00"}]
     synced.post("/api/sync")
     [f] = flags(synced)
-    assert f["ok"] is False and "IMG_5304.JPG" in f["reason"] and "not labeled" in f["reason"]
+    assert f["ok"] is False and "IMG_5304.JPG" in f["reason"] and "not labelled" in f["reason"]
 
 
 def test_too_few_flags_is_unusable_and_says_how_many(cloud, synced):
     cloud["annotations"] = [{**ANN, "data": flag_photo_data(n=4), "updated_at": "2026-07-01T00:00:00+00:00"}]
     synced.post("/api/sync")
     [f] = flags(synced)
-    assert f["ok"] is False and "IMG_5304.JPG" in f["reason"] and "4 ground marks" in f["reason"] and "label more flags" in f["reason"]
+    assert f["ok"] is False and "IMG_5304.JPG" in f["reason"] and "4 ground marks" in f["reason"] and "Label more flags" in f["reason"]
 
 
 def test_a_mislabeled_flag_still_fits_the_user_chooses(cloud, synced):

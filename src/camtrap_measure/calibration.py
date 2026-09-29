@@ -44,17 +44,17 @@ def fit(annotation: dict, jpeg: bytes | None) -> dict:
     row = {"site": annotation["site"], "image_name": image, "updated_at": annotation.get("updated_at"),
            "captured_at": None, "ok": False, "reason": None, "model": None}
     if jpeg is None:
-        row["reason"] = f"{image} is missing from cloud storage — re-upload it in FlagLabel."
+        row["reason"] = f"{image} is missing from FlagLabel's storage. Upload it again in FlagLabel."
         return row
     row["captured_at"] = read_exif(BytesIO(jpeg))["captured_at"]  # dated even when unlabeled, so a fresh re-flag closes the old window
     data = annotation.get("data") or {}
     if annotation.get("status") != "annotated" or not any(data.get(k) for k in LABEL_KEYS):
-        row["reason"] = f"{image} is not labeled yet — label its flags in FlagLabel."
+        row["reason"] = f"{image} is not labelled yet. Label its flags in FlagLabel."
         return row
     try:
         return _judge(row, data, image)
     except Exception as e:  # malformed labels (missing keys, 0 m distance, ...) — one row must not sink the sync
-        row["reason"] = f"{image} could not be fitted ({type(e).__name__}: {e}) — relabel it in FlagLabel."
+        row["reason"] = f"{image} could not be fitted ({type(e).__name__}: {e}). Label it again in FlagLabel."
         return row
 
 
@@ -64,7 +64,7 @@ def _judge(row: dict, data: dict, image: str) -> dict:
     if not model.ok:
         n, nd = len(photo.ground), len({g.dist for g in photo.ground})
         row["reason"] = (f"{image} has too few flag labels ({n} ground marks at {nd} distances; "
-                         f"needs {MIN_GROUND_OBS} at {MIN_DISTINCT_DISTS}) — label more flags in FlagLabel.")
+                         f"needs {MIN_GROUND_OBS} at {MIN_DISTINCT_DISTS}). Label more flags in FlagLabel.")
         return row
     row["ok"], row["model"] = True, json.dumps(model.to_dict())
     return row

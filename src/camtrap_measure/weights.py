@@ -86,7 +86,7 @@ def ensure(progress: Callable[[int, int], None] | None = None) -> dict:
             if progress:
                 progress(total, total)
         except (RepositoryNotFoundError, GatedRepoError) as e:
-            problem = f"the weights repo {REPO} rejected the access token ({type(e).__name__}) — check hf_token in config.json"
+            problem = f"the weights repo {REPO} rejected the access token ({type(e).__name__}); check hf_token in config.json"
         except HfHubHTTPError as e:
             problem = f"the weights server answered {e.response.status_code if e.response is not None else '?'} ({e})"
         except Exception:  # DNS, timeouts, connection refused: offline
@@ -97,7 +97,7 @@ def ensure(progress: Callable[[int, int], None] | None = None) -> dict:
                 watcher.join()  # no progress tick after the caller has moved on
         if (offline or problem) and not (local / "manifest.json").exists():
             raise WeightsMissing("Model weights are not downloaded yet and " + (
-                f"{problem}." if problem else "the download failed — connect to the internet and restart the app."))
+                f"{problem}." if problem else "the download failed. Connect to the internet and restart the app."))
     try:
         manifest = json.loads((local / "manifest.json").read_text())
     except (OSError, ValueError) as e:

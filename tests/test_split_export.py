@@ -90,7 +90,7 @@ def test_split_by_site_writes_one_file_per_site_with_rows(measured, tmp_path):
     doc, rows = read(body["paths"][0])
     assert {(r["camera"], r["photo"]) for r in rows} == {("MAS_CAM01", "IMG_A.JPG"), ("MAS_CAM02", "IMG_A.JPG")}
     assert {r["site"] for r in rows} == {"MAS"}
-    assert "site=MAS" in doc[0] and "1 suspicious rows excluded" in doc[0]  # the weak box on MAS_CAM01
+    assert "site=MAS" in doc[0] and "1 row that needs a look left out" in doc[0]  # the weak box on MAS_CAM01
     assert any(l.startswith("# distance_m:") for l in doc)  # the same column notes as the combined file
     _, rows = read(body["paths"][1])
     assert [r["camera"] for r in rows] == ["TON_CAM02"]
@@ -112,7 +112,7 @@ def test_split_applies_the_screen_filters_to_every_file(measured, tmp_path):
                            "camtrap-measure_MAS_CAM02_2026-05-02_2026-05-03.csv"]
     doc, rows = read(body["paths"][0])
     assert [(r["photo"], r["flag"] != "") for r in rows] == [("IMG_B.JPG", True)]
-    assert "from=2026-05-02" in doc[0] and "suspicious rows included" in doc[0]
+    assert "from=2026-05-02" in doc[0] and "rows that need a look included" in doc[0]
 
     every = split(measured, tmp_path, "site", all_species=True, survey_site="TON")
     assert names(every) == ["camtrap-measure_TON_start_end.csv"]  # the site filter narrows the split too

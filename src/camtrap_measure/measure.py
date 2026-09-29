@@ -46,16 +46,16 @@ def prepare(folder: str, site: str, flag: str, method: str, photos: list[str] | 
     if not d.is_dir():
         raise ValueError(f"Folder not found: {d}")
     if not store.sites():
-        raise ValueError("No cameras known yet — run Sync first.")
+        raise ValueError("No cameras yet. Press Sync first.")
     if site not in store.sites():
         raise ValueError(f"'{site}' is not a camera in FlagLabel.")
     cal = next((r for r in store.calibrations() if r["site"] == site and r["image_name"] == flag), None)
     if cal is None:
-        raise ValueError(f"{site} has no flag photo {flag} — run Sync and pick one from the list.")
+        raise ValueError(f"{site} has no flag photo {flag}. Press Sync and pick one from the list.")
     if not cal["ok"]:
         raise ValueError(cal["reason"])
     if not store.ref_path(site, flag).exists():
-        raise ValueError(f"The flag photo {flag} is not on this computer yet — run Sync, then measure again.")
+        raise ValueError(f"The flag photo {flag} is not on this computer yet. Press Sync, then measure again.")
     if photos is None:
         found = jpegs(d)
         if not found:
@@ -65,10 +65,10 @@ def prepare(folder: str, site: str, flag: str, method: str, photos: list[str] | 
     for name in photos:
         p = Path(name).expanduser().resolve()
         if p.suffix.lower() not in JPEG or p.parent != d or not p.is_file():
-            raise ValueError(f"{name} is not a photo in {d} — pick photos from the folder you are measuring.")
+            raise ValueError(f"{name} is not a photo in {d}. Pick photos from the folder you are measuring.")
         chosen.append(p)
     if not chosen:
-        raise ValueError("No photos picked — tick at least one photo, or measure the whole folder.")
+        raise ValueError("No photos picked. Tick at least one photo, or measure the whole folder.")
     return d, chosen, cal
 
 
@@ -95,8 +95,8 @@ def _plain(e: Exception) -> str:
     """A run's failure as something to act on. Out of memory is the one a technician can actually fix,
     and on a card shared with the desktop it is the one they will meet (seen 2026-08-23)."""
     if inference.is_oom(e):
-        return ("The GPU ran out of memory. Other programs are using it — close Chrome, Teams or other "
-                "heavy windows, then measure again. The photos already done keep their numbers.")
+        return ("The graphics card ran out of memory because other programs are using it. Close Chrome, "
+                "Teams or other heavy windows, then measure again. Photos already done keep their numbers.")
     return f"{type(e).__name__}: {e}"
 
 

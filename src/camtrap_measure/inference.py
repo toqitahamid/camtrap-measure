@@ -31,11 +31,11 @@ import numpy as np
 from . import distance, weights
 
 METHODS = {
-    "md": {"label": "Fast — MegaDetector box",
-           "hint": "Distance is read at the bottom of each animal's detection box. Fast; fine for most photos."},
-    "sam3": {"label": "Precise — SAM3 outline (slower)",
-             "hint": "SAM3 outlines each animal and the distance is read where its feet touch the ground. "
-                     "Several times slower; better when animals are partly hidden or the box is loose."},
+    "md": {"label": "MegaDetector box (faster)",
+           "hint": "Reads the distance at the bottom of the MegaDetector box around each animal. Fine for most photos."},
+    "sam3": {"label": "SAM3 outline (more exact)",
+             "hint": "SAM3 traces each animal and reads the distance where its feet touch the ground. "
+                     "Several times slower. Better when an animal is partly hidden."},
 }
 # ponytail: which method is the default is decided by the research-repo comparison (CONTEXT open item 2,
 # bbox-bottom vs mask ground contact on the labeled data); until then the fast one. One-line change.
@@ -196,15 +196,14 @@ class Real:
         free, total = self.torch.cuda.mem_get_info()
         gb, free_gb = total / 2**30, free / 2**30
         if round(gb) < VRAM_FLOOR_GB:  # an "8 GB" card reports ~7.99 GiB usable (seen on the dept RTX 2060 SUPER)
-            return (f"This GPU has {gb:.1f} GB of memory, below the {VRAM_FLOOR_GB} GB the app is designed for "
-                    "— runs will be slow.")
+            return (f"This graphics card has {gb:.1f} GB of memory, less than the {VRAM_FLOOR_GB} GB the app "
+                    "needs. Measuring will be slow.")
         if free_gb < RUN_VRAM_GB[self.fidelity]:
             # The dept machine shares its card with the desktop, Chrome and Teams. Short of memory the
             # run does not usually fail — Windows quietly serves the overflow from system memory over
             # PCIe, and the same photo takes ten times as long (33 s against 3 s, measured 2026-08-23).
-            return (f"Only {free_gb:.1f} GB of the GPU's {gb:.1f} GB is free, and a run needs about "
-                    f"{RUN_VRAM_GB[self.fidelity]:.1f} GB — other programs are using the card. Measuring "
-                    "will be several times slower until Chrome, Teams or other heavy windows are closed.")
+            return ("Other programs are using the graphics card, so measuring will be several times slower. "
+                    "Close Chrome, Teams or other heavy windows to speed it up.")
         return None
 
     def detecting(self) -> tuple:
@@ -260,7 +259,7 @@ class Real:
         """What the status line shows, so "is it really using the GPU?" has an answer on screen: the card's
         own name, from the driver, or plainly that there is none."""
         if self.device != "cuda":
-            return "CPU only — no GPU in use"
+            return "CPU only, no GPU in use"
         p = self.torch.cuda.get_device_properties(0)
         return f"{p.name} ({p.total_memory / 2**30:.1f} GB)"
 
@@ -346,8 +345,8 @@ class Real:
         """SAM3 (transformers port of facebook/sam3), loaded on first use so the fast method never pays its VRAM."""
         if self.sam3 is None:
             if "sam3" not in self.manifest:
-                raise RuntimeError("The precise method needs the SAM3 weights, which this computer has not downloaded yet "
-                                   "— restart the app while online, then try again.")
+                raise RuntimeError("SAM3 outline needs a download this computer does not have yet. "
+                                   "Restart the app while online, then try again.")
             from transformers import Sam3Model, Sam3Processor
             d = self.weights_dir / self.manifest["sam3"]
             # ponytail: fp32 weights (3.4 GB) under bf16 autocast as the research ran it; load in bf16 if a small card
@@ -421,7 +420,7 @@ def warmup() -> None:
     global backend
     state.update(status="loading", error=None, warning=None)
     if not models_installed():
-        state.update(status="ready", warning="FAKE inference — no models installed (uv sync --extra inference). "
+        state.update(status="ready", warning="FAKE inference: no models installed (uv sync --extra inference). "
                                              "Numbers are made up.")
         return
     # The models' libraries switch root logging to INFO on import, and the HTTP client then narrates every weights
@@ -444,7 +443,7 @@ def warmup() -> None:
         return
     backend = real
     if real.device != "cuda":
-        warnings.append("No GPU visible — running on the CPU, which is many times slower. "
+        warnings.append("No graphics card found, so measuring will be many times slower. "
                         "Check that the NVIDIA driver is installed and the card is seated.")
     if real.warning:
         warnings.append(real.warning)

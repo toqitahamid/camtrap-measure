@@ -164,7 +164,7 @@ def test_pinned_weights_dir_skips_the_hub(cloud, hub, models_installed, start, m
 def test_no_gpu_warns_loudly_but_still_runs(cloud, hub, models_installed, start, monkeypatch, synced, tmp_path):
     monkeypatch.setattr(inference, "Real", lambda d: StubReal(d, device="cpu"))
     c, s = start()
-    assert s["status"] == "ready" and s["device"] == "cpu" and "No GPU" in s["warning"] and "driver" in s["warning"]
+    assert s["status"] == "ready" and s["device"] == "cpu" and "No graphics card" in s["warning"] and "driver" in s["warning"]
     assert c.post("/api/run", json={"folder": str(folder(tmp_path)), "site": "TON_CAM02", "flag": "IMG_5304.JPG", "method": "md"}).status_code == 200
 
 
@@ -196,7 +196,7 @@ def test_runs_are_refused_while_models_load(cloud, hub, models_installed, start,
     c = TestClient(api.app)
     with c:
         r = c.post("/api/run", json={"folder": str(folder(tmp_path)), "site": "TON_CAM02", "flag": "IMG_5304.JPG", "method": "md"})
-        assert r.status_code == 503 and "loading" in r.json()["detail"]
+        assert r.status_code == 503 and "still starting" in r.json()["detail"]
         gate.set()
         for _ in range(100):
             if c.get("/api/status").json()["inference"]["status"] == "ready":

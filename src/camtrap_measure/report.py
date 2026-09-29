@@ -28,14 +28,14 @@ COLUMNS = ["photo", "camera", "site", "timestamp", "species", "distance_m", "q05
 DOC = """\
 # photo: file name; camera: the camera (the photo folder's name); timestamp: EXIF capture time in the camera's local time, no zone
 # site: the survey site, the part of the camera name before its last '_CAM' (MAS_CAM01 -> MAS); a name with no '_CAM' is its own site
-# species: SpeciesNet name — 'white-tailed deer' is any deer-family prediction, 'unsure' a weak one (score < {min_species})
+# species: what the species model named; 'white-tailed deer' is any deer-family prediction, 'unsure' a weak one (score < {min_species})
 # distance_m: horizontal ground distance to the animal in metres (median estimate)
 # q05_m, q95_m: bounds of the 90% interval around distance_m, metres; empty when no distance could be read
-# confidence: MegaDetector box confidence, 0-1; method: md = distance read at the box bottom, sam3 = at the SAM3 mask's feet
-# fidelity: research = the published pipeline's settings, fast = the faster settings for a small GPU (see the app's docs);
+# confidence: how sure the detector is that the box holds an animal, 0-1; method: md = distance read at the bottom of the MegaDetector box, sam3 = where the SAM3 outline meets the ground
+# fidelity: research = the published settings, fast = quicker settings for a small graphics card (see the app's docs);
 #           distances differ between the two by a few centimetres, well inside the q05-q95 band, but do not mix them silently
-# match_score: alignment inliers between this photo and its flag photo (fewer than {min_inliers} = suspicious)
-# flag: empty for a clean row, else why the row is suspicious (such rows are in this file only if you asked for them)
+# match_score: points that line up between this photo and its flag photo (fewer than {min_inliers} = needs a look)
+# flag: empty for a row that looks fine, else why the row needs a look (such rows are in this file only if you asked for them)
 """.format(min_inliers=MIN_INLIERS, min_species=MIN_SPECIES_SCORE)
 
 
@@ -51,15 +51,15 @@ def reasons(row: dict) -> list[str]:
     out = []
     aligned = row["match_score"] is not None and row["match_score"] >= MIN_INLIERS
     if row["match_score"] is None:
-        out.append("the photo did not align to its flag photo — no distance")
+        out.append("did not line up with its flag photo, so no distance")
     elif not aligned:
-        out.append(f"poor match to the flag photo ({row['match_score']} < {MIN_INLIERS} points) — misfiled or moved camera?")
+        out.append(f"lines up poorly with its flag photo ({row['match_score']} points, needs {MIN_INLIERS}). Wrong camera, or was it moved?")
     if row["confidence"] < LOW_CONF:
-        out.append(f"low detector confidence ({row['confidence']:.2f} < {LOW_CONF})")
+        out.append(f"low confidence it is an animal ({row['confidence']:.2f}, needs {LOW_CONF})")
     if row["species"] == "unsure":
-        out.append("species unsure — may not be a deer")
+        out.append("species unsure, may not be a deer")
     if row["distance_m"] is None and aligned:
-        out.append("no ground under the animal — no distance")
+        out.append("could not find the ground under the animal, so no distance")
     return out
 
 
@@ -204,6 +204,7 @@ def export_csv(site=None, date_from=None, date_to=None, all_species=False, inclu
     rs = _wanted(site, date_from, date_to, all_species, folder, survey_site)
     kept = [r for r in rs if include_suspicious or not r["flag"]]
     excluded = len(rs) - len(kept)
+    left_out = f"{excluded} row that needs a look left out" if excluded == 1 else f"{excluded} rows that need a look left out"
     methods = sorted({r["method"] for r in kept})
     buf = io.StringIO()
     buf.write(f"# CamTrap Measure export {datetime.now().astimezone().isoformat(timespec='seconds')}; "
@@ -211,10 +212,10 @@ def export_csv(site=None, date_from=None, date_to=None, all_species=False, inclu
               f"from={date_from or 'start'}; to={date_to or 'end'}; "
               f"folder={folder or 'all'}; "
               f"species={'all' if all_species else 'white-tailed deer + unsure'}; "
-              f"{'suspicious rows included (see flag)' if include_suspicious else f'{excluded} suspicious rows excluded'}\n")
+              f"{'rows that need a look included (see flag)' if include_suspicious else left_out}\n")
     buf.write(DOC)
     if len(methods) > 1:
-        buf.write(f"# methods present: {', '.join(methods)} — a photo measured with both has one row per animal per method; "
+        buf.write(f"# methods present: {', '.join(methods)}; a photo measured with both has one row per animal per method; "
                   "filter on the method column before analysis\n")
     w = csv.DictWriter(buf, COLUMNS, extrasaction="ignore", lineterminator="\n")
     w.writeheader()

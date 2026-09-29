@@ -213,7 +213,7 @@ def clear_measurements(site: str | None = None, path: str | None = None, everyth
     """
     asked = [site is not None, path is not None, bool(everything)]
     if sum(asked) != 1:
-        raise ValueError("Say what to clear: one photo (path), one camera (site), or everything — exactly one.")
+        raise ValueError("Say what to clear: one photo (path), one camera (site), or everything, exactly one.")
     where, args = ("1 = 1", ()) if everything else (("path = ?", (path,)) if path else ("site = ?", (site,)))
     with closing(_db()) as con, con:
         gone = [r["path"] for r in con.execute(f"select path from photos where {where}", args)]

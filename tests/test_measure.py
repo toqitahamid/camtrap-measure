@@ -81,7 +81,7 @@ def test_unusable_flag_photo_is_refused_with_its_reason(cloud, synced, tmp_path)
     cloud["annotations"] = [{**ANN, "status": "empty", "data": None, "updated_at": "2026-07-01T00:00:00+00:00"}]
     synced.post("/api/sync")
     r = synced.post("/api/run", json={"folder": str(folder(tmp_path)), "site": SITE, "flag": FLAG, "method": "md"})
-    assert r.status_code == 400 and "not labeled" in r.json()["detail"]
+    assert r.status_code == 400 and "not labelled" in r.json()["detail"]
 
 
 def test_flag_photo_missing_from_disk_asks_for_sync(synced, tmp_path):
@@ -193,7 +193,7 @@ def test_inference_crash_is_an_error_and_keeps_earlier_answers(synced, tmp_path,
     monkeypatch.setattr(api.inference, "backend", boom)
     st = run(synced, d, rerun=True)
     # the one failure a technician can act on gets plain words, not the driver's
-    assert st["status"] == "error" and "close Chrome" in st["error"] and "keep their numbers" in st["error"]
+    assert st["status"] == "error" and "Close Chrome" in st["error"] and "keep their numbers" in st["error"]
     assert [r["distance_m"] for r in results(synced)] == [r["distance_m"] for r in before]  # rows replaced only once new ones exist
 
 

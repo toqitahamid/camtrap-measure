@@ -121,4 +121,4 @@ def test_the_export_says_which_settings_made_each_number():
     from camtrap_measure import report
 
     assert "fidelity" in report.COLUMNS
-    assert "research = the published pipeline" in report.DOC
+    assert "research = the published settings" in report.DOC
