@@ -587,7 +587,7 @@ export default function Results({ site, cameras, folder, onClear }: {
                 {typedTo !== null && (
                   <input
                     className="path"
-                    style={{ borderBottom: '1px solid var(--line)' }}
+                    style={{ width: '100%', borderBottom: '1px solid var(--line)' }}
                     value={typedTo}
                     placeholder="Type or paste the folder to save in"
                     spellCheck={false}
@@ -603,7 +603,7 @@ export default function Results({ site, cameras, folder, onClear }: {
                   {splitName}, …
                 </span>
                 {saved && (
-                  <div className="notice stack" style={{ gap: 8 }}>
+                  <div className="notice stack" style={{ gap: 8, minWidth: 0, overflowWrap: 'anywhere' }}>
                     <span>
                       Saved {plural(saved.count, 'file')} to <span className="mono">{saved.folder}</span>
                     </span>
@@ -613,7 +613,7 @@ export default function Results({ site, cameras, folder, onClear }: {
                     </button>
                   </div>
                 )}
-                {saveNote && <div className="notice notice-warn">{saveNote}</div>}
+                {saveNote && <div className="notice notice-warn" style={{ overflowWrap: 'anywhere' }}>{saveNote}</div>}
               </>
             ) : exported > 0 ? (
               <>
