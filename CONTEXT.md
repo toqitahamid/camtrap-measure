@@ -1241,3 +1241,49 @@ its shortcuts so a pinned button keeps the icon; existing shortcuts get it on an
 icon/identity failures now reach logs\launcher.log through CAMTRAP_LAUNCHER_LOG. Evidence: a live dev run's
 taskbar button showed the amber reticle beside the installed app's Python logo; form.Icon handle == the
 window's big icon (Alt-Tab). 290 passed.
+
+## Distance sampling (2026-09-28)
+
+Ticket 25: Seth asked for distance sampling. `density.py` turns the measured deer distances into deer per km²
+(camera-trap distance sampling, Howe et al. 2017) and writes the flat file R's `Distance` package reads; a
+DENSITY section after RESULTS shows both.
+
+- **What enters.** White-tailed deer rows only, with a distance, and no row `report.reasons` flags (so every
+  "unsure" animal and every row without a distance stays out). A photo measured with both methods has rows under
+  each; only the method the photo was last measured with counts, or its deer would count twice. The screen says
+  "Uses N of M deer" with how many were beyond w, needed a look, or sat at a camera with no active days.
+- **Method.** Point-transect detection function on r ≤ w, half-normal and hazard-rate (shape b held in [1, 20]),
+  maximum likelihood of f(r) = r g(r) / ∫0^w r g(r) dr, chosen by AIC. The integral is closed form for the
+  half-normal and 96-node Gauss-Legendre for the hazard-rate (checked against scipy's adaptive `quad` to 1e-4).
+  P = 2∫r g / w², effective radius w√P, D = n / (π w² P Σ (T_k/t)(θ_k/360)). Every photo is a snapshot moment and
+  every box one deer; availability is 1, said in the CSV header and the help text.
+- **Interval.** 1000 bootstraps, seeded: cameras resampled with replacement (a camera brings its deer and its
+  effort, so a camera with no deer counts too), deer resampled when there are fewer than three cameras. Each deer's
+  distance is redrawn from Normal(d, (q95 − q05)/3.29) and it counts only if the redraw lands inside w. Only the
+  chosen model is refitted, from the point fit's parameters: refitting both models from three starts each took
+  19 s for 1000 replicates.
+- **Hazard-rate by Nelder-Mead, not L-BFGS-B.** L-BFGS-B's numeric gradient makes scipy ask the array-API layer
+  whether its input is a torch tensor; while the model warmup is still importing torch on its thread, that raises
+  AttributeError, and `/api/density` answered 500 on the first live run. Nelder-Mead never asks (regression test
+  plants a half-imported torch). It is also faster here: about 4 s for the interval on the workstation's 37 deer.
+- **Settings** live in config.json under `"density"` (read whole, one key changed, written back, so the
+  installer's `hf_token` and `weights_from` survive): snapshot interval (default 2 s), truncation (default the 95th
+  percentile of the distances rounded up to the metre), per camera active days (default first to last photo, whole
+  calendar days inclusive) and field of view. A null puts the default back. Saved per computer, not per filter.
+- **Field of view table is empty on purpose.** The dept's photos say `BROWNING BTC-7E` in EXIF, and Browning sells
+  several cameras under that prefix with different lenses: the Recon Force Elite HP5 manual gives 41°, retailers
+  list the Recon Force Edge at 38.1°. The EXIF string does not say which, and a guessed lens moves every density by
+  up to 8% unseen. So every camera starts at 42° (the Distance package's own example) marked "check" until
+  someone types the manual's number. Add an entry to `FOV_BY_MODEL` only with a maker's spec for that exact string.
+- **R export differs from the package example, on purpose.** The docs (vignette, `DuikerCameraTraps`, `dht2`)
+  keep Effort = snapshot moments and pass θ/360 as `sample_fraction`. We fold θ/360 into Effort, as the ticket
+  said, because cameras may have different lenses; the header says to leave `sample_fraction` at 1. Same density
+  when all lenses match. `Area` = 0 (dht2 then gives density only), one row with distance NA per camera with no deer
+  within w, `convert_units("meter", NULL, "square kilometer")`, `ds(transect = "point")`, `dht2(er_est = "P2")`.
+- **Screen.** Filter bar as RESULTS (photos, camera, dates) but starting on everything measured and all cameras:
+  a density is a survey question, not a folder question. Survey setup saves on blur or Enter, not per keystroke,
+  since each save refits. The chart is inline SVG, bars and fitted curve both in deer per bin, whole-metre ticks.
+  Fewer than 20 deer after truncation still shows the numbers under a warning (60 to 80 is the usual minimum).
+
+Evidence: 305 passed, 1 skipped; `npm run build` and oxlint clean; real engine on the workstation store: 37 of 38
+deer, hazard-rate (AIC 176.2 vs 177.1), 7.6 deer/km², 90% range 6.1 to 11, P 0.606, radius 10.1 m.
