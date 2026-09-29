@@ -91,19 +91,25 @@ export type SurveyCamera = {
   model: string | null
   active_days: number | null
   active_days_default: number | null
+  // how the days were found: from the flag photo of the setup visit (or the first photo) to the last photo
+  days_source: { days: number | null; from: string; from_kind: 'flag' | 'photo' | 'filter'; flag: string | null; to: string; to_kind: 'photo' | 'filter' } | null
   fov_deg: number
   fov_default: number
+  fov_source: string | null  // "flag calibration IMG_0004.JPG", "camera model", or null for the 42 degree guess
   fov_checked: boolean
 }
 export type Density = {
   deer: number
   suspicious: number
+  between_moments: number
   beyond: number
   no_days: number
   no_days_deer: number
   used: number
   interval_s: number
   interval_default_s: number
+  interval_gaps: number  // the gaps between photos the suggested interval came from; 0 when none
+  photos: { photos: number; at_moments: number; undated: number }
   truncation_m: number | null
   truncation_default_m: number | null
   cameras: SurveyCamera[]

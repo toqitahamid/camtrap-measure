@@ -6,7 +6,7 @@
 import Help from './Help'
 import Icon from './Icon'
 import { useEffect, useState, type ReactNode } from 'react'
-import { post, thousands, type Density as Result } from './ui'
+import { plural, post, thousands, type Density as Result, type SurveyCamera } from './ui'
 
 /** Nothing to draw: one card, one honest line. */
 function Message({ icon, title, line, action }: { icon: 'warn' | 'density'; title: string; line: string; action?: ReactNode }) {
@@ -60,6 +60,22 @@ function NumberInput({ value, isDefault, onSave, width = 64, label }: {
 }
 
 const MODEL_NAME: Record<string, string> = { 'half-normal': 'Half-normal', 'hazard-rate': 'Hazard-rate' }
+
+const shortDay = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+
+/** Where a camera's numbers came from, in one line: the days from its flag photo to its last photo, the view
+    from its flag calibration. Shown whether or not a number was typed over them, so the found value stays in view. */
+function found(c: SurveyCamera): string {
+  const parts = []
+  const d = c.days_source
+  if (d && d.days !== null) {
+    const start = d.from_kind === 'flag' ? `flag photo ${shortDay(d.from)}` : d.from_kind === 'photo' ? `first photo ${shortDay(d.from)}` : shortDay(d.from)
+    const end = d.to_kind === 'photo' ? `last photo ${shortDay(d.to)}` : 'the To date'
+    parts.push(`${+d.days.toFixed(1)} days, ${start} to ${end}`)
+  }
+  parts.push(c.fov_source ? `View ${c.fov_default}° from the ${c.fov_source}` : `View unknown, ${c.fov_default}° is a guess`)
+  return `Found: ${parts.join('. ')}.`
+}
 
 /** Round a density for reading: two significant figures below 10, whole numbers above. */
 const perKm2 = (d: number) => (d >= 10 ? d.toFixed(0) : d >= 1 ? d.toFixed(1) : d.toPrecision(2))
@@ -285,6 +301,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
   const exportName = `camtrap-measure_distance_${camera || 'all'}_${from || 'start'}_${to || 'end'}.csv`
   const autoW = r.truncation_default_m
   const out = [
+    r.between_moments > 0 && `${r.between_moments} between snapshot moments`,
     r.beyond > 0 && `${r.beyond} beyond ${r.truncation_m} m`,
     r.suspicious > 0 && `${r.suspicious} need${r.suspicious === 1 ? 's' : ''} a look`,
     r.no_days_deer > 0 && `${r.no_days_deer} at cameras with no active days`,
@@ -306,7 +323,12 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
               <span className="small faint">s</span>
             </span>
           </div>
-          <span className="tiny faint">Time between photos in a burst or time-lapse. Check the camera settings.</span>
+          <span className="tiny faint">
+            {r.interval_gaps > 0
+              ? `Blank uses ${r.interval_default_s} s, from ${plural(r.interval_gaps, 'gap')} between photos.`
+              : `Blank uses ${r.interval_default_s} s. Time between photos in a burst or time-lapse.`}
+            {r.interval_s > 3 && ' Longer than the 0.25 to 3 s the method suggests.'}
+          </span>
         </div>
 
         <div className="stack" style={{ gap: 6 }}>
@@ -337,7 +359,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
               </tr>
             </thead>
             <tbody>
-              {r.cameras.map((c) => (
+              {r.cameras.map((c) => [
                 <tr key={c.site}>
                   <td className="mono" style={{ paddingLeft: 0, fontSize: 12 }} title={c.model ?? undefined}>
                     {c.site}
@@ -350,7 +372,7 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
                   </td>
                   <td className="num" style={{ paddingRight: 0, whiteSpace: 'nowrap' }}>
                     {!c.fov_checked && (
-                      <span className="tiny warn" title="The app does not know this camera's lens and used 42 degrees">
+                      <span className="tiny warn" title="No flag calibration gives this camera's view, so 42 degrees is a guess">
                         check{' '}
                       </span>
                     )}
@@ -358,8 +380,13 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
                                  isDefault={c.fov_deg === c.fov_default}
                                  onSave={(v) => save({ cameras: { [c.site]: { fov_deg: v } } })} />
                   </td>
-                </tr>
-              ))}
+                </tr>,
+                <tr key={`${c.site}-found`}>
+                  <td colSpan={3} className="tiny faint" style={{ padding: '0 0 9px', borderTop: 0, lineHeight: 1.5 }}>
+                    {found(c)}
+                  </td>
+                </tr>,
+              ])}
             </tbody>
           </table>
           <span className="tiny faint">Saved on this computer. Blank puts the first value back.</span>
@@ -372,6 +399,10 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
             Uses {thousands(r.used)} of {thousands(r.deer)} deer
           </b>
           {out.length > 0 && <span className="small dim">{out.join(', ')}</span>}
+          <span className="small dim">
+            {thousands(r.photos.at_moments)} photos at snapshot moments of {thousands(r.photos.photos)}
+            {r.photos.undated > 0 && `, ${r.photos.undated} without a time kept`}
+          </span>
         </div>
 
         <div className="stack" style={{ gap: 6 }}>

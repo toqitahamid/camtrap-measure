@@ -117,8 +117,8 @@ export const HELP: Record<string, Topic> = {
   snapshot: {
     title: 'Snapshot interval',
     body: [
-      'How many seconds apart the camera takes photos while a deer is in view.',
-      'It is in the camera settings, often called the burst delay or time-lapse interval. A wrong number makes the density wrong by the same share.',
+      'The app looks at the photos every this many seconds and counts the deer in the first photo of each look. A burst of photos in one look counts once.',
+      'It starts at the usual time between the camera firing again while a deer stays, found from the photos. A wrong number makes the density wrong by the same share.',
     ],
   },
   truncation: {
@@ -131,8 +131,8 @@ export const HELP: Record<string, Topic> = {
   surveyCameras: {
     title: 'Active days and view',
     body: [
-      'Active days is how long each camera was running. It starts as the days from its first photo to its last. Change it if the camera ran longer.',
-      'View is how wide the camera sees, in degrees. It is in the camera manual. "check" means the app does not know this camera and guessed 42.',
+      'Active days is how long each camera was running: from the flag photo taken when it was set up to the last photo on its card.',
+      'View is how wide the camera sees, in degrees, measured from its flag photo. "check" means there was no flag photo to measure and 42 is a guess.',
     ],
   },
   rExport: {
