@@ -23,10 +23,11 @@ LOW_CONF = 0.5  # ponytail: detector confidence below this is "weak box"; tune w
 DEER = {"white-tailed deer", "unsure"}  # default export: the survey target plus animals that may be it
 BIN_M = 2  # histogram bin width, metres
 
-COLUMNS = ["photo", "camera", "timestamp", "species", "distance_m", "q05_m", "q95_m", "confidence", "method",
+COLUMNS = ["photo", "camera", "site", "timestamp", "species", "distance_m", "q05_m", "q95_m", "confidence", "method",
            "fidelity", "match_score", "flag"]
 DOC = """\
-# photo: file name; camera: site (the photo folder's name); timestamp: EXIF capture time in the camera's local time, no zone
+# photo: file name; camera: the camera (the photo folder's name); timestamp: EXIF capture time in the camera's local time, no zone
+# site: the survey site, the part of the camera name before its last '_CAM' (MAS_CAM01 -> MAS); a name with no '_CAM' is its own site
 # species: SpeciesNet name — 'white-tailed deer' is any deer-family prediction, 'unsure' a weak one (score < {min_species})
 # distance_m: horizontal ground distance to the animal in metres (median estimate)
 # q05_m, q95_m: bounds of the 90% interval around distance_m, metres; empty when no distance could be read
@@ -36,6 +37,13 @@ DOC = """\
 # match_score: alignment inliers between this photo and its flag photo (fewer than {min_inliers} = suspicious)
 # flag: empty for a clean row, else why the row is suspicious (such rows are in this file only if you asked for them)
 """.format(min_inliers=MIN_INLIERS, min_species=MIN_SPECIES_SCORE)
+
+
+def site_of(camera: str) -> str:
+    """The survey site a camera belongs to: the part of its name before the last "_CAM" (MAS_CAM01 -> MAS).
+    A name with no "_CAM" is its own site."""
+    head, cam, _ = camera.rpartition("_CAM")
+    return head if cam else camera
 
 
 def reasons(row: dict) -> list[str]:
@@ -71,11 +79,16 @@ def _in_folder(path: str, folder: str | None) -> bool:
     return not folder or Path(path).parent == Path(folder)
 
 
-def rows(site=None, date_from=None, date_to=None, folder=None) -> list[dict]:
+def _in_site(camera: str, site: str | None, survey_site: str | None) -> bool:
+    """`site` picks one camera (the store's historic name for it); `survey_site` picks every camera of a site."""
+    return (not site or camera == site) and (not survey_site or site_of(camera) == survey_site)
+
+
+def rows(site=None, date_from=None, date_to=None, folder=None, survey_site=None) -> list[dict]:
     """Detection rows in scope, each with `flag` = '; '.join(reasons)."""
     out = []
     for r in store.detections():
-        if (site and r["site"] != site) or not _in_range(r["captured_at"], date_from, date_to):
+        if not _in_site(r["site"], site, survey_site) or not _in_range(r["captured_at"], date_from, date_to):
             continue
         if not _in_folder(r["path"], folder):
             continue
@@ -83,19 +96,19 @@ def rows(site=None, date_from=None, date_to=None, folder=None) -> list[dict]:
     return out
 
 
-def photos(site=None, date_from=None, date_to=None, folder=None) -> list[dict]:
+def photos(site=None, date_from=None, date_to=None, folder=None, survey_site=None) -> list[dict]:
     """Photo rows in scope — measured and held."""
     return [p for p in store.photos()
-            if (not site or p["site"] == site) and _in_range(p["captured_at"], date_from, date_to)
+            if _in_site(p["site"], site, survey_site) and _in_range(p["captured_at"], date_from, date_to)
             and _in_folder(p["path"], folder)]
 
 
-def summary(site=None, date_from=None, date_to=None, all_species=False, folder=None) -> dict:
+def summary(site=None, date_from=None, date_to=None, all_species=False, folder=None, survey_site=None) -> dict:
     """Counts, a histogram of deer distances, and one line per camera. `suspicious` counts the rows the
     export with the same species setting would leave out, so the number on screen is the number in the file.
     `folder` narrows all of it to the photos measured out of one folder — what RESULTS shows by default, so
     the screen answers for the folder in the bar rather than for everything ever measured."""
-    ph, rs = photos(site, date_from, date_to, folder), rows(site, date_from, date_to, folder)
+    ph, rs = photos(site, date_from, date_to, folder, survey_site), rows(site, date_from, date_to, folder, survey_site)
     deer = [r for r in rs if all_species or r["species"] in DEER]
     dists = [r["distance_m"] for r in deer if r["distance_m"] is not None]
     hist = {}
@@ -180,16 +193,22 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
     return {"folder": str(d), "total": len(out), "unreadable": unreadable, "rows": out}
 
 
+def _wanted(site, date_from, date_to, all_species, folder, survey_site) -> list[dict]:
+    """The rows an export with these filters looks at, before the rows that need a look are taken out."""
+    return [r for r in rows(site, date_from, date_to, folder, survey_site) if all_species or r["species"] in DEER]
+
+
 def export_csv(site=None, date_from=None, date_to=None, all_species=False, include_suspicious=False,
-               folder=None) -> str:
+               folder=None, survey_site=None) -> str:
     """The documented CSV: header lines (#) state the filters, what was excluded, and every column's meaning."""
-    rs = [r for r in rows(site, date_from, date_to, folder) if all_species or r["species"] in DEER]
+    rs = _wanted(site, date_from, date_to, all_species, folder, survey_site)
     kept = [r for r in rs if include_suspicious or not r["flag"]]
     excluded = len(rs) - len(kept)
     methods = sorted({r["method"] for r in kept})
     buf = io.StringIO()
     buf.write(f"# CamTrap Measure export {datetime.now().astimezone().isoformat(timespec='seconds')}; "
-              f"site={site or 'all'}; from={date_from or 'start'}; to={date_to or 'end'}; "
+              f"camera={site or 'all'}; site={survey_site or 'all'}; "
+              f"from={date_from or 'start'}; to={date_to or 'end'}; "
               f"folder={folder or 'all'}; "
               f"species={'all' if all_species else 'white-tailed deer + unsure'}; "
               f"{'suspicious rows included (see flag)' if include_suspicious else f'{excluded} suspicious rows excluded'}\n")
@@ -200,5 +219,50 @@ def export_csv(site=None, date_from=None, date_to=None, all_species=False, inclu
     w = csv.DictWriter(buf, COLUMNS, extrasaction="ignore", lineterminator="\n")
     w.writeheader()
     for r in kept:
-        w.writerow({**r, "photo": basename(r["path"]), "camera": r["site"], "timestamp": r["captured_at"]})
+        w.writerow({**r, "photo": basename(r["path"]), "camera": r["site"], "site": site_of(r["site"]),
+                    "timestamp": r["captured_at"]})
     return buf.getvalue()
+
+
+def file_name(key: str | None, date_from: str | None, date_to: str | None) -> str:
+    """What an export file is called: the camera or site it holds (or all), then the date range."""
+    return f"camtrap-measure_{key or 'all'}_{date_from or 'start'}_{date_to or 'end'}.csv"
+
+
+def _write_new(folder: Path, name: str, text: str) -> Path:
+    """Write `text` to `name` in `folder`, never over a file already there: the next one is "name (2).csv",
+    then "(3)", and so on. Opened with "x", so a file that appears in the meantime is not overwritten either."""
+    stem, suffix = name.rsplit(".", 1)
+    n = 1
+    while True:
+        p = folder / (name if n == 1 else f"{stem} ({n}).{suffix}")
+        try:
+            with open(p, "x", encoding="utf-8", newline="") as f:
+                f.write(text)
+            return p
+        except FileExistsError:
+            n += 1
+
+
+def export_split(to: str, by: str, site=None, date_from=None, date_to=None, all_species=False,
+                 include_suspicious=False, folder=None, survey_site=None) -> list[Path]:
+    """The export as one file per site (by="site") or per camera (by="camera"), written into the folder `to`.
+    Each file is `export_csv` narrowed to its site or camera, so it has the same header lines and filters as
+    the combined file. Only a site or camera with rows to write gets a file. Raises ValueError with the message."""
+    if by not in ("site", "camera"):
+        raise ValueError(f"Split by site or camera, not {by!r}")
+    d = Path(to).expanduser().resolve()
+    if not d.is_dir():
+        raise ValueError(f"Folder not found: {d}")
+    kept = [r for r in _wanted(site, date_from, date_to, all_species, folder, survey_site)
+            if include_suspicious or not r["flag"]]
+    written = []
+    if by == "site":
+        for s in sorted({site_of(r["site"]) for r in kept}):
+            text = export_csv(site, date_from, date_to, all_species, include_suspicious, folder, survey_site=s)
+            written.append(_write_new(d, file_name(s, date_from, date_to), text))
+    else:
+        for cam in sorted({r["site"] for r in kept}):
+            text = export_csv(cam, date_from, date_to, all_species, include_suspicious, folder, survey_site)
+            written.append(_write_new(d, file_name(cam, date_from, date_to), text))
+    return written

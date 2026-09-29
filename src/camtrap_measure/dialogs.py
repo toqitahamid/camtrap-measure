@@ -6,6 +6,7 @@ opened in an ordinary browser; then the page falls back to a typed path, which i
 back as a plain sentence the technician can act on rather than an error.
 """
 
+import os
 from pathlib import Path
 
 window = None  # set by main.py once the desktop window exists; None means "no native dialog here"
@@ -26,3 +27,17 @@ def pick_folder() -> tuple[str | None, str | None]:
         return None, "No folder chosen."
     picked = chosen if isinstance(chosen, str) else chosen[0]  # the dialog answers with a sequence; older ones a bare path
     return str(Path(picked).expanduser().resolve()), None
+
+
+def open_folder(path: str) -> str | None:
+    """Show a folder in Explorer → None, or why not. Windows only: that is where the app runs for real."""
+    d = Path(path)
+    if not d.is_dir():
+        return f"Folder not found: {d}"
+    if not hasattr(os, "startfile"):
+        return "Opening a folder only works on Windows."
+    try:
+        os.startfile(d)
+    except OSError as e:
+        return f"The folder did not open ({e})."
+    return None

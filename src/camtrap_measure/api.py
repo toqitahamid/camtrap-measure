@@ -144,8 +144,10 @@ def sync():
 
 @app.get("/api/cameras")
 def cameras():
-    """Every camera with its flag photos (usable ones carry ok=True) — what the Measure card offers."""
-    return calibration.cameras(store.sites(), store.calibrations())
+    """Every camera with its flag photos (usable ones carry ok=True) and its survey site — what the Measure
+    card offers, and what the Results camera filter groups by site."""
+    return [{**c, "survey_site": report.site_of(c["site"])}
+            for c in calibration.cameras(store.sites(), store.calibrations())]
 
 
 @app.post("/api/folder/pick")
@@ -228,10 +230,10 @@ def clear_results(site: str | None = None, path: str | None = None, everything: 
 
 @app.get("/api/summary")
 def summary(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
-            all_species: bool = False, folder: str | None = None):
-    """Counts, deer-distance histogram, per-camera stats for the chosen site / capture-date range (YYYY-MM-DD,
-    inclusive). `folder` narrows it to the photos measured out of that one folder."""
-    return report.summary(site, _iso(date_from), _iso(date_to), all_species, folder)
+            all_species: bool = False, folder: str | None = None, survey_site: str | None = None):
+    """Counts, deer-distance histogram, per-camera stats for the chosen camera (`site`) or survey site / capture-date
+    range (YYYY-MM-DD, inclusive). `folder` narrows it to the photos measured out of that one folder."""
+    return report.summary(site, _iso(date_from), _iso(date_to), all_species, folder, survey_site)
 
 
 SIZES = {"thumb": 320, "full": 1600}  # list icon / the viewer; the originals are 20-MP and never reach the page whole
@@ -271,11 +273,50 @@ def flag_photo(site: str, image: str, size: str = "full"):
 
 @app.get("/api/export.csv")
 def export(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
-           all_species: bool = False, include_suspicious: bool = False, folder: str | None = None):
+           all_species: bool = False, include_suspicious: bool = False, folder: str | None = None,
+           survey_site: str | None = None):
     """The documented CSV. Suspicious rows stay out unless include_suspicious is set — never silently."""
-    name = f"camtrap-measure_{site or 'all'}_{date_from or 'start'}_{date_to or 'end'}.csv"
-    return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, include_suspicious, folder),
+    name = report.file_name(site or survey_site, _iso(date_from), _iso(date_to))
+    return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, include_suspicious, folder,
+                                      survey_site),
                     media_type="text/csv; charset=utf-8", headers={"content-disposition": f'attachment; filename="{name}"'})
+
+
+# Folders a split export has written to since the engine started: the only ones "Open folder" will open.
+EXPORTED_FOLDERS: set[str] = set()
+
+
+@app.post("/api/export/split")
+def export_split(to: str, by: str, site: str | None = None, date_from: date | None = None, date_to: date | None = None,
+                 all_species: bool = False, include_suspicious: bool = False, folder: str | None = None,
+                 survey_site: str | None = None):
+    """The export as one file per site (by=site) or per camera (by=camera), written into the folder `to`, with
+    the same filters as GET /api/export.csv. An existing file is never overwritten: the new one gets " (2)"."""
+    try:
+        paths = report.export_split(to, by, site, _iso(date_from), _iso(date_to), all_species, include_suspicious,
+                                    folder, survey_site)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(500, f"Could not write the files ({e})")
+    out = str(Path(to).expanduser().resolve())
+    EXPORTED_FOLDERS.add(out)
+    return {"folder": out, "count": len(paths), "paths": [str(p) for p in paths]}
+
+
+class FolderPath(BaseModel):
+    path: str
+
+
+@app.post("/api/folder/open")
+def open_folder(body: FolderPath):
+    """Show a folder the split export wrote to in Explorer. Only those: this is not a general file opener."""
+    if body.path not in EXPORTED_FOLDERS:
+        raise HTTPException(404, "Not a folder this window saved files to")
+    reason = dialogs.open_folder(body.path)
+    if reason:
+        raise HTTPException(400, reason)
+    return {"ok": True}
 
 
 def _density_scope(site, date_from, date_to, folder) -> tuple[list[dict], list[dict]]:
