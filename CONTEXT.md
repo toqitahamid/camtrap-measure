@@ -1502,3 +1502,50 @@ forward"; a click while the app was starting without a launcher waited for its w
 window shown 0.9 s after start, the Starting page painted within about 1.4 s of that, engine imported 1.9 s later. `python -X importtime -c "import
 camtrap_measure.api"`: 2.1 s, of which calibration (scipy.optimize) 0.8 s, inference/weights (huggingface_hub)
 0.5 s, fastapi 0.5 s; torch is not imported until the model loader runs.
+
+## The app starts first; an update waits for the next start (2026-09-29, later)
+
+The researcher approved the proposal from the section above, and asked for the notice: "show a notification that
+an update is available in the app somewhere, as a popover or toaster or something else that doesn't go away
+unless the user takes action by updating it or closing the notification."
+
+- **Start first, fetch behind.** The launcher no longer fetches before the app. It starts the app from what is on
+  disk, then runs `git fetch --quiet --tags origin` as a background process while the window opens, and reads the
+  result once the window is up (at most 120 s, then the fetch is stopped). A fetch only moves refs and adds
+  objects, so it never touches files the running app uses. A failed fetch (offline) is a log line and nothing else.
+- **A newer version is written down**, in `logs\update-ready.json` (`commit`, `describe`, `ref`, `found`), UTF-8
+  with no byte order mark, in one write. `logs\` rather than beside the layout file: every copy has it, not only
+  the installed one, and git ignores it, so it never makes the clone look changed.
+- **The next start applies it.** Before the app starts, the launcher resolves `$ref` (origin/main, or ref.txt) in
+  what was already fetched (no network) and compares it with HEAD. If they differ: checkout, then
+  `uv sync --frozen --extra inference`, with the same rollback as before, and the splash says "Updating…". The
+  refs decide, not the file, so ref.txt keeps its rule exactly (a pinned tag is checked out at the next start and
+  kept at every start after). The file is removed at every start and written again by that start's fetch. A
+  checkout never runs while the app runs: the running-app check (bring forward, or wait for its window, then exit)
+  comes first. Sparse checkout, the dirty-clone rule and ref.txt are unchanged; a dirty clone neither applies nor
+  fetches, and its app is not given the file.
+- **Cost, taken knowingly.** An update lands one start later. `uv sync` no longer runs on every start, only after a
+  checkout: a damaged environment is no longer quietly repaired at start (the installer's repair still does it).
+  The first start on this launcher is the only one that pays nothing and learns nothing new until its fetch ends.
+- **The notice.** The launcher gives the app two variables for its process only: `CAMTRAP_UPDATE_FILE` and
+  `CAMTRAP_LAUNCH_VBS`. `GET /api/update` reads the file (`ready`, `commit`, `describe`, `can_restart`); a
+  half-written or missing file reads as "nothing yet". The window polls it every 30 s and shows an amber bar under
+  the header: "A new version is ready. Restart to update.", with **Restart now** and **Later**. It stays until one
+  is pressed. Later hides it until the app starts again, or until a different commit is waiting. A bar, not a toast:
+  a toast that never hides covers part of the work area; the bar takes one line and pushes nothing off screen.
+- **Restart now.** `POST /api/update/restart` refuses during a run ("Finish or stop the run first."). Otherwise it
+  starts `wscript.exe launch.vbs -AfterPid <engine pid>`, detached and asking to break away from uv's job object
+  (retried without that flag if the job forbids it), and then ends the process the way closing the window does
+  (`main.shutdown`, 0.5 s later so the answer reaches the window). The new launcher waits for the mutex up to 30 s
+  (the old launcher may still be finishing its fetch; a click never waits) and for that process and every
+  `camtrap-measure-app` of this folder to be gone (up to 30 s), then starts as usual, so the update is applied.
+  Started without the launcher (a developer's `camtrap-measure`), there is no file and no restart.
+- Not done: the splash for a restart appears once the old app has gone (2.8 s in the harness), not at the click.
+
+Evidence: 350 passed, 1 skipped; `npm run build` clean. Harness: a bare clone of the dev repo as `origin`, a clone
+of it as the app (synced venv), and a newer commit pushed to that origin. Launch 1: "up to date", app window 5.5 s
+after the click, background fetch 4 s, "newer version found: v0.2.0-47-g8dfe3f3", and the bar in the window.
+`POST /api/update/restart` (what the button sends): 200; the new launcher waited for pid 26876, checked out
+8dfe3f3 (0.2 s), synced (0.5 s), and the app window came 5.7 s after the request, with no bar. Launch 3 with the
+origin unreachable: "background fetch: exit 128 (offline?) - no update check this time", and the app ran as
+usual. The installed copy in D:\CamTrapMeasure was not touched.
