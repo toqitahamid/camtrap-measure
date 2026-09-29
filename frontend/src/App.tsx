@@ -11,6 +11,7 @@ import RangeScene from './RangeScene'
 import Density from './Density'
 import Results from './Results'
 import TableView from './TableView'
+import UpdateNotice from './UpdateNotice'
 import {
   duration,
   plural,
@@ -399,6 +400,8 @@ export default function App() {
             {initials(status.email)}
           </button>
         </header>
+
+        <UpdateNotice />
 
         {!summing && (
           <div className="ctxbar">

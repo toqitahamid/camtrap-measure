@@ -22,6 +22,7 @@ const PATHS = {
   spinner: 'M12 3a9 9 0 1 0 9 9',
   up: 'M6 15l6-6 6 6',
   trash: 'M4 7h16M10 7V4.5h4V7M6.5 7l1 12.5h9L17.5 7M10 11v5M14 11v5',
+  close: 'M6.5 6.5l11 11M17.5 6.5l-11 11',
 } as const // as const, so a name that is not an icon is a type error rather than an empty <path>
 /** Circles some icons need on top of their path, since a path alone cannot draw one. */
 const CIRCLES: Record<string, [number, number, number]> = {

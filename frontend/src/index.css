@@ -303,6 +303,23 @@ th.num,
   min-width: 0; /* .ellipsis can only bite once the flex item is allowed below its text width */
 }
 
+/* A new version is waiting: stays until Restart now or Later (see UpdateNotice.tsx) */
+.updatebar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 7px 14px;
+  background: var(--amber-bg);
+  border-bottom: 1px solid var(--amber-line);
+  color: var(--amber);
+  font-size: 13px;
+}
+.updatebar-problem {
+  color: #e8a08f;
+}
+
 .ctxbar {
   min-height: 58px;
   flex: none;
