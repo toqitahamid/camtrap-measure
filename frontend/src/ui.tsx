@@ -85,6 +85,37 @@ export type Summary = {
   cameras: { site: string; photos: number; detections: number; deer: number; median_m: number | null; suspicious: number }[]
 }
 
+/** One camera in the density's survey setup: saved value over default, and whether the lens angle is known. */
+export type SurveyCamera = {
+  site: string
+  model: string | null
+  active_days: number | null
+  active_days_default: number | null
+  fov_deg: number
+  fov_default: number
+  fov_checked: boolean
+}
+export type Density = {
+  deer: number
+  suspicious: number
+  beyond: number
+  no_days: number
+  no_days_deer: number
+  used: number
+  interval_s: number
+  interval_default_s: number
+  truncation_m: number | null
+  truncation_default_m: number | null
+  cameras: SurveyCamera[]
+  effort: number
+  min_deer: number
+  too_few: boolean
+  fit: { model: string; sigma: number; b: number | null; aic: number; other: { model: string; aic: number } | null } | null
+  bins: { lo: number; hi: number; n: number }[]
+  curve: { r: number; n: number }[]  // the fitted curve as expected deer per bin, so it sits on the bars
+  density: { per_km2: number; lo: number; hi: number; p: number; edr_m: number } | null
+}
+
 /** What every section is pointed at: one camera, one of its flag photos, one folder, one method. */
 export type Scope = { site: string; flag: string; folder: string; method: string }
 

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import Measure from './Measure'
 import RangeScene from './RangeScene'
+import Density from './Density'
 import Results from './Results'
 import TableView from './TableView'
 import {
@@ -47,11 +48,12 @@ const runningOn = (inf: Inference): string => {
   return !name || name.toLowerCase().startsWith('cpu') ? name : `on ${name}`
 }
 
-type Section = 'measure' | 'table' | 'results'
-const SECTIONS: { id: Section; label: string; icon: 'measure' | 'table' | 'results' }[] = [
+type Section = 'measure' | 'table' | 'results' | 'density'
+const SECTIONS: { id: Section; label: string; icon: 'measure' | 'table' | 'results' | 'density' }[] = [
   { id: 'measure', label: 'MEASURE', icon: 'measure' },
   { id: 'table', label: 'TABLE', icon: 'table' },
   { id: 'results', label: 'RESULTS', icon: 'results' },
+  { id: 'density', label: 'DENSITY', icon: 'density' },
 ]
 
 const initials = (email: string | null) =>
@@ -76,6 +78,8 @@ export default function App() {
   const copyRef = useRef<HTMLDivElement>(null) // the sign-in text; the scene's horizon sits under it
 
   const [section, setSection] = useState<Section>('measure')
+  // RESULTS and DENSITY add up what was measured: they bring their own filters, not the measuring bar
+  const summing = section === 'results' || section === 'density'
   const [picked, setPicked] = useState<Scope>({ site: '', flag: '', folder: '', method: '' })
   const [typedPath, setTypedPath] = useState('') // only reachable where there is no native folder dialog
   const [pickable, setPickable] = useState(true) // until a pick says this window has no native dialog
@@ -394,7 +398,7 @@ export default function App() {
           </button>
         </header>
 
-        {section !== 'results' && (
+        {!summing && (
           <div className="ctxbar">
             {/* width is what each field would like; minWidth is what it must keep to stay readable —
                 the bar wraps to a second row before anything is squeezed past it */}
@@ -482,11 +486,11 @@ export default function App() {
           </div>
         )}
 
-        {notice && notice.kind !== 'done' && section !== 'results' && (
+        {notice && notice.kind !== 'done' && !summing && (
           <p className={`notice notice-${notice.kind}`} style={{ margin: '10px 14px 0' }}>{notice.text}</p>
         )}
 
-        <div className={section === 'results' ? 'body' : 'work'}>
+        <div className={summing ? 'body' : 'work'}>
           {section === 'measure' && (
             <Measure scope={scope} folder={folder} methods={methods} busy={running || !ready} running={running}
               onClear={clearResults}
@@ -499,6 +503,9 @@ export default function App() {
           {section === 'results' && (
             <Results site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder}
               onClear={clearResults} />
+          )}
+          {section === 'density' && (
+            <Density site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder} />
           )}
         </div>
 

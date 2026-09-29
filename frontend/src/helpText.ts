@@ -99,6 +99,49 @@ export const HELP: Record<string, Topic> = {
       'Your photos, cameras and flag photos all stay. There is no undo, so the app asks twice.',
     ],
   },
+  density: {
+    title: 'Deer per square kilometre',
+    body: [
+      'How many deer live in the area, worked out from how often the cameras saw deer and how far away they stood.',
+      'Far deer are easy to miss, so the app learns from the distances how many it missed and adds them back.',
+      'Every photo counts and every deer box is one deer. It assumes a deer in front of a camera could always be seen.',
+    ],
+  },
+  densityRange: {
+    title: 'The 90% range',
+    body: [
+      'The app is fairly sure the real density is between these two numbers.',
+      'It allows for chance in which deer walked past the cameras, and for each distance being a best guess.',
+    ],
+  },
+  snapshot: {
+    title: 'Snapshot interval',
+    body: [
+      'How many seconds apart the camera takes photos while a deer is in view.',
+      'It is in the camera settings, often called the burst delay or time-lapse interval. A wrong number makes the density wrong by the same share.',
+    ],
+  },
+  truncation: {
+    title: 'Truncation distance',
+    body: [
+      'Deer further away than this are left out. The few far ones make the answer shaky.',
+      'Left blank, the app uses the distance that 95% of deer are closer than.',
+    ],
+  },
+  surveyCameras: {
+    title: 'Active days and view',
+    body: [
+      'Active days is how long each camera was running. It starts as the days from its first photo to its last. Change it if the camera ran longer.',
+      'View is how wide the camera sees, in degrees. It is in the camera manual. "check" means the app does not know this camera and guessed 42.',
+    ],
+  },
+  rExport: {
+    title: 'Export for R Distance',
+    body: [
+      'A file for the Distance package in R, with the same deer, cameras and settings as this screen.',
+      'The top of the file says how to load it and which commands to run.',
+    ],
+  },
   sync: {
     title: 'Sync',
     body: [
