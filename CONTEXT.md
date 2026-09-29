@@ -1378,3 +1378,59 @@ Real engine on the workstation store: 141/167 labelled, 26 unlabelled listed (SR
 MAS_CAM01 11 rows, MAS_CAM04 27 rows. By site: MAS 38 rows; the second run wrote "... (2).csv". In headless
 Edge: the export choice, the site filter (MAS 31, MOR 23, SHB 41, SRF 41, TON 31 cameras) and "Saved 1 file to
 ...". Fixed on the way: a long folder path pushed the export card wider than the window; it wraps now.
+
+## Plain-language pass (2026-09-29)
+
+The researcher: "make sure the ui is user friendly and simple so that any one can understand", then "fix the color
+of some text ... and fix the font too". The readers are wildlife and life-science students and technicians. So the
+distance-sampling terms they learn in class and report in a thesis stay on screen, each with a one-line meaning in
+its help. Software terms go, or are said in plain words. Copy is one to three short sentences, with no em dashes.
+Nothing on screen is informational only.
+
+**Word list** (old, new, why):
+
+| Old | New | Why |
+|---|---|---|
+| suspicious, flagged for a look | Needs a look (screen and CSV header) | one word for one thing on every screen and in the file |
+| Clean / Empty frame / Answer out of date | Looks fine / No animal / Out of date | "clean" promised more than it means |
+| Alignment: 8812 points; match score; inliers | Lines up with flag photo: Good / Check / No (count in the tooltip) | the point count means nothing to a student; the decision does |
+| box confidence 0.97; Conf | 97% sure it is an animal; Sure | a percentage reads without a lesson |
+| Fast — MegaDetector box / Precise — SAM3 outline (slower) | MegaDetector box (faster) / SAM3 outline (more exact) | the researcher kept the model names; only the dash and the order changed |
+| Re-measure photos that already have a number | Redo measured photos | shorter, same meaning |
+| 90% between / 90% interval (per photo) | 90% range | plain; the density keeps its own term below |
+| 90% range (density) | 90% confidence interval | the thesis term |
+| Detection probability P, Truncation distance, Snapshot interval, Effective detection radius, Detection function | unchanged, each with a help line | students report these |
+| Hazard-rate, σ, b, AIC in the chart header | Details for your report (collapsed), with "How to report this" | model selection is for the methods section, not the daily screen |
+| View ° | Field of view ° | the standard term |
+| Measured against / Read at | Flag photo / Distance read at | the names the bar above already uses |
+| Engine unreachable / The engine is not answering | The app is not answering. Restart it. | a technician does not know there is an engine |
+| GPU / weights / FAKE inference | graphics card / models / Test mode (dev only) | plain words |
+| v0.2.0 (v0.2.0-33-g...), weights version, GPU name, loaded models in header and status bar | About panel in the header | the header keeps the name; the status bar keeps the state and warnings |
+| synced 10:49:20 · 314 flag photos · 141/167 cameras labelled | Synced 10:49 (counts in About) | the time is what decides pressing Sync |
+| — as an empty cell | – | no em dashes on screen |
+
+- **RESULTS starts on Everything measured when no folder is chosen.** This refines "the screen answers for the
+  folder in the bar": with no folder there is nothing to answer for, and the old default was an empty
+  screen. With a folder chosen it still starts on that folder.
+- **Fast settings stay visible**, as "⚠ Quick settings are on. See About." (ticket 19 said fast fidelity is never
+  silent). It shows only when someone turned it on in config.json.
+- **The CSV keeps every column name and number.** Header lines and the `flag` column's reason text are reworded
+  (for example "lines up poorly with its flag photo (12 points, needs 20). Wrong camera, or was it moved?"). The
+  thresholds are still named in the reasons, and the words the table matches on ("flag photo", "confidence",
+  "unsure") are kept.
+- **Contrast** (WCAG 2, measured by script against bg, rail, pane, raised and sunk; worst case shown):
+  `--faint` #5c646e 2.73 to #848c96 4.81; `--dim` #8a929c 5.20 to #a3abb5 7.05; `--bad` #d6544a 4.07 to #e36a60
+  5.06 (on its own tint 4.43 to 5.51). Disabled text (options, tabs, buttons, selects) moved from --ghost or
+  #31373e / #4a5058 (1.5 to 2.3) to a new `--disabled` #6a727c, 3.36. Unchanged and passing: text 13.6, text-2
+  10.1, amber 7.5, ok 6.5, info 6.8, dark ink on amber 8.5, dark on the green and red box tags 7.4 and 5.9.
+  --ghost is now for lines only.
+- **Type.** Nothing under 12px. Captions and column headings are sentence-case Inter 12px with light tracking,
+  not 10px uppercase Space Grotesk. Monospace only for numbers in tables, paths, and the sign-in code. Space
+  Grotesk stays for headings, the wordmark and the big numbers. Fonts stay bundled.
+- Left alone: code comments with em dashes (not on screen); the sign-in animation's canvas labels (decoration,
+  `aria-hidden`); installer scripts and `supabase_ro.py`.
+
+Evidence: 324 passed, 1 skipped. `npm run build` (tsc -b) and oxlint clean. Real engine on the workstation store,
+headless Edge at 1500x900, 1280x800 and 1920x1080: sign-in, MEASURE (empty and with MAS_CAM01), a help popover,
+About, TABLE, RESULTS (folder and everything), DENSITY with the details open. No overflow or bad wraps. Before
+shots from a73b015 (sign-in served from the committed ui over the same engine).
