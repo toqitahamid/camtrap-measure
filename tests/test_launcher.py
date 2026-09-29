@@ -750,7 +750,7 @@ def test_the_splash_uses_standard_windows_colours_and_says_each_step():
     assert "FromHtml" not in ps and "BackColor" not in ps
     assert "[System.Drawing.SystemColors]::ControlText" in ps
     assert '$E = [char]0x2026' in ps
-    for line in ('"Starting CamTrap Measure$E"', '"Checking for updates$E"', '"Updating$E"', '"Starting$E"',
+    for line in ('"Starting CamTrap Measure$E"', '"Updating$E"', '"Starting$E"',
                  '"Still starting. This can take a few minutes after an update."'):
         assert line in ps, line
 
@@ -764,11 +764,12 @@ def test_the_launcher_is_ascii_without_a_byte_order_mark():
 def test_a_second_click_while_starting_does_not_start_a_second_copy():
     ps = text(SCRIPTS / "launcher.ps1")
     # a launcher still updating or waiting holds the mutex; a second one brings its splash forward and leaves
-    assert "New-Object System.Threading.Mutex($false, $MutexName)" in ps and "$Mutex.WaitOne(0)" in ps
+    assert "New-Object System.Threading.Mutex($false, $MutexName)" in ps and "$Mutex.WaitOne($patience)" in ps
+    assert "$patience = 0\n" in ps  # a click never waits for another launcher; only "Restart now" does
     assert "[CamTrap.Win]::FindWindowW([NullString]::Value, $Splash)" in ps
     # an app process with no window yet is waited for, never started again, never updated under
     assert "$hwnd = Wait-ForApp $running[0]" in ps
-    for before in ("$Mutex.WaitOne(0)", "$hwnd = Wait-ForApp $running[0]"):
+    for before in ("$Mutex.WaitOne($patience)", "$hwnd = Wait-ForApp $running[0]"):
         assert ps.index(before) < ps.index("# --- the update") < ps.index("Start-Process -FilePath $Exe")
 
 
@@ -786,3 +787,58 @@ def test_the_launcher_logs_how_long_each_step_took():
     ps = text(SCRIPTS / "launcher.ps1")
     assert 'Log "  exit $($p.ExitCode) ($(Seconds-Since $t))"' in ps
     assert 'Log "app window showing after $(Seconds-Since $started) ($(Seconds-Since $T0) after the click)"' in ps
+
+
+# --- the app starts first; the update waits for the next start (2026-09-29) ----------------------
+
+def test_the_fetch_runs_behind_the_window_and_never_before_the_app_starts():
+    ps = text(SCRIPTS / "launcher.ps1")
+    start_app = ps.index("$app = Start-Process -FilePath $Exe")
+    assert 'Step "git" @("fetch"' not in ps  # no fetch holds up the start any more
+    assert ps.index("$fetch = Start-Fetch") > start_app
+    assert ps.index("if ($fetch) { Finish-Fetch $fetch $fetchStarted }") > ps.index("$hwnd = Wait-ForApp $app")
+    fetch = ps.split("function Start-Fetch", 1)[1].split("\nfunction ", 1)[0]
+    assert '@("fetch", "--quiet", "--tags", "origin")' in fetch and "-NoNewWindow" in fetch
+
+
+def test_a_newer_version_is_written_down_and_offline_is_only_a_log_line():
+    ps = text(SCRIPTS / "launcher.ps1")
+    finish = ps.split("function Finish-Fetch", 1)[1].split("\n# --- ", 1)[0]
+    assert "if ($p.ExitCode -ne 0) { Log " in finish and "Stop-With" not in finish and "MessageBox" not in finish
+    assert "[IO.File]::WriteAllText($UpdateFile, ($found | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))" in finish
+    assert "commit = $target; describe = $describe" in finish
+    assert '$UpdateFile = Join-Path $LogDir "update-ready.json"' in ps  # logs/ is ignored: the clone stays clean
+
+
+def test_the_next_start_applies_it_before_the_app_and_never_while_it_runs():
+    ps = text(SCRIPTS / "launcher.ps1")
+    checkout = ps.index('"checkout", "--quiet", "--detach", $target)')
+    # the running app was dealt with (brought forward or waited for, then exit) before any checkout
+    assert ps.index("$running = Running-Apps") < ps.index("$hwnd = Wait-ForApp $running[0]") < checkout
+    assert checkout < ps.index("$app = Start-Process -FilePath $Exe")
+    # ref.txt decides, read from what was fetched: no network at the start
+    assert '$c = Capture "git" @("rev-parse", "--verify", "--quiet", "$ref^{commit}")' in ps
+    assert ps.index("$target = Resolve-Ref") < checkout
+    assert "Remove-Item -LiteralPath $UpdateFile" in ps
+
+
+def test_the_rules_around_the_update_stay_as_they_were():
+    ps = text(SCRIPTS / "launcher.ps1")
+    sparse = ps.index('(Step "git" (@("sparse-checkout", "set", "--no-cone") + $SparsePatterns))')
+    dirty = ps.index('Capture "git" @("status", "--porcelain")')
+    assert sparse < dirty < ps.index("$target = Resolve-Ref")
+    assert 'if (Test-Path $refFile) { $ref = (Get-Content $refFile -TotalCount 1).Trim() }' in ps
+    # a dirty clone neither updates nor fetches, and its app is not told about an update file
+    assert "if (-not $NoUpdate) { $env:CAMTRAP_UPDATE_FILE = $UpdateFile }" in ps
+    assert ps.count("if (-not $NoUpdate) {") >= 2
+
+
+def test_restart_now_waits_for_the_old_app_to_go():
+    ps = text(SCRIPTS / "launcher.ps1")
+    assert "[int]$AfterPid = 0" in ps
+    assert '$env:CAMTRAP_LAUNCH_VBS = Join-Path $PSScriptRoot "launch.vbs"' in ps
+    wait = ps.split("if ($AfterPid) {\n    # The app asked", 1)[1].split("\n}\n", 1)[0]
+    assert "Get-Process -Id $AfterPid" in wait and "(Running-Apps).Count -eq 0" in wait
+    assert ps.index("if ($AfterPid) {\n    # The app asked") < ps.index("$running = Running-Apps")
+    vbs = text(SCRIPTS / "launch.vbs")
+    assert "WScript.Arguments" in vbs  # launch.vbs hands -AfterPid on to the launcher

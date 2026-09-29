@@ -19,9 +19,14 @@
     -Console   report to the console instead of the splash (what run.bat uses)
     -NoUpdate  skip the update (also skipped by itself in a clone with local changes)
     -NoStart   do everything except start the app - for checking an install
+    -AfterPid  the app's "Restart now": wait for that process to end first, then start as usual
+
+  Updates (2026-09-29): the app starts at once from what is on disk, and `git fetch` runs behind its window.
+  A newer version found that way is written to logs\update-ready.json, which the app shows as a notice, and
+  the NEXT start checks it out and installs it before the app starts. A checkout never runs while the app does.
 #>
 [CmdletBinding()]
-param([switch]$Console, [switch]$NoUpdate, [switch]$NoStart)
+param([switch]$Console, [switch]$NoUpdate, [switch]$NoStart, [int]$AfterPid = 0)
 
 $ErrorActionPreference = "Stop"
 $Dir = Split-Path -Parent $PSScriptRoot
@@ -29,6 +34,7 @@ $Icon = Join-Path $Dir "src\camtrap_measure\assets\camtrap-measure.ico"
 $Exe = Join-Path $Dir ".venv\Scripts\camtrap-measure-app.exe"  # the pythonw entry point: it owns no console
 $LogDir = Join-Path $Dir "logs"
 $Log = Join-Path $LogDir "launcher.log"
+$UpdateFile = Join-Path $LogDir "update-ready.json"  # logs\ is ignored by git: it never makes the clone look changed
 $Title = "CamTrap Measure"        # the app window's title: what "is it already running?" looks for
 $Splash = "Starting CamTrap Measure"  # never the same as $Title, or the splash answers that question
 Set-Location $Dir
@@ -130,7 +136,10 @@ function Bring-Forward($hwnd) {
 $MutexName = "Local\CamTrapMeasure-launcher-" + ($Dir.ToLowerInvariant() -replace "[^a-z0-9]", "_")
 $Mutex = New-Object System.Threading.Mutex($false, $MutexName)
 $owned = $false
-try { $owned = $Mutex.WaitOne(0) } catch { $owned = $true }  # AbandonedMutexException: it is ours now
+# "Restart now" waits a little: the launcher that started the app may still be finishing its background fetch.
+$patience = 0
+if ($AfterPid) { $patience = 30000 }
+try { $owned = $Mutex.WaitOne($patience) } catch { $owned = $true }  # AbandonedMutexException: it is ours now
 if (-not $owned) {
     Log "another launcher is starting the app - bringing its splash forward"
     # $null is marshalled as an EMPTY class name, which matches nothing; [NullString]::Value is a real NULL.
@@ -139,10 +148,25 @@ if (-not $owned) {
     exit 0
 }
 
+function Running-Apps {
+    return @(Get-Process -Name "camtrap-measure-app" -ErrorAction SilentlyContinue |
+             Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) })
+}
+
+if ($AfterPid) {
+    # The app asked for this start ("Restart now") and is closing itself; the update is applied only once it
+    # has gone. Should it still be there after 30 s, the start below finds it running and changes nothing.
+    Log "restart asked by the app (pid $AfterPid) - waiting for it to close"
+    $until = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $until) {
+        if (-not (Get-Process -Id $AfterPid -ErrorAction SilentlyContinue) -and (Running-Apps).Count -eq 0) { break }
+        Start-Sleep -Milliseconds 200
+    }
+}
+
 # The process, not the window, is the real answer: an app still starting has no window yet. The window is only
 # how the running app is brought forward.
-$running = @(Get-Process -Name "camtrap-measure-app" -ErrorAction SilentlyContinue |
-             Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) })
+$running = Running-Apps
 if ($running.Count -gt 0) {
     $hwnd = App-Window $running[0].Id
     if ($hwnd -ne [IntPtr]::Zero) {
@@ -431,24 +455,34 @@ if ($dirty -and $dirty.Trim()) {
     $NoUpdate = $true
 }
 
+$ref = "origin/main"
+$refFile = Join-Path $Dir "ref.txt"
+if (Test-Path $refFile) { $ref = (Get-Content $refFile -TotalCount 1).Trim() }
+
+function Resolve-Ref {
+    # the commit $ref names in what was fetched last time: no network, so it never slows a start
+    $c = Capture "git" @("rev-parse", "--verify", "--quiet", "$ref^{commit}")
+    if ($c) { return $c.Trim() }
+    return $null
+}
+
+# The update found by the last start's background fetch is applied here, before the app starts: the app is not
+# running (checked above), so nothing has the files open. What decides is $ref in the fetched refs against HEAD,
+# not the file, so ref.txt keeps its rule: the app stays on that tag at every start until ref.txt is deleted.
 if (-not $NoUpdate) {
-    $ref = "origin/main"
-    $refFile = Join-Path $Dir "ref.txt"
-    if (Test-Path $refFile) { $ref = (Get-Content $refFile -TotalCount 1).Trim() }
     $prev = Capture "git" @("rev-parse", "HEAD")
     if ($prev) { $prev = $prev.Trim() }
-
-    Say "Checking for a newer version..." "Checking for updates$E"
-    if ((Step "git" @("fetch", "--quiet", "--tags", "origin")) -ne 0) {
-        Say "Offline - starting the version on this computer."
+    $target = Resolve-Ref
+    if (-not $target) {
+        Log "could not find $ref in what was fetched - starting the version on this computer"
+    } elseif ($target -eq $prev) {
+        Log "up to date with $ref ($($target.Substring(0, 10)))"
     } else {
-        Say "Updating the app..." "Updating$E"
-        if ((Step "git" @("-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", $ref)) -ne 0) {
+        Say "Updating the app to $ref ($($target.Substring(0, 10)))..." "Updating$E"
+        if ((Step "git" @("-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", $target)) -ne 0) {
             Say "Could not switch to $ref - starting the version on this computer."
         } else {
-            $now = Capture "git" @("rev-parse", "HEAD")
-            if ($now -and $prev -and $now.Trim() -ne $prev) { Say "Installing what the new version needs..." }
-            else { Say "Checking the app's software..." }
+            Say "Installing what the new version needs..."
             if ((Step "uv" @("sync", "--frozen", "--extra", "inference")) -ne 0) {
                 Say "The new version could not be installed - going back to the previous one..." "Updating$E"
                 if ($prev) {
@@ -461,6 +495,46 @@ if (-not $NoUpdate) {
                 }
             }
         }
+    }
+}
+# Whatever it said is settled now: applied, undone, or not for this copy. The fetch below writes it again.
+Remove-Item -LiteralPath $UpdateFile -ErrorAction SilentlyContinue
+
+function Start-Fetch {
+    # `git fetch` only moves refs and adds objects; it never touches the files the running app uses
+    Log "> git fetch --quiet --tags origin (in the background)"
+    $p = Start-Process -FilePath "git" -ArgumentList @("fetch", "--quiet", "--tags", "origin") -WorkingDirectory $Dir `
+                       -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $LogDir "fetch.out") `
+                       -RedirectStandardError (Join-Path $LogDir "fetch.err")
+    $null = $p.Handle  # see Step: without this the exit code can come back null
+    return $p
+}
+
+function Finish-Fetch($p, $started) {
+    # Offline, or anything else that goes wrong here, is a log line only: the app is already running.
+    try {
+        if (-not $p.WaitForExit(120000)) {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Log "  background fetch still going after 120 s - stopped; no update check this time"
+            return
+        }
+        $err = Join-Path $LogDir "fetch.err"
+        if ((Test-Path $err) -and (Get-Item $err).Length -gt 0) { Get-Content $err | Add-Content $Log }
+        Remove-Item (Join-Path $LogDir "fetch.out"), $err -ErrorAction SilentlyContinue
+        if ($p.ExitCode -ne 0) { Log "  background fetch: exit $($p.ExitCode) (offline?) - no update check this time"; return }
+        Log "  background fetch: exit 0 ($(Seconds-Since $started))"
+        $target = Resolve-Ref
+        $head = Capture "git" @("rev-parse", "HEAD")
+        if ($head) { $head = $head.Trim() }
+        if (-not $target -or $target -eq $head) { Log "no newer version"; return }
+        $describe = Capture "git" @("describe", "--tags", "--always", $target)
+        if ($describe) { $describe = $describe.Trim() } else { $describe = $target.Substring(0, 10) }
+        $found = [ordered]@{ commit = $target; describe = $describe; ref = $ref; found = (Get-Date -Format s) }
+        # UTF-8 without a byte order mark, whole in one write: the app reads it while it runs
+        [IO.File]::WriteAllText($UpdateFile, ($found | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+        Log "newer version found: $describe - it is installed at the next start"
+    } catch {
+        Log "  background update check failed ($($_.Exception.Message)) - carrying on"
     }
 }
 
@@ -476,12 +550,20 @@ if (-not (Test-Path $Exe)) {
 # later (its icon, say) it writes straight into this log, which it finds through this variable. So do the
 # app's own start-up timings: window shown, engine imported, engine up.
 $env:CAMTRAP_LAUNCHER_LOG = $Log
+# The app's "new version" notice reads this file; its "Restart now" runs the shortcut's launch.vbs again.
+if (-not $NoUpdate) { $env:CAMTRAP_UPDATE_FILE = $UpdateFile }
+$env:CAMTRAP_LAUNCH_VBS = Join-Path $PSScriptRoot "launch.vbs"
 $started = Get-Date
 $app = Start-Process -FilePath $Exe -WorkingDirectory $Dir -PassThru `
                      -RedirectStandardOutput (Join-Path $LogDir "app.out") `
                      -RedirectStandardError (Join-Path $LogDir "app.err")
 $null = $app.Handle  # so the exit code below is readable if it dies while starting
 Log "app started (pid $($app.Id))"
+$fetch = $null
+$fetchStarted = Get-Date
+if (-not $NoUpdate) {
+    try { $fetch = Start-Fetch } catch { Log "could not start the background fetch ($($_.Exception.Message)) - carrying on" }
+}
 
 # The app opens its window first, with a Starting page, and loads the engine behind it; the window being on
 # screen is what says the app started. The splash stays until then, and says so if it takes a while.
@@ -499,6 +581,7 @@ if ($hwnd -ne [IntPtr]::Zero) {
     Log "no app window after 5 minutes - leaving it to finish starting"
 }
 Close-Splash
+if ($fetch) { Finish-Fetch $fetch $fetchStarted }  # hidden, after the splash: the app is on screen by now
 if ($Console) { $app.WaitForExit(); exit $app.ExitCode }
 # A form was shown without a message loop of its own; ending the script explicitly is what makes
 # the process go, rather than lingering with a closed window nobody can see.
