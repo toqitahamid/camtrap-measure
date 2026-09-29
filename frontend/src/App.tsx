@@ -370,8 +370,7 @@ export default function App() {
                       onClick={() => {
                         setFocus(null) // coming back by the tab resumes where you were, not the row the table opened
                         setSection(t.id)
-                      }}
-                      disabled={t.id !== section && t.id === 'table' && folder === null}>
+                      }}>
                 <Icon name={t.icon} size={13} width={2} />
                 {t.label}
               </button>
@@ -505,7 +504,26 @@ export default function App() {
               onClear={clearResults}
                      onMeasure={measure} focus={focus} error={shownError} />
           )}
-          {section === 'table' && (
+          {/* The tab is never greyed out: a dead tab with no reason read as broken (2026-09-29). With no
+              folder it says what it needs and offers the way to get it. */}
+          {section === 'table' && folder === null && (
+            <div className="sheet">
+              <div className="card" style={{ flex: 1 }}>
+                <div className="empty">
+                  <span className="faint"><Icon name="table" size={22} /></span>
+                  <div className="stack" style={{ justifyItems: 'center' }}>
+                    <b className="grot">No photo folder chosen</b>
+                    <span className="small dim">The table lists the photos in one folder. Choose a folder to see them.</span>
+                  </div>
+                  <button className="btn btn-amber" onClick={() => { setSection('measure'); void browse() }}>
+                    <Icon name="folder" size={13} width={2} />
+                    Choose a folder
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {section === 'table' && folder !== null && (
             <TableView scope={scope} folder={folder} methods={methods} busy={running || !ready} onMeasure={measure}
                        error={shownError} onOpen={(p) => { setFocus(p); setSection('measure') }} />
           )}
