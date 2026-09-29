@@ -222,9 +222,16 @@ def test_the_splash_is_not_mistaken_for_the_app():
 
 
 def test_the_launcher_waits_for_the_window_not_the_process_it_started():
-    """The generated entry point re-runs itself as pythonw: the window belongs to a child process."""
+    """The generated entry point re-runs itself as pythonw: the window belongs to a grandchild process.
+    2026-09-29: the launcher took some other window of the same title for the app (FindWindowW also finds
+    hidden windows, and any copy's) and closed the splash at once. Now it must be visible and the app's."""
     ps = text(SCRIPTS / "launcher.ps1")
-    assert "if ((App-Window) -ne [IntPtr]::Zero) { break }" in ps
+    assert "$hwnd = Wait-ForApp $app" in ps
+    assert "$h = App-Window $proc.Id" in ps
+    app_window = ps.split("function App-Window", 1)[1].split("\nfunction ", 1)[0]
+    assert "[CamTrap.Win]::Visible($Title)" in app_window and "$tree = Tree-Ids $rootId" in app_window
+    assert "if (!IsWindowVisible(h)) return true;" in ps
+    assert "Win32_Process -Property ProcessId, ParentProcessId" in ps
     assert "MainWindowHandle" not in ps
 
 
@@ -442,7 +449,7 @@ def test_the_folder_question_suggests_a_known_install_from_the_file_or_the_regis
 
 
 def launcher_layout(launcher: str) -> str:
-    return launcher.split("# --- where the data and uv's folders are", 1)[1].split("# --- the splash", 1)[0]
+    return launcher.split("# --- where the data and uv's folders are", 1)[1].split("# --- running a step", 1)[0]
 
 
 def test_the_launcher_resolves_the_layout_file_then_leftover_variables_then_nothing():
@@ -717,3 +724,65 @@ def test_installer_windows_come_to_the_front():
     show_now = install.split("function Show-Now", 1)[1].split("\n}", 1)[0]
     assert "$this.TopMost = $true; $this.Activate(); $this.TopMost = $false" in show_now
     assert "add_Shown" in show_now
+
+
+# --- feedback from the first click (2026-09-29) --------------------------------------------------
+
+def test_the_splash_comes_up_before_anything_else_is_done():
+    """The researcher clicked twice and saw nothing: the update took 20 s and the app two minutes more."""
+    ps = text(SCRIPTS / "launcher.ps1")
+    shown = ps.index("$Form.Show()")
+    for later in ("# --- which copy this is", "# --- where the data", 'Step "git"', 'Capture "git"', "Start-Process -FilePath $Exe"):
+        assert shown < ps.index(later), later
+
+
+def test_the_splash_shows_itself_despite_the_hidden_start():
+    """launch.vbs starts the launcher hidden, and Windows applied that to the splash: it was never seen.
+    The installer's Show-Now: an explicit ShowWindow as the window loads, then a moment of TopMost."""
+    ps = text(SCRIPTS / "launcher.ps1")
+    assert "$Form.add_Load({ [CamTrap.Win]::ShowWindow($this.Handle, 5) | Out-Null })" in ps
+    assert "$Form.add_Shown({ $this.TopMost = $true; $this.Activate(); $this.TopMost = $false })" in ps
+    assert "$Form.TopMost = $true" not in ps  # a pulse, not a window stuck above the app
+
+
+def test_the_splash_uses_standard_windows_colours_and_says_each_step():
+    ps = text(SCRIPTS / "launcher.ps1")
+    assert "FromHtml" not in ps and "BackColor" not in ps
+    assert "[System.Drawing.SystemColors]::ControlText" in ps
+    assert '$E = [char]0x2026' in ps
+    for line in ('"Starting CamTrap Measure$E"', '"Checking for updates$E"', '"Updating$E"', '"Starting$E"',
+                 '"Still starting. This can take a few minutes after an update."'):
+        assert line in ps, line
+
+
+def test_the_launcher_is_ascii_without_a_byte_order_mark():
+    """No BOM, so PowerShell 5.1 reads it in the ANSI code page: anything else is garbled or breaks parsing."""
+    raw = (SCRIPTS / "launcher.ps1").read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf") and raw.isascii()
+
+
+def test_a_second_click_while_starting_does_not_start_a_second_copy():
+    ps = text(SCRIPTS / "launcher.ps1")
+    # a launcher still updating or waiting holds the mutex; a second one brings its splash forward and leaves
+    assert "New-Object System.Threading.Mutex($false, $MutexName)" in ps and "$Mutex.WaitOne(0)" in ps
+    assert "[CamTrap.Win]::FindWindowW([NullString]::Value, $Splash)" in ps
+    # an app process with no window yet is waited for, never started again, never updated under
+    assert "$hwnd = Wait-ForApp $running[0]" in ps
+    for before in ("$Mutex.WaitOne(0)", "$hwnd = Wait-ForApp $running[0]"):
+        assert ps.index(before) < ps.index("# --- the update") < ps.index("Start-Process -FilePath $Exe")
+
+
+def test_the_splash_waits_long_and_an_app_that_dies_gets_the_error_box():
+    ps = text(SCRIPTS / "launcher.ps1")
+    wait = ps.split("function Wait-ForApp", 1)[1].split("\nfunction ", 1)[0]
+    assert "$from.AddMinutes(5)" in wait and "$from.AddSeconds(20)" in wait
+    assert "if ($proc.HasExited) { return [IntPtr]::Zero }" in wait
+    start = ps.split("# --- start the app", 1)[1]
+    assert "} elseif ($app.HasExited) {" in start  # any end before the window, whatever the exit code
+    assert 'Stop-With ("CamTrap Measure stopped as it was starting' in start
+
+
+def test_the_launcher_logs_how_long_each_step_took():
+    ps = text(SCRIPTS / "launcher.ps1")
+    assert 'Log "  exit $($p.ExitCode) ($(Seconds-Since $t))"' in ps
+    assert 'Log "app window showing after $(Seconds-Since $started) ($(Seconds-Since $T0) after the click)"' in ps

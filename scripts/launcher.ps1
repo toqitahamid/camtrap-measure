@@ -34,11 +34,236 @@ $Splash = "Starting CamTrap Measure"  # never the same as $Title, or the splash 
 Set-Location $Dir
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 if ((Test-Path $Log) -and (Get-Item $Log).Length -gt 512KB) { Move-Item $Log "$Log.old" -Force }
+$T0 = Get-Date  # the click, near enough: the timings in the log count from here
 "=== $(Get-Date -Format s) launcher start ($Dir) ===" | Add-Content $Log
 
 function Log($msg) {
     "$(Get-Date -Format 'HH:mm:ss')  $msg" | Add-Content $Log
     if ($Console) { Write-Host $msg }
+}
+
+# --- windows, found and shown -----------------------------------------------------------------------
+# One compile for every call into Windows below (about 0.15 s), before the splash, which needs ShowWindow.
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace CamTrap {
+public static class Win {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowW(string cls, string title);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    // Every VISIBLE top-level window titled exactly `title`, with the id of the process that owns it.
+    public static List<KeyValuePair<IntPtr, int>> Visible(string title) {
+        var found = new List<KeyValuePair<IntPtr, int>>();
+        EnumWindows(delegate(IntPtr h, IntPtr l) {
+            if (!IsWindowVisible(h)) return true;
+            var sb = new StringBuilder(256);
+            GetWindowTextW(h, sb, sb.Capacity);
+            if (sb.ToString() == title) {
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                found.Add(new KeyValuePair<IntPtr, int>(h, (int)pid));
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+}
+}
+"@
+
+function Tree-Ids($rootId) {
+    # The process and everything it started, as a set of ids. The entry point re-runs itself as pythonw, and
+    # that one again as the real Python, so the window belongs to a grandchild of the process started here.
+    $all = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId)
+    $ids = @{ [int]$rootId = $true }
+    $grew = $true
+    while ($grew) {
+        $grew = $false
+        foreach ($p in $all) {
+            if ($ids.ContainsKey([int]$p.ParentProcessId) -and -not $ids.ContainsKey([int]$p.ProcessId)) {
+                $ids[[int]$p.ProcessId] = $true
+                $grew = $true
+            }
+        }
+    }
+    return $ids
+}
+
+function App-Window($rootId) {
+    # The app's window is on screen: VISIBLE, titled exactly $Title, and owned by the process tree of $rootId.
+    # On 2026-09-29 the launcher took some other window of that title for the app (FindWindowW also finds
+    # hidden ones, and any copy's), closed the splash at once, and the app's own window came two minutes
+    # later with nothing on screen in between. The process list is read only when such a window exists.
+    $candidates = [CamTrap.Win]::Visible($Title)
+    if ($candidates.Count -eq 0) { return [IntPtr]::Zero }
+    $tree = Tree-Ids $rootId
+    foreach ($c in $candidates) { if ($tree.ContainsKey($c.Value)) { return $c.Key } }
+    return [IntPtr]::Zero
+}
+
+function Bring-Forward($hwnd) {
+    if ([CamTrap.Win]::IsIconic($hwnd)) { [CamTrap.Win]::ShowWindow($hwnd, 9) | Out-Null }  # SW_RESTORE, minimised only
+    [CamTrap.Win]::SetForegroundWindow($hwnd) | Out-Null
+}
+
+# --- one launcher, one app --------------------------------------------------------------------------
+# Double-clicking the icon again must not start a second engine (two would fight over the GPU), nor a second
+# update of the same folder. A launcher that is still working holds this mutex until it ends; a second one
+# brings that launcher's splash forward and leaves. A launcher that died holding it leaves it "abandoned",
+# which Windows hands to the next one, so a crash never locks the app out.
+$MutexName = "Local\CamTrapMeasure-launcher-" + ($Dir.ToLowerInvariant() -replace "[^a-z0-9]", "_")
+$Mutex = New-Object System.Threading.Mutex($false, $MutexName)
+$owned = $false
+try { $owned = $Mutex.WaitOne(0) } catch { $owned = $true }  # AbandonedMutexException: it is ours now
+if (-not $owned) {
+    Log "another launcher is starting the app - bringing its splash forward"
+    # $null is marshalled as an EMPTY class name, which matches nothing; [NullString]::Value is a real NULL.
+    $other = [CamTrap.Win]::FindWindowW([NullString]::Value, $Splash)
+    if ($other -ne [IntPtr]::Zero) { Bring-Forward $other }
+    exit 0
+}
+
+# The process, not the window, is the real answer: an app still starting has no window yet. The window is only
+# how the running app is brought forward.
+$running = @(Get-Process -Name "camtrap-measure-app" -ErrorAction SilentlyContinue |
+             Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) })
+if ($running.Count -gt 0) {
+    $hwnd = App-Window $running[0].Id
+    if ($hwnd -ne [IntPtr]::Zero) {
+        Log "already running (pid $($running[0].Id)) - bringing its window forward"
+        Bring-Forward $hwnd
+        exit 0
+    }
+    Log "already running (pid $($running[0].Id)) but its window is not showing yet - waiting for it"
+}
+
+# --- the splash -------------------------------------------------------------------------------------
+# WinForms is on every Windows 10/11; nothing is installed for this. Without a console there is no other way to
+# say "something is happening", and a click that shows nothing for a minute reads as broken (2026-09-29: the
+# researcher clicked twice and wrote "it dont show anything"). It comes up before anything else is done.
+# System colours, like the installer. launch.vbs starts this process hidden, and Windows applies that to the
+# first window it shows: the splash was built here since ticket 18 and never seen. Show-Now is the installer's
+# answer (see install.ps1): an explicit ShowWindow as the window loads, then a moment of TopMost to bring it in
+# front of whatever was on screen.
+$E = [char]0x2026  # the ellipsis, as one character: this file is ASCII, with no byte order mark
+$Form = $null
+$Status = $null
+if (-not $Console) {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+    $Form = New-Object System.Windows.Forms.Form
+    $Form.Text = $Splash
+    $Form.FormBorderStyle = "FixedDialog"
+    $Form.ControlBox = $false  # closing it would not stop the start, only hide it again
+    $Form.StartPosition = "CenterScreen"
+    $Form.ClientSize = New-Object System.Drawing.Size(400, 112)
+    if (Test-Path $Icon) { $Form.Icon = New-Object System.Drawing.Icon($Icon) }
+    $Form.add_Load({ [CamTrap.Win]::ShowWindow($this.Handle, 5) | Out-Null })  # SW_SHOW
+    $Form.add_Shown({ $this.TopMost = $true; $this.Activate(); $this.TopMost = $false })
+
+    $head = New-Object System.Windows.Forms.Label
+    $head.Text = "Starting CamTrap Measure$E"
+    $head.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 12)
+    $head.ForeColor = [System.Drawing.SystemColors]::ControlText
+    $head.SetBounds(24, 18, 352, 26)
+    $Form.Controls.Add($head)
+
+    $Status = New-Object System.Windows.Forms.Label
+    $Status.Text = "Starting$E"
+    $Status.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $Status.ForeColor = [System.Drawing.SystemColors]::ControlText
+    $Status.SetBounds(26, 50, 352, 20)
+    $Form.Controls.Add($Status)
+
+    $bar = New-Object System.Windows.Forms.ProgressBar
+    $bar.Style = "Marquee"
+    $bar.MarqueeAnimationSpeed = 25
+    $bar.SetBounds(26, 80, 348, 10)
+    $Form.Controls.Add($bar)
+    $Form.Show()
+    [System.Windows.Forms.Application]::DoEvents()  # Load and Shown run now
+    Log "splash shown ($([Math]::Round(((Get-Date) - $T0).TotalSeconds, 1)) s after the launcher started)"
+}
+
+function Pump { if ($Form) { [System.Windows.Forms.Application]::DoEvents() } }
+
+function Wait-Pumping($ms) {
+    # a pause that keeps the splash answering (and its bar moving)
+    $until = (Get-Date).AddMilliseconds($ms)
+    do { Pump; Start-Sleep -Milliseconds 40 } while ((Get-Date) -lt $until)
+}
+
+function Say($msg, $status) {
+    # $msg is for the log; $status, when given, is the splash's short line
+    Log $msg
+    if ($script:Status -and $status) { $script:Status.Text = $status }
+    Pump
+}
+
+function Close-Splash {
+    if ($script:Form) { $script:Form.Close(); $script:Form.Dispose(); $script:Form = $null }
+}
+
+function Stop-With($msg) {
+    Log "STOPPED: $msg"
+    Close-Splash
+    if ($Console) {
+        Write-Host "STOPPED: $msg" -ForegroundColor Red
+        Read-Host "Press Enter to close" | Out-Null
+    } else {
+        $answer = [System.Windows.Forms.MessageBox]::Show(
+            "$msg`r`n`r`nWould you like to see the technical details?", $Title,
+            [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Error)
+        if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { Start-Process notepad.exe $Log }
+    }
+    exit 1
+}
+
+function Wait-ForApp($proc) {
+    # Until the app's window is on screen: its handle. [IntPtr]::Zero when the app ended first, or after five
+    # minutes without a window (the models load behind the window, so this is only ever the start itself).
+    $from = Get-Date
+    $slow = $false
+    while ((Get-Date) -lt $from.AddMinutes(5)) {
+        Wait-Pumping 250
+        if ($proc.HasExited) { return [IntPtr]::Zero }
+        $h = App-Window $proc.Id
+        if ($h -ne [IntPtr]::Zero) { return $h }
+        if (-not $slow -and (Get-Date) -gt $from.AddSeconds(20)) {
+            Say "no window yet after 20 s" "Still starting. This can take a few minutes after an update."
+            $slow = $true
+        }
+    }
+    return [IntPtr]::Zero
+}
+
+function Seconds-Since($t) { return "$([Math]::Round(((Get-Date) - $t).TotalSeconds, 1)) s" }
+
+if ($running.Count -gt 0) {
+    # Started by a launcher that has since gone (or by hand): no update while it runs, just wait for its window.
+    Say "waiting for the running app's window" "Still starting. This can take a few minutes after an update."
+    $hwnd = Wait-ForApp $running[0]
+    if ($hwnd -ne [IntPtr]::Zero) {
+        Log "app window showing ($(Seconds-Since $T0) after the click)"
+        Bring-Forward $hwnd
+    } elseif ($running[0].HasExited) {
+        Stop-With ("CamTrap Measure stopped as it was starting. Open it again; if it keeps happening, " +
+                   "run the installer.")
+    } else {
+        Log "no app window after 5 minutes - leaving it to finish starting"
+    }
+    Close-Splash
+    exit 0
 }
 
 # --- which copy this is -----------------------------------------------------------------------------
@@ -121,79 +346,6 @@ try {
 }
 Log "layout: CAMTRAP_DATA_DIR=$env:CAMTRAP_DATA_DIR; UV_CACHE_DIR=$env:UV_CACHE_DIR; UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR"
 
-# --- the splash -------------------------------------------------------------------------------------
-# WinForms is on every Windows 10/11; nothing is installed for this. Without a console there is no other
-# way to say "something is happening", and a double-click that shows nothing for a minute reads as broken.
-$Form = $null
-$Status = $null
-if (-not $Console) {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    [System.Windows.Forms.Application]::EnableVisualStyles()
-    $Form = New-Object System.Windows.Forms.Form
-    $Form.FormBorderStyle = "None"
-    $Form.StartPosition = "CenterScreen"
-    $Form.Size = New-Object System.Drawing.Size(420, 150)
-    $Form.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#14171B")
-    $Form.TopMost = $true
-    $Form.Text = $Splash
-    if (Test-Path $Icon) { $Form.Icon = New-Object System.Drawing.Icon($Icon) }
-    $edge = [System.Drawing.ColorTranslator]::FromHtml("#2E343C")
-    $Form.add_Paint({
-        $pen = New-Object System.Drawing.Pen $edge
-        $_.Graphics.DrawRectangle($pen, 0, 0, $Form.Width - 1, $Form.Height - 1)
-        $pen.Dispose()
-    }.GetNewClosure())
-
-    $mark = New-Object System.Windows.Forms.Label
-    $mark.Text = "CAMTRAP MEASURE"
-    $mark.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 12)
-    $mark.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#E8A13C")
-    $mark.SetBounds(28, 34, 360, 26)
-    $Form.Controls.Add($mark)
-
-    $Status = New-Object System.Windows.Forms.Label
-    $Status.Text = "Starting..."
-    $Status.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $Status.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#C7CCD2")
-    $Status.SetBounds(30, 66, 360, 20)
-    $Form.Controls.Add($Status)
-
-    $bar = New-Object System.Windows.Forms.ProgressBar
-    $bar.Style = "Marquee"
-    $bar.MarqueeAnimationSpeed = 25
-    $bar.SetBounds(30, 96, 360, 6)
-    $Form.Controls.Add($bar)
-    $Form.Show()
-}
-
-function Pump { if ($Form) { [System.Windows.Forms.Application]::DoEvents() } }
-
-function Say($msg) {
-    Log $msg
-    if ($Status) { $Status.Text = $msg }
-    Pump
-}
-
-function Close-Splash {
-    if ($script:Form) { $script:Form.Close(); $script:Form.Dispose(); $script:Form = $null }
-}
-
-function Stop-With($msg) {
-    Log "STOPPED: $msg"
-    Close-Splash
-    if ($Console) {
-        Write-Host "STOPPED: $msg" -ForegroundColor Red
-        Read-Host "Press Enter to close" | Out-Null
-    } else {
-        $answer = [System.Windows.Forms.MessageBox]::Show(
-            "$msg`r`n`r`nWould you like to see the technical details?", $Title,
-            [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Error)
-        if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { Start-Process notepad.exe $Log }
-    }
-    exit 1
-}
-
 # --- running a step without a console window --------------------------------------------------------
 # -NoNewWindow keeps Windows from giving the child a console of its own (this process has none to share),
 # and the output goes to files that are folded into the log, so a failure is still readable afterwards.
@@ -201,6 +353,7 @@ function Step($exe, $arguments) {
     $out = Join-Path $LogDir "step.out"
     $err = Join-Path $LogDir "step.err"
     Log "> $exe $($arguments -join ' ')"
+    $t = Get-Date
     $p = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $Dir -NoNewWindow -PassThru `
                        -RedirectStandardOutput $out -RedirectStandardError $err
     # Touching .Handle keeps the process object's handle open; without it PowerShell can hand back
@@ -211,7 +364,7 @@ function Step($exe, $arguments) {
         if ((Test-Path $f) -and (Get-Item $f).Length -gt 0) { Get-Content $f | Add-Content $Log }
         Remove-Item $f -ErrorAction SilentlyContinue
     }
-    Log "  exit $($p.ExitCode)"
+    Log "  exit $($p.ExitCode) ($(Seconds-Since $t))"
     return $p.ExitCode
 }
 
@@ -228,35 +381,6 @@ function Capture($exe, $arguments) {
     Remove-Item $out, $err -ErrorAction SilentlyContinue
     if ($p.ExitCode -ne 0) { return $null }
     return $text
-}
-
-# --- one app at a time ------------------------------------------------------------------------------
-Add-Type -Namespace CamTrap -Name Win -MemberDefinition @"
-[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowW(string cls, string title);
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
-"@
-
-function App-Window {
-    # $null is marshalled as an EMPTY class name, which matches nothing; [NullString]::Value is a real
-    # NULL. With $null the check never fired and a second engine started (seen 2026-08-23).
-    return [CamTrap.Win]::FindWindowW([NullString]::Value, $Title)
-}
-
-# Double-clicking the icon again must not start a second engine: two would fight over the GPU. The
-# process, not the window, is the real answer - during the first minute the models are loading and there
-# is no window yet. The window is only how the running app is brought forward.
-$already = @(Get-Process -Name "camtrap-measure-app" -ErrorAction SilentlyContinue |
-             Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) })
-if ($already.Count -gt 0) {
-    Log "already running (pid $($already[0].Id)) - bringing its window forward"
-    $hwnd = App-Window
-    if ($hwnd -ne [IntPtr]::Zero) {
-        [CamTrap.Win]::ShowWindow($hwnd, 9) | Out-Null  # SW_RESTORE
-        [CamTrap.Win]::SetForegroundWindow($hwnd) | Out-Null
-    }
-    Close-Splash
-    exit 0
 }
 
 # --- the update -------------------------------------------------------------------------------------
@@ -307,11 +431,11 @@ if (-not $NoUpdate) {
     $prev = Capture "git" @("rev-parse", "HEAD")
     if ($prev) { $prev = $prev.Trim() }
 
-    Say "Checking for a newer version..."
+    Say "Checking for a newer version..." "Checking for updates$E"
     if ((Step "git" @("fetch", "--quiet", "--tags", "origin")) -ne 0) {
         Say "Offline - starting the version on this computer."
     } else {
-        Say "Updating the app..."
+        Say "Updating the app..." "Updating$E"
         if ((Step "git" @("-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", $ref)) -ne 0) {
             Say "Could not switch to $ref - starting the version on this computer."
         } else {
@@ -319,7 +443,7 @@ if (-not $NoUpdate) {
             if ($now -and $prev -and $now.Trim() -ne $prev) { Say "Installing what the new version needs..." }
             else { Say "Checking the app's software..." }
             if ((Step "uv" @("sync", "--frozen", "--extra", "inference")) -ne 0) {
-                Say "The new version could not be installed - going back to the previous one..."
+                Say "The new version could not be installed - going back to the previous one..." "Updating$E"
                 if ($prev) {
                     Step "git" @("-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", $prev) | Out-Null
                     if ((Step "uv" @("sync", "--frozen", "--offline", "--extra", "inference")) -ne 0) {
@@ -335,37 +459,38 @@ if (-not $NoUpdate) {
 
 # --- start the app ----------------------------------------------------------------------------------
 if ($NoStart) { Say "Ready (not starting the app)."; Close-Splash; exit 0 }
-Say "Starting CamTrap Measure..."
+Say "Starting CamTrap Measure... ($(Seconds-Since $T0) after the click)" "Starting$E"
 if (-not (Test-Path $Exe)) {
     Stop-With "CamTrap Measure is not installed properly on this computer: $Exe is missing. Run the installer again."
 }
 # The generated entry point re-runs itself as pythonw, so the window belongs to a CHILD process and the
-# handle on the one started here stays empty. The window is found by its title instead.
+# handle on the one started here stays empty. The window is found through the process tree instead (App-Window).
 # The app's stderr goes to app.err, which is only copied here if it dies while starting; a problem it hits
-# later (its icon, say) it writes straight into this log, which it finds through this variable.
+# later (its icon, say) it writes straight into this log, which it finds through this variable. So do the
+# app's own start-up timings: window shown, engine imported, engine up.
 $env:CAMTRAP_LAUNCHER_LOG = $Log
+$started = Get-Date
 $app = Start-Process -FilePath $Exe -WorkingDirectory $Dir -PassThru `
                      -RedirectStandardOutput (Join-Path $LogDir "app.out") `
                      -RedirectStandardError (Join-Path $LogDir "app.err")
 $null = $app.Handle  # so the exit code below is readable if it dies while starting
+Log "app started (pid $($app.Id))"
 
-# The window appearing is what says the app started. The first start also downloads the weights, but that
-# happens behind the window with its own progress. Ninety seconds is far past a normal start on a slow disk.
-$deadline = (Get-Date).AddSeconds(90)
-while ((Get-Date) -lt $deadline) {
-    Pump
-    Start-Sleep -Milliseconds 200
-    if ($app.HasExited) { break }
-    if ((App-Window) -ne [IntPtr]::Zero) { break }
-}
-if ($app.HasExited -and $app.ExitCode -ne 0) {
+# The app opens its window first, with a Starting page, and loads the engine behind it; the window being on
+# screen is what says the app started. The splash stays until then, and says so if it takes a while.
+$hwnd = Wait-ForApp $app
+if ($hwnd -ne [IntPtr]::Zero) {
+    Log "app window showing after $(Seconds-Since $started) ($(Seconds-Since $T0) after the click)"
+    Bring-Forward $hwnd
+} elseif ($app.HasExited) {
     foreach ($f in @((Join-Path $LogDir "app.out"), (Join-Path $LogDir "app.err"))) {
         if ((Test-Path $f) -and (Get-Item $f).Length -gt 0) { Get-Content $f | Add-Content $Log }
     }
     Stop-With ("CamTrap Measure stopped as it was starting (code $($app.ExitCode)). This usually means its " +
                "software needs installing again: run the installer.")
+} else {
+    Log "no app window after 5 minutes - leaving it to finish starting"
 }
-Log "app started (pid $($app.Id))"
 Close-Splash
 if ($Console) { $app.WaitForExit(); exit $app.ExitCode }
 # A form was shown without a message loop of its own; ending the script explicitly is what makes
