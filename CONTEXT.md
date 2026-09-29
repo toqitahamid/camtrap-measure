@@ -1434,3 +1434,71 @@ Evidence: 324 passed, 1 skipped. `npm run build` (tsc -b) and oxlint clean. Real
 headless Edge at 1500x900, 1280x800 and 1920x1080: sign-in, MEASURE (empty and with MAS_CAM01), a help popover,
 About, TABLE, RESULTS (folder and everything), DENSITY with the details open. No overflow or bad wraps. Before
 shots from a73b015 (sign-in served from the committed ui over the same engine).
+
+## Feedback from the first click (2026-09-29)
+
+The researcher: "i opened the desktop app two times, but it dont show anything when i click the icon". The
+installed app's log for 17:43: the click at 17:43:18, the update (fetch 11 s, checkout 0 s, `uv sync` 7 s), then
+"app started" at 17:43:39, and the window at about 17:45:30.
+
+- **What the two minutes were.** No site-packages file was recompiled (no .pyc under `.venv` written after 16:43).
+  The app's own changed modules were: `api.pyc` at 17:43:50, `calibration` 17:43:54, `inference`/`weights`
+  17:44:05, `store`/`report`/`dialogs` 17:44:09. So the engine import alone ran about 30 s (2.5 s warm on the dev
+  PC) before the window was even created, then the window took about 80 s more while the model loader (started
+  with the engine) read torch and CUDA from a cold disk beside WebView2's own first start. A fresh venv in the
+  harness below reproduces the shape: engine import 18.3 s against 2 s warm, with only 2.7 s of CPU. It waits on
+  the disk (Windows Defender scanning new files is the likely reader), not on compiling.
+- **Why nothing was on screen.** The launcher's "app started" at 17:43:39 came in the same second the app was
+  launched: `FindWindowW` also finds hidden windows and any process's window, so some other "CamTrap Measure"
+  window counted as the app, and the splash closed at once. (A hidden-start splash was the first suspect; the old
+  splash did show under launch.vbs in the harness, so that was not it. Show-Now is added anyway: it is what the
+  installer needed under the same start.)
+- **The app opens its window first.** `main.py` imports nothing heavy at module scope. `run_window` makes the
+  window with an inline Starting page (the app's colours, no server, no files), and `_bring_up`, on pywebview's
+  thread, waits for it to be shown, dresses the icon, then `start_engine` imports `.api` and uvicorn and serves,
+  and the window goes to the engine's URL, or to a "could not start" page with the reason in the log. The model
+  loader starts with the engine, so it no longer competes with the window. `--no-window` and `--preflight` are
+  unchanged; shutdown is unchanged.
+- **Timings in the log.** `say()` writes "window shown in X s", "engine imported in X s (Y s after start)",
+  "engine up in X s". The launcher adds each step's duration ("exit 0 (11.2 s)"), "splash shown", "Starting
+  (N s after the click)" and "app window showing after X s (N s after the click)".
+- **The server timeout.** It was 10 s over the import and the server together. Now the import is timed but not
+  limited (it finishes or raises), and `ENGINE_START_TIMEOUT` = 60 s covers the server only: measured 0.0 to 0.2 s
+  after the import, warm and cold.
+- **`git describe --dirty` moved off the start.** It ran at import to fill `/api/health`'s commit. With --dirty git
+  checks every file in the clone, and on this PC a broken git on the PATH made it cost its full 5 s timeout each
+  start. Now it runs on the first `/api/health` and is cached.
+- **The splash.** It comes up before anything else (0.3 to 0.4 s after the launcher starts, about 1 s after the
+  click), in system colours, like the installer, with Show-Now (ShowWindow on Load, a TopMost pulse, not a window
+  stuck on top). No close box: closing it would not stop the start. The title stays "Starting CamTrap Measure"
+  (never the app's title). Its line follows the steps: "Checking for updates…", "Updating…", "Starting…", and after
+  20 s without a window, "Still starting. This can take a few minutes after an update." The log keeps the long
+  messages.
+- **Ready means the app's window is on screen.** `App-Window` lists visible top-level windows titled exactly
+  "CamTrap Measure" (EnumWindows) and takes one owned by the process started, or anything it started (the entry
+  point re-runs itself as pythonw, then as the real Python). The process list (Win32_Process) is read only when
+  such a window exists; if it cannot be read, any visible window of that title counts and the log says so. The
+  wait is five minutes at most; after that the launcher logs it and leaves the app to finish. A ready marker file
+  written by the app was the other option; it was not taken because a launcher that runs an older app (ref.txt
+  rollback) would then wait five minutes for a marker that never comes.
+- **An app that ends before its window gets the error box**, whatever its exit code (it used to be only a
+  non-zero code). Checked in the harness with `webview` renamed away: the box, and the traceback in the log.
+- **One launcher, one app.** A second click while the first launcher is updating used to start a second fetch
+  and sync in the same folder. A named mutex (`Local\CamTrapMeasure-launcher-<folder>`) is held by the launcher
+  until it ends; a second one brings the first one's splash forward and leaves. An app process with no window yet
+  (its launcher gone) is waited for with the splash, never started again and never updated under. A running app
+  is only restored if it is minimised (SW_RESTORE on a maximised window un-maximised it).
+- **The update check still blocks the start** (about 20 s on the dept PC, mostly `git fetch`). Not changed here:
+  the proposal is to start the app first and fetch in the background, applying a fetched update at the next start
+  (the checkout and `uv sync` only run when the app is closed). Waiting for the researcher's answer.
+
+Evidence: 337 passed, 1 skipped. Harness: a clone of the dev repo in the scratchpad (not the installed copy,
+which was not touched), started through its own launch.vbs (hidden, as the shortcut does). First start, with a
+fresh `.venv` from `uv sync`: splash visible 1.0 s after the click, "Updating…" through the 24.8 s sync, the app
+window 31.4 s after the click with the Starting page, engine up 21 s after the app started, then the Measure
+screen. Warm start: window 3.8 s after the click, engine up 2.9 s after start. A second click 1.5 s into the first
+logged "another launcher is starting the app"; a third, after the window, "already running - bringing its window
+forward"; a click while the app was starting without a launcher waited for its window. Dev app (`camtrap-measure`):
+window shown 0.9 s after start, the Starting page painted within about 1.4 s of that, engine imported 1.9 s later. `python -X importtime -c "import
+camtrap_measure.api"`: 2.1 s, of which calibration (scipy.optimize) 0.8 s, inference/weights (huggingface_hub)
+0.5 s, fastapi 0.5 s; torch is not imported until the model loader runs.
