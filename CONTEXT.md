@@ -1339,3 +1339,42 @@ workstation store: t 3 s (12 gaps); MAS_CAM01 33.79 days (flag 19 Dec 13:41 to l
 degrees; MAS_CAM04 29.5 days (flag 20 Dec 08:57 to last photo 18 Jan 20:59) at 34.1 degrees. Hazard-rate (AIC
 55.9 vs 56.3); 0.22 deer/km², 90% range 0.15 to 0.35, P 0.678, radius 9.9 m, 12 deer: too few, and the screen
 says so. The earlier 7.6 deer/km² counted every burst photo over one and two active days.
+
+## One file per site or per camera; where an unlabelled camera's flag photo goes (2026-09-29, ticket 26)
+
+Seth asked for both; the researcher approved them on 2026-09-29.
+
+- **Site = the camera name before its last "_CAM".** MAS_CAM01 is MAS; a name with no "_CAM" is its own site.
+  `report.site_of` is the only place that says so. `/api/cameras` sends each camera's `survey_site`, so the page
+  never works it out itself. In the store and the API, `site` still means the camera (its old name), so the new
+  filter is a separate `survey_site` query parameter, not a second meaning of `site`.
+- **The CSV gets a `site` column** after `camera`, with a header line saying how it is read. The first header line
+  now names both filters, `camera=...; site=...`, where it used to say `site=` for the camera.
+- **Split export.** "One file per site" and "One file per camera" ask for a folder with the same chooser as Browse,
+  then `POST /api/export/split` writes the files. Each file is `export_csv` narrowed to one site or camera, so it
+  has the combined file's header and every filter on screen. Only a site or camera with rows to write gets a
+  file. The files are named like the combined download (`camtrap-measure_MAS_<from>_<to>.csv`). Where there is
+  no native chooser (a browser, `--no-window`), the card offers a typed folder, as the Measure bar does.
+- **Never overwrite: " (2)", not a question.** A name already in the folder gets " (2)", then " (3)". The file
+  is opened with "x", so one that appears in the meantime is safe too. Asking first would mean a dialog after the
+  folder chooser, and the window has no dialog of its own; a browser `confirm()` blocks the whole WebView (the
+  same reason the clear buttons are two clicks, 2026-08-25). A duplicate is easy to delete; a lost file is not.
+- **Open folder** runs `os.startfile` on the folder, and only on a folder a split export wrote to since the
+  engine started. It is not a general way for the page to open paths.
+- **Site entries in the Results camera filter** ("MAS, all 31 cameras") are listed only for sites with more than
+  one camera. A one-camera site is already in the list as that camera. The clear button clears one camera only,
+  so it hides while a site is chosen: a site in the filter is a way of reading, not a thing to delete.
+- **Unlabelled cameras are shown, not hidden.** The Measure camera list puts cameras with no usable flag photo
+  (the same test as the "labelled" count: no flag with a usable calibration) in a disabled group, "Not labelled
+  yet. Label in FlagLabel, then press Sync". Each one says "Label its flag photo in FlagLabel, then press Sync."
+  on hover. The app cannot take a flag photo: it only reads Supabase (`supabase_ro.py` untouched). The Camera,
+  Flag photo and Sync help now say that flag photos are added and marked in FlagLabel, then Sync brings them.
+- **No FlagLabel web address.** None was found in this repo, `../distance_estimation` or `../photo`. The only
+  address is the Supabase project URL, which is the database and not the labelling site. The copy says "in
+  FlagLabel" until someone gives the address.
+
+Evidence: 324 passed, 1 skipped (11 new in tests/test_split_export.py). `npm run build`, tsc and oxlint clean.
+Real engine on the workstation store: 141/167 labelled, 26 unlabelled listed (SRF_CAM16 first). By camera:
+MAS_CAM01 11 rows, MAS_CAM04 27 rows. By site: MAS 38 rows; the second run wrote "... (2).csv". In headless
+Edge: the export choice, the site filter (MAS 31, MOR 23, SHB 41, SRF 41, TON 31 cameras) and "Saved 1 file to
+...". Fixed on the way: a long folder path pushed the export card wider than the window; it wraps now.

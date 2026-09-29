@@ -10,7 +10,7 @@
 
 **Blocked by:** 09 — Summary, gallery, export; 22 — Flag photo and clearing (done).
 
-**Status:** open
+**Status:** done (2026-09-29) — 324 passed, 1 skipped (11 in tests/test_split_export.py: site derivation, the site column, one file per site and per camera into a tmp folder with the right rows, dates / species / needs-a-look / folder applied per file, " (2)" instead of overwriting, a missing folder refused, the site-level summary, Open folder only for a folder the split wrote to); `npm run build`, tsc and oxlint clean. Real engine on the workstation store: 141/167 cameras labelled, 26 listed as "not labelled yet"; split by camera wrote `camtrap-measure_MAS_CAM01_start_end.csv` (11 rows) and `..._MAS_CAM04_...` (27); split by site wrote `camtrap-measure_MAS_start_end.csv` (38 rows), and again as `... (2).csv`. Screenshots of the Results export choice, the site filter, "Saved 1 file to ...", and the Camera list, from headless Edge.
 
 ## Sites
 
