@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calibration, dialogs, inference, measure, report, store
+from . import calibration, density, dialogs, inference, measure, report, store
 from . import supabase_ro as sb
 
 __version__ = version("camtrap-measure")
@@ -275,6 +275,53 @@ def export(site: str | None = None, date_from: date | None = None, date_to: date
     """The documented CSV. Suspicious rows stay out unless include_suspicious is set — never silently."""
     name = f"camtrap-measure_{site or 'all'}_{date_from or 'start'}_{date_to or 'end'}.csv"
     return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, include_suspicious, folder),
+                    media_type="text/csv; charset=utf-8", headers={"content-disposition": f'attachment; filename="{name}"'})
+
+
+def _density_scope(site, date_from, date_to, folder) -> tuple[list[dict], list[dict]]:
+    """The rows and photos DENSITY answers for: the Results filters, read the same way."""
+    return report.rows(site, date_from, date_to, folder), report.photos(site, date_from, date_to, folder)
+
+
+@app.get("/api/density")
+def density_estimate(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
+                     folder: str | None = None):
+    """Deer per km² with a 90% interval, the detection function and the survey setup it used. White-tailed deer
+    only; suspicious rows never enter. The settings are the saved ones (POST /api/density/settings)."""
+    rows, photos = _density_scope(site, _iso(date_from), _iso(date_to), folder)
+    return density.estimate(rows, photos, density.settings())
+
+
+class CameraSetup(BaseModel):
+    active_days: float | None = None
+    fov_deg: float | None = None
+
+
+class DensitySettings(BaseModel):
+    interval_s: float | None = None
+    truncation_m: float | None = None
+    cameras: dict[str, CameraSetup] = {}
+
+
+@app.post("/api/density/settings")
+def density_settings(body: DensitySettings):
+    """Save what was sent; a field sent as null goes back to its default, a field left out is kept."""
+    change = body.model_dump(exclude_unset=True)
+    change["cameras"] = {s: c.model_dump(exclude_unset=True) for s, c in body.cameras.items()}
+    try:
+        return density.save_settings(change)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/density.csv")
+def density_export(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
+                   folder: str | None = None):
+    """The same deer, cameras and effort as the screen, as a flat file for R's Distance package."""
+    rows, photos = _density_scope(site, _iso(date_from), _iso(date_to), folder)
+    filters = {"site": site, "date_from": _iso(date_from), "date_to": _iso(date_to), "folder": folder}
+    name = f"camtrap-measure_distance_{site or 'all'}_{date_from or 'start'}_{date_to or 'end'}.csv"
+    return Response(density.export_csv(rows, photos, density.settings(), filters),
                     media_type="text/csv; charset=utf-8", headers={"content-disposition": f'attachment; filename="{name}"'})
 
 
