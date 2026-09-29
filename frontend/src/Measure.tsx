@@ -76,6 +76,7 @@ export default function Measure({
   onClear,
   focus,
   error,
+  onChooseFolder,
 }: {
   scope: Scope
   folder: Folder | null
@@ -83,6 +84,7 @@ export default function Measure({
   busy: boolean
   running: boolean // a run is actually in flight; `busy` is also true while the models load
   onMeasure: (paths: string[]) => void
+  onChooseFolder: () => void
   onClear: (what: { path?: string; site?: string; everything?: boolean }) => void
   // ponytail: optional because the ticket's signature stops above; the shell hands these over when the table
   // opens a row here, and when the folder listing itself failed. Omitting them changes nothing.
@@ -327,11 +329,21 @@ export default function Measure({
           )}
         </div>
 
-        {!cur ? (
+        {!cur && folder === null ? (
           <div className="empty">
-            <p className="dim small">
-              {folder === null ? '' : 'Pick a photo on the left.'}
-            </p>
+            <span className="faint"><Icon name="folder" size={22} /></span>
+            <div className="stack" style={{ justifyItems: 'center' }}>
+              <b className="grot">No photo folder chosen</b>
+              <span className="small dim">Choose the folder of camera-trap photos to measure.</span>
+            </div>
+            <button className="btn btn-amber" onClick={onChooseFolder}>
+                <Icon name="folder" size={13} width={2} />
+                Choose a folder
+              </button>
+          </div>
+        ) : !cur ? (
+          <div className="empty">
+            <p className="dim small">Pick a photo on the left.</p>
           </div>
         ) : running && !cur.measured ? (
           /* a run is in flight and this photo has no number: it is being measured or is waiting its turn */

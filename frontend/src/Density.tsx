@@ -135,7 +135,13 @@ function DetectionChart({ r }: { r: Result }) {
   )
 }
 
-export default function Density({ site, sites, folder }: { site: string; sites: string[]; folder: string }) {
+export default function Density({ site, sites, folder, onChooseFolder, onGoMeasure }: {
+  site: string
+  sites: string[]
+  folder: string
+  onChooseFolder: () => void
+  onGoMeasure: () => void
+}) {
   // A density is a survey-wide question, so this screen starts on everything measured, not the one folder.
   const [where, setWhere] = useState<'folder' | 'all'>('all')
   const onlyFolder = where === 'folder'
@@ -273,8 +279,12 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
       <>
         {filters}
         <div className="sheet">
-          <Message icon="density" title="No folder chosen"
-                   line="Pick a folder in MEASURE, or set Photos to Everything measured." />
+          <Message icon="density" title="No photo folder chosen"
+                   line="Choose a folder, or set Photos to Everything measured."
+                   action={<button className="btn btn-amber" onClick={onChooseFolder}>
+                <Icon name="folder" size={13} width={2} />
+                Choose a folder
+              </button>} />
         </div>
       </>
     )
@@ -293,7 +303,11 @@ export default function Density({ site, sites, folder }: { site: string; sites: 
         {filters}
         <div className="sheet">
           <Message icon="density" title="Nothing measured in this selection"
-                   line="Measure a folder in MEASURE, or widen the filters above." />
+                   line="Measure a folder in MEASURE, or widen the filters above."
+                   action={<button className="btn" onClick={onGoMeasure}>
+                <Icon name="measure" size={13} width={2} />
+                Go to Measure
+              </button>} />
         </div>
       </>
     )

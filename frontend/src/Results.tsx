@@ -47,11 +47,13 @@ function Message({ icon, title, line, action }: { icon: 'warn' | 'results'; titl
   )
 }
 
-export default function Results({ site, cameras, folder, onClear }: {
+export default function Results({ site, cameras, folder, onClear, onChooseFolder, onGoMeasure }: {
   site: string
   cameras: Camera[]
   folder: string
   onClear: (what: { path?: string; site?: string; everything?: boolean }) => void | Promise<void>
+  onChooseFolder: () => void
+  onGoMeasure: () => void
 }) {
   // The screen answers for the folder in the bar, not for everything this computer has ever measured:
   // otherwise a fresh window shows the last run's numbers over photos the researcher has not opened.
@@ -309,8 +311,12 @@ export default function Results({ site, cameras, folder, onClear }: {
         <div className="sheet">
           <Message
             icon="results"
-            title="No folder chosen"
-            line="Pick a folder in MEASURE, or set Photos to Everything measured."
+            title="No photo folder chosen"
+            line="Choose a folder, or set Photos to Everything measured."
+            action={<button className="btn btn-amber" onClick={onChooseFolder}>
+                <Icon name="folder" size={13} width={2} />
+                Choose a folder
+              </button>}
           />
           {clearCard}
         </div>
@@ -338,6 +344,10 @@ export default function Results({ site, cameras, folder, onClear }: {
                 ? 'Measure it in MEASURE, or set Photos to Everything measured.'
                 : 'Measure a folder in MEASURE, or widen the filters above.'
             }
+            action={<button className="btn" onClick={onGoMeasure}>
+                <Icon name="measure" size={13} width={2} />
+                Go to Measure
+              </button>}
           />
           {clearCard}
         </div>

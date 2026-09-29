@@ -219,6 +219,12 @@ export default function App() {
     if (body.reason) setNotice({ text: body.reason, kind: 'warn' })
   }
 
+  // The one way every screen asks for a folder: the Measure bar holds it, so go there and open the chooser.
+  function chooseFolder() {
+    setSection('measure')
+    void browse()
+  }
+
   async function sync() {
     setBusy(true)
     setNotice(null)
@@ -502,7 +508,7 @@ export default function App() {
           {section === 'measure' && (
             <Measure scope={scope} folder={folder} methods={methods} busy={running || !ready} running={running}
               onClear={clearResults}
-                     onMeasure={measure} focus={focus} error={shownError} />
+                     onMeasure={measure} focus={focus} error={shownError} onChooseFolder={chooseFolder} />
           )}
           {/* The tab is never greyed out: a dead tab with no reason read as broken (2026-09-29). With no
               folder it says what it needs and offers the way to get it. */}
@@ -515,7 +521,7 @@ export default function App() {
                     <b className="grot">No photo folder chosen</b>
                     <span className="small dim">The table lists the photos in one folder. Choose a folder to see them.</span>
                   </div>
-                  <button className="btn btn-amber" onClick={() => { setSection('measure'); void browse() }}>
+                  <button className="btn btn-amber" onClick={chooseFolder}>
                     <Icon name="folder" size={13} width={2} />
                     Choose a folder
                   </button>
@@ -529,10 +535,11 @@ export default function App() {
           )}
           {section === 'results' && (
             <Results site={scope.site} cameras={cameras} folder={scope.folder}
-              onClear={clearResults} />
+              onClear={clearResults} onChooseFolder={chooseFolder} onGoMeasure={() => setSection('measure')} />
           )}
           {section === 'density' && (
-            <Density site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder} />
+            <Density site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder}
+              onChooseFolder={chooseFolder} onGoMeasure={() => setSection('measure')} />
           )}
         </div>
 
