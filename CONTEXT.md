@@ -1549,3 +1549,28 @@ after the click, background fetch 4 s, "newer version found: v0.2.0-47-g8dfe3f3"
 8dfe3f3 (0.2 s), synced (0.5 s), and the app window came 5.7 s after the request, with no bar. Launch 3 with the
 origin unreachable: "background fetch: exit 128 (offline?) - no update check this time", and the app ran as
 usual. The installed copy in D:\CamTrapMeasure was not touched.
+
+## A click on an app that is closing is not a failure (2026-09-29, later)
+
+On the installed app, 18:50:50: the app was started (by the previous launcher, which had just updated to this one)
+and its window was on screen at 18:50:59. At 18:51:36 a click found the app's process but no window, waited,
+and at 18:51:44 showed "CamTrap Measure stopped as it was starting." (The app.err with 1.0 s / 1.8 s timings is
+from the next start, 18:52:17: the file is rewritten at every start, so it never belonged to the 18:50 process.)
+
+- **Cause.** The window had been closed. Closing destroys the window at once, and the process ends only after
+  `shutdown` (up to 2 s for a run in flight, then `os._exit`, which hands the GPU back and can take seconds).
+  Measured on the dev PC: WM_CLOSE, window gone in 0.3 s, every process gone 3 s later; once, with the GPU busy,
+  over a minute. A click in that gap sees "running, no window", which the launcher read as "still starting", and
+  the end of a normal close as a failed start. Reproduced on the dev PC: close the window, click at once.
+  Not the cause: the window title (pywebview never changes it after navigation; checked in its source and on
+  screen), the process tree (the same three processes whoever started the app), or the waiting launcher (it only
+  lists windows and processes).
+- **Fix.** An app this launcher did not start is never reported as a failure. If it shows a window, it is brought
+  forward; if it ends, the launcher waits (up to 30 s) until every `camtrap-measure-app` of the folder has gone
+  and then starts the app, as a click on a closed app does, applying a waiting update on the way. The splash says
+  "Starting…" meanwhile, not "Still starting". "Stopped as it was starting" is left for the one case it means:
+  the app this launcher started ended before its window was ever on screen.
+
+Evidence: 351 passed, 1 skipped. Dev repo with -NoUpdate: close the window, click 50 ms later: "no window on
+screen - starting or closing", "the running app ended (it was closing) - starting it again" 2 s later, and the
+new window 5.7 s after the click.

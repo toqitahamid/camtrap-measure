@@ -174,7 +174,10 @@ if ($running.Count -gt 0) {
         Bring-Forward $hwnd
         exit 0
     }
-    Log "already running (pid $($running[0].Id)) but its window is not showing yet - waiting for it"
+    # Starting, or closing: a closed window goes at once, and the process can take seconds more to end (it hands
+    # the GPU back). 2026-09-29 18:51: this read as "still starting", the process then ended, and the launcher
+    # showed its failure box for an app that had run normally and been closed.
+    Log "already running (pid $($running[0].Id)) but no window on screen - starting or closing; waiting to see which"
 }
 
 # --- the splash -------------------------------------------------------------------------------------
@@ -281,20 +284,30 @@ function Wait-ForApp($proc) {
 function Seconds-Since($t) { return "$([Math]::Round(((Get-Date) - $t).TotalSeconds, 1)) s" }
 
 if ($running.Count -gt 0) {
-    # Started by a launcher that has since gone (or by hand): no update while it runs, just wait for its window.
-    Say "waiting for the running app's window" "Still starting. This can take a few minutes after an update."
+    # Not started by this launcher, so its end is never reported as a failure here: an app that was closed ends
+    # like this too. No update while it runs. If it shows a window, that is the app; if it ends, this click
+    # opens a new one, below, as a click on a closed app does.
+    Say "waiting for the running app" "Starting$E"
     $hwnd = Wait-ForApp $running[0]
     if ($hwnd -ne [IntPtr]::Zero) {
         Log "app window showing ($(Seconds-Since $T0) after the click)"
         Bring-Forward $hwnd
-    } elseif ($running[0].HasExited) {
-        Stop-With ("CamTrap Measure stopped as it was starting. Open it again; if it keeps happening, " +
-                   "run the installer.")
-    } else {
-        Log "no app window after 5 minutes - leaving it to finish starting"
+        Close-Splash
+        exit 0
     }
-    Close-Splash
-    exit 0
+    if (-not $running[0].HasExited) {
+        Log "no app window after 5 minutes - leaving it to finish starting"
+        Close-Splash
+        exit 0
+    }
+    Log "the running app ended (it was closing) - starting it again"
+    $until = (Get-Date).AddSeconds(30)  # its other processes go with it; the update below must not run under them
+    while ((Running-Apps).Count -gt 0 -and (Get-Date) -lt $until) { Wait-Pumping 200 }
+    if ((Running-Apps).Count -gt 0) {
+        Log "another copy is still running - not starting a second one"
+        Close-Splash
+        exit 0
+    }
 }
 
 # --- which copy this is -----------------------------------------------------------------------------

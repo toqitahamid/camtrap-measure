@@ -842,3 +842,22 @@ def test_restart_now_waits_for_the_old_app_to_go():
     assert ps.index("if ($AfterPid) {\n    # The app asked") < ps.index("$running = Running-Apps")
     vbs = text(SCRIPTS / "launch.vbs")
     assert "WScript.Arguments" in vbs  # launch.vbs hands -AfterPid on to the launcher
+
+
+def test_an_app_that_ends_while_a_click_waits_was_closing_not_failing():
+    """2026-09-29 18:51: the app had been on screen since 18:50:59 and was closed; its process took seconds more
+    to end. A click in between found the process with no window, waited, and then showed "stopped as it was
+    starting". An app this launcher did not start is never reported as a failure: if it ends, the click opens
+    a new one, after all of its processes are gone and before any update is applied."""
+    ps = text(SCRIPTS / "launcher.ps1")
+    block = ps.split("if ($running.Count -gt 0) {\n    # Not started by this launcher", 1)[1].split("\n}\n", 1)[0]
+    assert "Stop-With" not in block and "stopped as it was starting" not in block
+    assert "$hwnd = Wait-ForApp $running[0]" in block
+    assert 'Log "the running app ended (it was closing) - starting it again"' in block
+    assert "while ((Running-Apps).Count -gt 0 -and (Get-Date) -lt $until)" in block
+    after = ps.index('Log "the running app ended (it was closing) - starting it again"')
+    assert after < ps.index("$target = Resolve-Ref") < ps.index("$app = Start-Process -FilePath $Exe")
+    # the one failure report left is for the app this launcher started, and only before its window was seen
+    assert ps.count("stopped as it was starting") == 1
+    start = ps.split("# --- start the app", 1)[1]
+    assert "stopped as it was starting" in start and "} elseif ($app.HasExited) {" in start
