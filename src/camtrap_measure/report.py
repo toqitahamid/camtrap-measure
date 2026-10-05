@@ -73,10 +73,10 @@ def _in_range(captured_at: str | None, date_from: str | None, date_to: str | Non
 
 
 def _in_folder(path: str, folder: str | None) -> bool:
-    """Was this photo measured out of `folder`? Directly inside it, not below it: a run only ever reads the
-    JPEGs sitting in the one folder the window is pointed at. On Windows the comparison folds case, as the
-    filesystem does — the picker and a typed path can disagree about drive letters and capitals."""
-    return not folder or Path(path).parent == Path(folder)
+    """Was this photo measured out of `folder` or a folder inside it? A site folder holds its cameras' folders
+    (ticket 27), so RESULTS for the site folder is every camera in it. On Windows the comparison folds case, as
+    the filesystem does: the picker and a typed path can disagree about drive letters and capitals."""
+    return not folder or Path(folder) in Path(path).parents
 
 
 def _in_site(camera: str, site: str | None, survey_site: str | None) -> bool:
@@ -153,24 +153,39 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
     measured photos. A photo measured under the OTHER method reads as unmeasured here, because the
     question is what this method says. `stale` asks the run's own skip rule (`measure.current_answer`), so a stale row is
     exactly a row that measuring the folder again would redo; with no flag photo chosen nothing is stale,
-    because there is nothing to be stale against. Raises ValueError with the message."""
+    because there is nothing to be stale against.
+
+    A site folder (ticket 27) lists the photos of every camera folder in it, each named by its path inside the
+    site folder ("MAS_CAM01\\IMG_1032.JPG"), and each is stale against the flag photo the site plan gives it by
+    date, not against one chosen flag photo. Raises ValueError with the message."""
+    from . import batch  # batch asks this module for the site of a camera
+
     d = Path(path).expanduser().resolve()
     if not d.is_dir():
         raise ValueError(f"Folder not found: {d}")
     files = measure.jpegs(d)  # raises ValueError with a plain message if the folder cannot be read
-    LISTED_FOLDERS.add(d)
-    cal = next((c for c in store.calibrations() if c["site"] == site and c["image_name"] == flag), None)
+    if not files and batch.walk(d) is not None:
+        scan = batch.ready_scan(d)
+        given = batch.assignments(str(d))
+        photos = [(p["path"], str(p["path"].relative_to(d)), given.get(str(p["path"])), (p["captured_at"], p["ok"]))
+                  for f in scan["folders"] for p in f["photos"]]
+        LISTED_FOLDERS.update(f["path"] for f in scan["folders"])
+    else:
+        cal = next((c for c in store.calibrations() if c["site"] == site and c["image_name"] == flag), None)
+        photos = [(p, p.name, cal, None) for p in files]
+        LISTED_FOLDERS.add(d)
     known = {p["path"]: p for p in store.photos()}
     dets: dict[str, list[dict]] = {}
     for r in store.detections():
         if r["method"] == method:
             dets.setdefault(r["path"], []).append(r)
+    fid = inference.fidelity()
     out, unreadable = [], 0
-    for p in files:
+    for p, name, cal, read in photos:
         seen = known.get(str(p))
         if seen and seen["method"] != method:
             seen = None  # measured, but not under the method being asked about: no answer to this question
-        row = {"name": p.name, "path": str(p), "captured_at": None, "measured": seen is not None, "stale": False,
+        row = {"name": name, "path": str(p), "captured_at": None, "measured": seen is not None, "stale": False,
                "match_score": None, "method": None, "flag_image": None, "flag_site": None, "reasons": [], "detections": []}
         if seen:
             # flag_site travels with flag_image or the pair is meaningless: the window shows the flag photo a
@@ -178,19 +193,35 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
             # Asking for one camera's flag under another camera's name is a 404 and a blank frame (2026-08-25).
             row.update(captured_at=seen["captured_at"], match_score=seen["match_score"], method=seen["method"],
                        flag_image=seen["calibration_image"], flag_site=seen["site"],
-                       stale=cal is not None and not measure.current_answer(seen, cal, method, inference.fidelity()),
+                       stale=cal is not None and not measure.current_answer(seen, cal, method, fid),
                        reasons=[seen["held_reason"]] if seen["held_reason"] else [])
             for r in sorted(dets.get(str(p), []), key=lambda r: r["idx"]):
                 why = reasons(r)
                 row["detections"].append({**{k: r[k] for k in DET_KEYS}, "reasons": why})
                 row["reasons"] += [w for w in why if w not in row["reasons"]]
-        elif measure.readable(p):
-            row["captured_at"] = calibration.read_exif(p)["captured_at"]
+            out.append(row)
+            continue
+        captured_at, ok = read or (None, measure.readable(p))  # a site folder's scan has read both already
+        if ok:
+            row["captured_at"] = captured_at if read else calibration.read_exif(p)["captured_at"]
         else:  # a truncated file is listed like any other, so the technician sees which one to look at
             unreadable += 1
             row["reasons"] = [UNREADABLE]
         out.append(row)
     return {"folder": str(d), "total": len(out), "unreadable": unreadable, "rows": out}
+
+
+def camera_summary(folder: str, site: str) -> dict:
+    """One camera folder after a site run: photos on record, deer, their median distance, and photos that need a
+    look (any reason, as TABLE's filter counts them). Only the photos directly in `folder`: a nested folder is a
+    row of its own."""
+    d = Path(folder)
+    ph = [p for p in store.photos() if p["site"] == site and Path(p["path"]).parent == d]
+    rs = [r for r in rows(site=site) if Path(r["path"]).parent == d]
+    deer = [r for r in rs if r["species"] in DEER]
+    dist = [r["distance_m"] for r in deer if r["distance_m"] is not None]
+    return {"photos": len(ph), "deer": len(deer), "median_m": round(statistics.median(dist), 1) if dist else None,
+            "needs_look": len({r["path"] for r in rs if r["flag"]})}
 
 
 def _wanted(site, date_from, date_to, all_species, folder, survey_site) -> list[dict]:

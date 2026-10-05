@@ -9,6 +9,10 @@ same fidelity, same annotation version) unless asked to `rerun`.
 A run happens in stages, and `phase` says which one it is in: the detector looks at every photo first,
 then the distance models measure only the photos it found an animal in. The photos with nothing in them
 are finished and written during the first stage, which on a real card-dump is most of them.
+
+A run is a queue of jobs, each a set of photos and the one flag photo they are measured against. A folder
+is one job. A site folder (`batch`, ticket 27) is one job per camera folder and flag photo, with `cameras`
+in the status saying how far each camera has got.
 """
 
 import os
@@ -93,20 +97,31 @@ def prepare(folder: str, site: str, flag: str, method: str, photos: list[str] | 
 
 def start(folder: str, site: str, flag: str, method: str, rerun: bool = False, photos: list[str] | None = None) -> dict:
     """Validate, then measure in a background thread. Raises ValueError (bad input) or RuntimeError (busy)."""
+    if current and current["status"] == "running":
+        raise RuntimeError("A run is already in progress.")
+    d, chosen, cal = prepare(folder, site, flag, method, photos)
+    # picking photos by hand IS the intent to measure them: only a whole-folder run skips what already has an answer
+    return start_jobs({"kind": "folder", "folder": str(d), "site": site, "flag": flag},
+                      [{"camera": None, "cal": cal, "photos": chosen}], method, rerun or photos is not None)
+
+
+def start_jobs(fields: dict, jobs: list[dict], method: str, rerun: bool) -> dict:
+    """Run a queue of jobs, each a set of photos measured against one flag photo (`cal`), in a background thread.
+    One folder is one job. A site folder is one job per camera folder and flag photo; its `fields` carry the
+    `cameras` that `job["camera"]` points into. Raises RuntimeError when a run is busy."""
     global current
     with _lock:
         if current and current["status"] == "running":
             raise RuntimeError("A run is already in progress.")
-        d, chosen, cal = prepare(folder, site, flag, method, photos)
-        current = {"folder": str(d), "site": site, "flag": flag, "method": method,
+        current = {**fields, "method": method,
                    "fidelity": inference.state["fidelity"] or inference.fidelity(), "status": "running",
-                   "total": len(chosen), "done": 0, "skipped": 0, "unreadable": 0, "detections": 0, "error": None, "cancel": False,
+                   "total": sum(len(j["photos"]) for j in jobs), "done": 0, "skipped": 0, "unreadable": 0,
+                   "detections": 0, "error": None, "cancel": False,
                    # the run happens in stages, and which one it is in is the difference between "nothing is
                    # happening" and "it is looking through 400 photos for animals before it measures any"
                    "phase": "loading the models", "phase_done": 0, "phase_total": 0,
                    "started": time.monotonic(), "elapsed_s": 0.0, "eta_s": None}
-        # picking photos by hand IS the intent to measure them: only a whole-folder run skips what already has an answer
-        threading.Thread(target=_work, args=(current, chosen, cal, rerun or photos is not None), daemon=True).start()
+        threading.Thread(target=_work, args=(current, jobs, rerun), daemon=True).start()
         return status()
 
 
@@ -144,11 +159,15 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str) ->
     calibration? The calibration's annotation `updated_at` is its version: a relabel changes it → measure
     again. Versions are compared, never clocks (the dept machine's and the cloud's need not agree).
 
+    The camera counts too: two cameras can each have an IMG_0001.JPG flag photo, and a photo measured under
+    the wrong one is no answer for the right one (ticket 27). In a site folder `cal` is the flag photo the
+    plan gives this photo by date, so a run split across two visits is current against each.
+
     Fidelity counts for the same reason a relabel does: it is a different set of settings and so a
     different number. Switching it re-measures the folder rather than leaving two kinds of metres side by
     side with nothing on screen to tell them apart."""
     return bool(known and known["method"] == method and known.get("fidelity") == fidelity
-                and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at"))
+                and known["site"] == cal["site"] and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at"))
 
 
 def readable(p: Path) -> bool:
@@ -161,40 +180,27 @@ def readable(p: Path) -> bool:
         return False
 
 
-def _work(run: dict, photos: list[Path], cal: dict, rerun: bool) -> None:
+def _work(run: dict, jobs: list[dict], rerun: bool) -> None:
     known = {p["path"]: p for p in store.photos()}
-    method, fidelity = run["method"], run["fidelity"]
+    measured = 0
     try:
-        batch = []
-        for p in photos:
-            if not rerun and current_answer(known.get(str(p)), cal, method, fidelity):
-                run["skipped"] += 1
-                run["done"] += 1
-                continue
-            if not readable(p):
-                run["unreadable"] += 1
-                run["done"] += 1
-                continue
-            batch.append((p, {"path": str(p), "site": run["site"], **calibration.read_exif(p), "held_reason": None,
-                              "calibration_image": cal["image_name"], "calibration_version": cal.get("updated_at"),
-                              "fidelity": fidelity}))
-        if batch and not run["cancel"]:
-            ref = {**cal, "ref_path": str(store.ref_path(cal["site"], cal["image_name"]))}
-            rows = {str(p): photo for p, photo in batch}
+        for n, job in enumerate(jobs):
+            if run["cancel"]:
+                break
+            cam = None if job["camera"] is None else run["cameras"][job["camera"]]
+            if cam:
+                run["camera_i"], cam["status"] = job["camera"], "running"
+            if n:
+                # The models were handed one flag photo and the next job has another. The card is handed back
+                # between them, so the detector and the distance models are never on it together (ticket 20).
+                _release()
+            measured += _job(run, cam, job, known, rerun)
+            if cam and run["cancel"]:
+                cam["status"] = "stopped"
+            elif cam and (n + 1 == len(jobs) or jobs[n + 1]["camera"] != job["camera"]):
+                from .report import camera_summary  # report imports this module
 
-            def progress(phase: str, done: int, total: int) -> None:
-                run["phase"], run["phase_done"], run["phase_total"] = phase, done, total
-
-            # The backend finishes photos out of order - an empty frame is done as soon as the detector
-            # has looked at it, one with a deer in it not until the distance stage - so each result names
-            # its own photo instead of arriving in the order the photos were handed over.
-            for res in inference.backend([p for p, _ in batch], ref, method, progress=progress):
-                photo = rows[str(res.path)]
-                store.record({**photo, "match_score": res.match_score}, method, [asdict(d) for d in res.detections])
-                run["detections"] += len(res.detections)
-                run["done"] += 1
-                if run["cancel"]:
-                    break
+                cam.update(camera_summary(cam["folder"], cam["site"]), status="done")
         outcome = ("cancelled", None) if run["cancel"] else ("done", None)
     except Exception as e:
         outcome = ("error", _plain(e))
@@ -202,9 +208,63 @@ def _work(run: dict, photos: list[Path], cal: dict, rerun: bool) -> None:
         # The run is over: the models go and the card goes back to whatever else is running on this
         # machine. The next run loads them again, which is the price of not sitting on 4 GB while idle.
         run["phase"], run["phase_done"], run["phase_total"] = "finished", 0, 0
-        try:
-            inference.release()
-        except Exception:  # freeing memory must never be what turns a finished run into a failed one
-            pass
+        _release()
     run["elapsed_s"] = round(time.monotonic() - run["started"], 1)
+    if outcome[0] == "done" and measured and inference.state.get("backend") == "real":
+        store.save_meta("pace_s_per_photo", str(round(run["elapsed_s"] / measured, 2)))  # the next estimate's pace
     run["status"], run["error"] = outcome
+
+
+def _release() -> None:
+    try:
+        inference.release()
+    except Exception:  # freeing memory must never be what turns a finished run into a failed one
+        pass
+
+
+def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> int:
+    """Measure one job's photos against its flag photo. -> how many went through the models."""
+    from .report import DEER, reasons  # report imports this module
+
+    cal, method, fidelity = job["cal"], run["method"], run["fidelity"]
+
+    def count(**more) -> None:
+        for k, v in more.items():
+            run[k] += v
+        run["done"] += 1
+        if cam:
+            cam["done"] += 1
+
+    batch = []
+    for p in job["photos"]:
+        if not rerun and current_answer(known.get(str(p)), cal, method, fidelity):
+            count(skipped=1)
+            continue
+        if not readable(p):
+            count(unreadable=1)
+            continue
+        batch.append((p, {"path": str(p), "site": cal["site"], **calibration.read_exif(p), "held_reason": None,
+                          "calibration_image": cal["image_name"], "calibration_version": cal.get("updated_at"),
+                          "fidelity": fidelity}))
+    if not batch or run["cancel"]:
+        return 0
+    ref = {**cal, "ref_path": str(store.ref_path(cal["site"], cal["image_name"]))}
+    rows = {str(p): photo for p, photo in batch}
+
+    def progress(phase: str, done: int, total: int) -> None:
+        run["phase"], run["phase_done"], run["phase_total"] = phase, done, total
+
+    # The backend finishes photos out of order - an empty frame is done as soon as the detector
+    # has looked at it, one with a deer in it not until the distance stage - so each result names
+    # its own photo instead of arriving in the order the photos were handed over.
+    for res in inference.backend([p for p, _ in batch], ref, method, progress=progress):
+        photo = rows[str(res.path)]
+        dets = [asdict(d) for d in res.detections]
+        store.record({**photo, "match_score": res.match_score}, method, dets)
+        count(detections=len(dets))
+        if cam:
+            cam["deer"] += sum(1 for d in dets if d["species"] in DEER)
+            cam["needs_look"] += any(reasons({**d, "match_score": res.match_score}) for d in dets)
+        if run["cancel"]:
+            break
+    return len(batch)

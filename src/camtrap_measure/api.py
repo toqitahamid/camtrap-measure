@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calibration, density, dialogs, inference, measure, report, store, updates
+from . import batch, calibration, density, dialogs, inference, measure, report, store, updates
 from . import supabase_ro as sb
 
 __version__ = version("camtrap-measure")
@@ -189,6 +189,109 @@ def start_run(body: RunRequest):
         raise HTTPException(400, str(e))
     except RuntimeError as e:
         raise HTTPException(409, str(e))
+
+
+@app.get("/api/site")
+def site_folder(path: str, method: str = inference.DEFAULT_METHOD, refresh: bool = False):
+    """Is this a site folder (camera folders inside it)? While its photos are read: {status: "reading", done,
+    total}, polled. Not a site folder: {status: "single"}, and the folder is measured as one camera. Read: the
+    confirmation table (`batch.plan`). refresh=true reads the folder again (new photos; known ones are cached)."""
+    try:
+        s = batch.scan(path, refresh)
+        if s["status"] == "ready":
+            return batch.plan(path, method)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {k: s[k] for k in ("status", "done", "total", "error") if k in s}
+
+
+class SiteChoice(BaseModel):
+    path: str  # the site folder
+    folder: str  # the camera folder (row) the click was on
+    method: str = inference.DEFAULT_METHOD
+    camera: str | None = None  # the camera menu, or "Use MAS_CAM14"
+    keep: str | None = None  # "Keep MAS_CAM04": the camera kept although its photos name another
+    flag: str | None = None  # the flag photo menu: "" = chosen by date
+    tick: bool | None = None
+
+
+@app.post("/api/site/choose")
+def site_choose(body: SiteChoice):
+    """One click on one row of the confirmation table; answers with the table again."""
+    change = body.model_dump(exclude={"path", "folder", "method"}, exclude_none=True)
+    try:
+        batch.choose(body.path, body.folder, **change)
+        return batch.plan(body.path, body.method)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class SiteTick(BaseModel):
+    path: str
+    on: bool
+    method: str = inference.DEFAULT_METHOD
+
+
+@app.post("/api/site/tick")
+def site_tick(body: SiteTick):
+    """Tick all / Tick none over the Ready rows."""
+    try:
+        batch.tick_all(body.path, body.on)
+        return batch.plan(body.path, body.method)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class SiteFolder(BaseModel):
+    path: str
+    folder: str
+
+
+def _models_free() -> None:
+    if inference.state["status"] != "ready":
+        raise HTTPException(503, inference.state["error"] or "The app is still starting. Try again in a moment.")
+    if measure.current and measure.current["status"] == "running":
+        raise HTTPException(409, "Measuring is running. Try again when it has finished or been stopped.")
+
+
+@app.post("/api/site/compare")
+def site_compare(body: SiteFolder):
+    """Line one photo of the folder up against the matched camera's flag photo and the one its stamp names.
+    Loads the alignment model if it is not loaded, so it takes seconds; never during a run."""
+    _models_free()
+    try:
+        return batch.compare(body.path, body.folder)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class SiteRun(BaseModel):
+    path: str
+    method: str = inference.DEFAULT_METHOD
+    rerun: bool = False
+    photos: list[str] | None = None  # exactly these photos of the site folder; None = every ticked camera
+
+
+@app.post("/api/site/run")
+def site_run(body: SiteRun):
+    """Measure every ticked camera folder, each photo against its own flag photo. Progress via GET /api/run."""
+    if inference.state["status"] != "ready":
+        raise HTTPException(503, inference.state["error"] or "The app is still starting. Try again in a moment.")
+    try:
+        return batch.start(body.path, body.method, body.rerun, body.photos)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/flaglabel/open")
+def open_flaglabel():
+    """Open FlagLabel in the default browser, for a camera that has no labelled flag photo yet."""
+    reason = dialogs.open_flaglabel()
+    if reason:
+        raise HTTPException(400, reason)
+    return {"ok": True}
 
 
 @app.get("/api/run")

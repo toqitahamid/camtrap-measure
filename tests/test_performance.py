@@ -109,8 +109,8 @@ def test_changing_the_settings_re_measures_instead_of_mixing_two_kinds_of_metres
     folder with nothing on screen to tell them apart is the failure being prevented."""
     from camtrap_measure import measure
 
-    cal = {"image_name": "IMG_0004.JPG", "updated_at": "2026-08-01T00:00:00"}
-    done = {"method": "md", "fidelity": distance.RESEARCH, "calibration_image": "IMG_0004.JPG",
+    cal = {"site": "MAS_CAM01", "image_name": "IMG_0004.JPG", "updated_at": "2026-08-01T00:00:00"}
+    done = {"method": "md", "fidelity": distance.RESEARCH, "site": "MAS_CAM01", "calibration_image": "IMG_0004.JPG",
             "calibration_version": "2026-08-01T00:00:00"}
     assert measure.current_answer(done, cal, "md", distance.RESEARCH)
     assert not measure.current_answer(done, cal, "md", distance.FAST)

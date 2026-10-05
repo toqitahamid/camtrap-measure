@@ -20,6 +20,7 @@ import gc
 import logging
 import os
 import random
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import nullcontext
@@ -341,6 +342,13 @@ class Real:
             yield PhotoResult(dets, inliers, p)
             tick("measuring distances", i, len(found))
 
+    def align_score(self, photo: Path, calibration: dict) -> int:
+        """How many points of one photo line up with a flag photo: the run's own RoMa alignment, with no
+        detector and no distance read. What the Compare dialog asks (ticket 27)."""
+        dist = self.measuring()
+        ref_crop, _, _ = dist.reference(calibration)
+        return dist.align(ref_crop, distance.crop_banner(self._open(photo)))[1]
+
     def _sam3(self):
         """SAM3 (transformers port of facebook/sam3), loaded on first use so the fast method never pays its VRAM."""
         if self.sam3 is None:
@@ -466,3 +474,23 @@ def release() -> None:
     free = getattr(backend, "release", None)
     if free:
         free()
+
+
+_aligning = threading.Lock()  # one alignment at a time: two would load the models twice
+
+
+def alignment(photo: Path, calibration: dict) -> int:
+    """Points of `photo` that line up with the flag photo in `calibration` (which carries `ref_path`). The real
+    backend loads RoMa for it (seconds the first time) and hands the card back after; the test backend makes
+    up a stable number per photo and flag photo."""
+    with _aligning:
+        score = getattr(backend, "align_score", None)
+        if score is None:
+            if FAKE_DELAY_S:
+                time.sleep(FAKE_DELAY_S)
+            return random.Random(f"{photo.name}|{calibration['site']}|{calibration['image_name']}").choice(
+                [54, 150, 276, 8600, 8900, 9100])
+        try:
+            return score(photo, calibration)
+        finally:
+            release()

@@ -162,6 +162,18 @@ def calibrations() -> list[dict]:
     return [{**dict(r), "ok": bool(r["ok"])} for r in rows]
 
 
+def meta(key: str) -> str | None:
+    """A small remembered value (the last sync time, the measured pace); None when never written."""
+    with closing(_db()) as con:
+        row = con.execute("select value from meta where key=?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def save_meta(key: str, value: str) -> None:
+    with closing(_db()) as con, con:
+        con.execute("insert or replace into meta values (?, ?)", (key, value))
+
+
 def summary() -> dict:
     with closing(_db()) as con:
         last = con.execute("select value from meta where key='last_sync'").fetchone()

@@ -7,7 +7,10 @@ back as a plain sentence the technician can act on rather than an error.
 """
 
 import os
+import webbrowser
 from pathlib import Path
+
+FLAGLABEL_URL = "https://flaglabel.vercel.app/"  # the one web address the page may ask the engine to open
 
 window = None  # set by main.py once the desktop window exists; None means "no native dialog here"
 
@@ -41,3 +44,12 @@ def open_folder(path: str) -> str | None:
     except OSError as e:
         return f"The folder did not open ({e})."
     return None
+
+
+def open_flaglabel() -> str | None:
+    """Open FlagLabel in the default browser -> None, or why not. Only this address: the page names no URL."""
+    try:
+        opened = webbrowser.open(FLAGLABEL_URL)
+    except Exception as e:  # no browser registered, or the shell refused
+        return f"FlagLabel did not open ({e}). Go to {FLAGLABEL_URL} in a browser."
+    return None if opened else f"FlagLabel did not open. Go to {FLAGLABEL_URL} in a browser."

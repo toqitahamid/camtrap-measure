@@ -84,8 +84,9 @@ def test_summary_and_export_narrow_to_the_chosen_folder(measured, tmp_path):
 
     elsewhere = measured.get("/api/summary", params={"folder": str(tmp_path / "photos" / "TON_CAM03")}).json()
     assert elsewhere["photos"] == 0 and elsewhere["detections"] == 0 and elsewhere["cameras"] == []
-    # the folder itself, never what lies under it: a run reads the JPEGs of one folder only
-    assert measured.get("/api/summary", params={"folder": str(tmp_path / "photos")}).json()["photos"] == 0
+    # the folder and every folder inside it: a site folder answers for its cameras' folders (ticket 27)
+    assert measured.get("/api/summary", params={"folder": str(tmp_path / "photos")}).json()["photos"] == 8
+    assert measured.get("/api/summary", params={"folder": str(tmp_path / "photo")}).json()["photos"] == 0  # not a prefix
 
     doc, rows = export(measured, folder=str(d))
     assert f"folder={d}" in doc[0] and len(rows) == 2  # the five deer less the three suspicious
