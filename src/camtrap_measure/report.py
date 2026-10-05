@@ -79,6 +79,12 @@ def _in_folder(path: str, folder: str | None) -> bool:
     return not folder or Path(folder) in Path(path).parents
 
 
+def _as_stored(folder: str | None) -> str | None:
+    """The folder written the way the store writes photo paths (absolute, resolved), so a typed path, a relative
+    one or a Windows short name (SIU856~4 for SIU856562106) still finds the photos measured out of it."""
+    return str(Path(folder).expanduser().resolve()) if folder else None
+
+
 def _in_site(camera: str, site: str | None, survey_site: str | None) -> bool:
     """`site` picks one camera (the store's historic name for it); `survey_site` picks every camera of a site."""
     return (not site or camera == site) and (not survey_site or site_of(camera) == survey_site)
@@ -86,7 +92,7 @@ def _in_site(camera: str, site: str | None, survey_site: str | None) -> bool:
 
 def rows(site=None, date_from=None, date_to=None, folder=None, survey_site=None) -> list[dict]:
     """Detection rows in scope, each with `flag` = '; '.join(reasons)."""
-    out = []
+    folder, out = _as_stored(folder), []
     for r in store.detections():
         if not _in_site(r["site"], site, survey_site) or not _in_range(r["captured_at"], date_from, date_to):
             continue
@@ -98,6 +104,7 @@ def rows(site=None, date_from=None, date_to=None, folder=None, survey_site=None)
 
 def photos(site=None, date_from=None, date_to=None, folder=None, survey_site=None) -> list[dict]:
     """Photo rows in scope — measured and held."""
+    folder = _as_stored(folder)
     return [p for p in store.photos()
             if _in_site(p["site"], site, survey_site) and _in_range(p["captured_at"], date_from, date_to)
             and _in_folder(p["path"], folder)]

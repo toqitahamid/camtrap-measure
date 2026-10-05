@@ -15,6 +15,7 @@ is one job. A site folder (`batch`, ticket 27) is one job per camera folder and 
 in the status saying how far each camera has got.
 """
 
+import itertools
 import os
 import stat
 import threading
@@ -32,6 +33,7 @@ HIDDEN = stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM
 # just means pressing Measure again. Persist `current` if the dept asks where last night's run got to.
 current: dict | None = None
 _lock = threading.Lock()
+_runs = itertools.count(1)  # each run's id, so the window can tell a finished run from the next one
 
 
 def is_photo(f: Path | os.DirEntry) -> bool:
@@ -113,7 +115,7 @@ def start_jobs(fields: dict, jobs: list[dict], method: str, rerun: bool) -> dict
     with _lock:
         if current and current["status"] == "running":
             raise RuntimeError("A run is already in progress.")
-        current = {**fields, "method": method,
+        current = {**fields, "id": next(_runs), "method": method,
                    "fidelity": inference.state["fidelity"] or inference.fidelity(), "status": "running",
                    "total": sum(len(j["photos"]) for j in jobs), "done": 0, "skipped": 0, "unreadable": 0,
                    "detections": 0, "error": None, "cancel": False,

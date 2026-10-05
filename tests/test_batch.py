@@ -214,7 +214,10 @@ def test_photos_stamped_with_another_camera_wait_for_the_user(c, tmp_path):
 def test_compare_lines_one_photo_up_against_both_flag_photos(c, tmp_path):
     root = make(tmp_path / "site", {"MAS_CAM04": {f"IMG_{i}.JPG": shot(stamp="MAS14") for i in range(3)}})
     r = plan(c, root)["rows"][0]
+    first = c.post("/api/site/compare", json={"path": str(root), "folder": r["folder"], "score": False}).json()
+    assert [f["score"] for f in first["flags"]] == [None, None]  # at once: which photos, before the models load
     got = c.post("/api/site/compare", json={"path": str(root), "folder": r["folder"]}).json()
+    assert got["photo"] == first["photo"]
     assert got["stamp"] == "MAS14" and Path(got["photo"]).parent == Path(r["folder"])
     assert [(f["site"], f["image_name"]) for f in got["flags"]] == [("MAS_CAM04", "IMG_0001.JPG"), ("MAS_CAM14", "IMG_0001.JPG")]
     for f in got["flags"]:
@@ -304,7 +307,8 @@ def test_a_site_run_measures_each_camera_against_its_own_flag_photos_and_carries
                              ("MAS_CAM02", "IMG_0001.JPG", ["IMG_1.JPG"])]  # one call per camera folder and flag photo
     cams = {cam["name"]: cam for cam in st["cameras"]}
     assert cams["MAS_CAM01"]["status"] == "done" and cams["MAS_CAM01"]["photos"] == 2 and cams["MAS_CAM01"]["done"] == 2
-    assert cams["MAS_CAM01"]["flags"] == ["IMG_0004.JPG", "IMG_2868.JPG"] and cams["mas cam 2"]["site"] == "MAS_CAM02"
+    assert [f["image_name"] for f in cams["MAS_CAM01"]["flags"]] == ["IMG_0004.JPG", "IMG_2868.JPG"]
+    assert cams["MAS_CAM01"]["flags"][0]["captured_at"] == "2025-12-19T10:00:00" and cams["mas cam 2"]["site"] == "MAS_CAM02"
     assert {"deer", "median_m", "needs_look"} <= cams["MAS_CAM01"].keys()
     assert sorted(st["left_out"], key=lambda x: x["name"]) == [{"name": "MAS_CAM04", "why": "check which camera it is"},
                                                                {"name": "card 3", "why": "no camera with this name"}]
@@ -394,3 +398,5 @@ def test_results_and_the_table_for_a_site_folder_include_its_camera_folders(c, t
     for x in listing["rows"]:
         assert c.get("/api/photo", params={"path": x["path"], "size": "thumb"}).status_code == 200
     assert report._in_folder(str(root / "a" / "b.JPG"), str(root)) and not report._in_folder(str(tmp_path / "b.JPG"), str(root))
+    # the folder as typed, not as stored: relative here, a Windows short name (SIU856~4) on the workstation
+    assert c.get("/api/summary", params={"folder": str(root / "MAS_CAM01" / "..")}).json()["photos"] == 2

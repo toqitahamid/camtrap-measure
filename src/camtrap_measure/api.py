@@ -245,6 +245,7 @@ def site_tick(body: SiteTick):
 class SiteFolder(BaseModel):
     path: str
     folder: str
+    score: bool = True  # False: only which photo and flag photos would be compared, at once
 
 
 def _models_free() -> None:
@@ -258,9 +259,10 @@ def _models_free() -> None:
 def site_compare(body: SiteFolder):
     """Line one photo of the folder up against the matched camera's flag photo and the one its stamp names.
     Loads the alignment model if it is not loaded, so it takes seconds; never during a run."""
-    _models_free()
+    if body.score:
+        _models_free()
     try:
-        return batch.compare(body.path, body.folder)
+        return batch.compare(body.path, body.folder, body.score)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

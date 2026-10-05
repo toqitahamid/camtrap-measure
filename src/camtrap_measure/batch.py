@@ -493,7 +493,9 @@ def start(path: str, method: str, rerun: bool = False, photos: list[str] | None 
                 raise ValueError(f"The flag photo {flag} of {cal['site']} is not on this computer yet. "
                                  "Press Sync, then measure again.")
             jobs.append({"camera": i, "cal": cal, "photos": group})
-        cameras.append({"folder": r["folder"], "name": r["name"], "site": r["camera"], "flags": list(groups),
+        flags = [{"image_name": f, "captured_at": r["_got"][str(g[0])]["captured_at"]} for f, g in groups.items()]
+        cameras.append({"folder": r["folder"], "name": r["name"], "site": r["camera"], "flags": flags,
+                        "prefix": str(Path(r["name"])) + os.sep,  # how TABLE names this folder's photos
                         "total": len(ps), "done": 0, "deer": 0, "needs_look": 0, "status": "waiting",
                         "photos": None, "median_m": None})
     left = [] if photos is not None else \
@@ -503,10 +505,11 @@ def start(path: str, method: str, rerun: bool = False, photos: list[str] | None 
                               jobs, method, rerun or photos is not None)
 
 
-def compare(path: str, folder: str) -> dict:
+def compare(path: str, folder: str, score: bool = True) -> dict:
     """The Compare dialog: one photo of the row, lined up against the matched camera's flag photo and against the
-    flag photo of the camera its stamp names. Loads the alignment model when needed (seconds), so it is asked
-    for, never run on its own. Raises ValueError with the message."""
+    flag photo of the camera its stamp names. Lining up loads the alignment model when needed (seconds), so the
+    dialog first asks with score=False, shows the three photos, and then asks for the scores.
+    Raises ValueError with the message."""
     root = Path(path).expanduser().resolve()
     want = str(Path(folder).expanduser().resolve())
     row = next((r for r in _build(root)[0] if r["folder"] == want), None)
@@ -522,7 +525,7 @@ def compare(path: str, folder: str) -> dict:
         if cal is None:
             out["flags"].append({"site": cam, "image_name": None, "score": None, "lines_up": False})
             continue
-        score = inference.alignment(photo, {**cal, "ref_path": str(store.ref_path(cam, cal["image_name"]))})
-        out["flags"].append({"site": cam, "image_name": cal["image_name"], "score": score,
-                             "lines_up": score is not None and score >= COMPARE_GOOD})
+        points = inference.alignment(photo, {**cal, "ref_path": str(store.ref_path(cam, cal["image_name"]))})             if score else None
+        out["flags"].append({"site": cam, "image_name": cal["image_name"], "score": points,
+                             "lines_up": points is not None and points >= COMPARE_GOOD})
     return out
