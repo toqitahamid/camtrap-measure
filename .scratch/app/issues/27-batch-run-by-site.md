@@ -12,7 +12,7 @@ catches this before anything is measured. MIN_INLIERS is not changed here; that 
 
 **Blocked by:** 15 (pick the flag photo), 22 (flag photo and clearing), 26 (sites) — all done.
 
-**Status:** ready-for-agent
+**Status:** done (2026-10-05) — 375 passed, 1 skipped (22 in tests/test_batch.py: names, whole numbers, nested and ambiguous folders, unknown and unlabelled cameras, Open FlagLabel, the Browning stamp read from a PIL-written UserComment and its mismatch with Use / Keep, Compare, flag photo by date across two visits / before the first / undated, current_answer per camera, duplicates, the queue end to end on the fake backend with stop and carry on, picked photos, the folder scope including subfolders); `npm run build`, tsc and oxlint clean. Live on a scratch copy of the dev store: `D:\research\photo` reads as a site folder with MAS_CAM14 matched to MAS_CAM14 (no longer MAS_CAM04) and MAS_CAM07_filtered to MAS_CAM07 with 2,835 photos; real-model Compare on MAS_CAM14 photos filed as MAS_CAM04: 118 to 184 points against 4,781 to 5,037; the run, Stop and summary in test mode. Deviations and open points in CONTEXT (2026-10-05, ticket 27).
 
 ## 1. Site folder detection
 

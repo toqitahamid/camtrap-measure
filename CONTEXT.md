@@ -1593,3 +1593,83 @@ photos, and counted the 2,835 twins as unreadable.
 Evidence: 353 passed, 1 skipped (two new tests: `._IMG_1.JPG` and `.hidden.jpg` beside `IMG_1.JPG` list and
 measure one photo, none unreadable, and the twin is not served; a file set hidden or system with
 SetFileAttributesW is not listed). `measure.jpegs` on the real folder: 2,835 (was 5,670).
+
+## A site folder is measured in one go, each camera against its own flag photos (2026-10-05, ticket 27)
+
+Seth emailed on 2026-10-05: choose a site folder that holds all its camera folders and measure every camera in
+one go, each against its own flag photo, matched by name. The researcher approved the mockup
+(`.scratch/design/BatchRun.html`) and the rules in the ticket the same day.
+
+- **Site folder.** No JPEGs directly in it, and its subfolders have some (`batch.walk`, up to 3 levels below each
+  camera folder; dot, `$` and hidden or system folders are not looked in). A folder with JPEGs in it is one
+  camera's card and works exactly as before: the Camera and Flag photo menus, Measure all. Each folder that holds
+  photos is a row; a subfolder with none is listed under Skipped.
+- **Names.** Case, spaces, `_`, `-` and leading zeros do not count, and a camera name must sit in the folder name as
+  whole words and whole numbers (`batch.matches`): `MAS_CAM07_filtered`, `2026_MAS_CAM07` and "MAS_CAM07 deer only"
+  are MAS_CAM07, "mas cam 2" is MAS_CAM02, and MAS_CAM1 is never found in MAS_CAM14. A nested folder takes the
+  nearest folder above it that names a camera. A name that fits two cameras waits for the user to choose. The row
+  says 'Matched "mas cam 2" to MAS_CAM02' when the name differs from the camera's.
+- **The camera stamp.** Browning writes the camera into EXIF UserComment (`C[P] R0S1 T25F:P0000 MAS01   M1`). Five
+  photos per folder are read (evenly spread), and the SITE+number token whose letters are a known site is compared
+  with the matched camera (MAS14 = same site, number 14 = MAS_CAM14). A mismatch holds the row unticked with
+  Compare / Use / Keep; no stamp, no check. This is what would have caught the dev store's mistake: the photos in
+  `D:\research\photo\MAS_CAM14`, stamped MAS14, measured as MAS_CAM04, lined up 54 to 276 points against that
+  camera's flag photo, where photos of the right camera get 8,600 to 9,100. The run's alarm is `distance.MIN_INLIERS`
+  = 15 in the code (the brief said 20, as does the plain-language pass's CSV example), and 54 passes either. It is
+  not changed here: raising it is the researcher's separate decision.
+- **Flag photo by date, for a site folder only.** Each photo gets its camera's usable flag photo with the latest
+  capture time on or before its own; photos before the first flag photo get the earliest; undated photos get what
+  the folder's first dated photo got (`batch.assign`). The row shows the split ("19 Dec 2025 setup visit, 280
+  photos · 1 Apr 2026 service visit, 32 photos"; setup = the camera's earliest usable flag photo). Its menu can put
+  one flag photo on every photo. This brings back ticket 05's date windows for site folders, which ticket 15 took
+  away ("the user picks the flag photo"). The reason that beats ticket 15's here: a site folder has dozens of
+  cameras, and picking each one's flag photo by hand is the work Seth asked to be rid of; the rule follows the field
+  visits, it is shown per row before anything runs, and any row can be overridden. The single folder keeps ticket
+  15's rule unchanged.
+- **Already measured is per photo.** `measure.current_answer` now also compares the camera: two cameras can each
+  have an IMG_0001.JPG flag photo, and the old rule called a photo measured under MAS_CAM04/IMG_0001.JPG current for
+  MAS_CAM14/IMG_0001.JPG. In a site folder it is asked against each photo's assigned flag photo, by the table's
+  "N already measured", by the run's skip and by TABLE's "out of date", so a card split across two visits is not
+  half out of date.
+- **Duplicates, within one camera.** Two folders of the same camera share half or more of the smaller one's dated
+  photos (same file name, same capture time): both rows say "MAS_CAM07_filtered has the same photos as MAS_CAM07.
+  Measure only one.", the smaller stays ticked, the larger is unticked. Only within a camera, a narrowing of the
+  brief's "two folders": two cameras on one time-lapse schedule can both write IMG_0001.JPG at noon (the first test
+  data did exactly that across cameras). A copy filed under the wrong camera is the stamp check's to catch.
+- **The queue.** `measure.start_jobs` runs a list of jobs, each a set of photos and one flag photo; a single folder
+  is one job, a site folder one job per camera folder and flag photo, and `cameras` in the run status says how far
+  each has got. Stop, carrying on (the skip rule) and one run at a time are the existing ones. The card is handed
+  back between jobs (`inference.release`), so the detector and the distance models are never on it together
+  (ticket 20); the cost is a model load per job, about 20 s warm, against hours of measuring.
+- **Time estimate.** The last real run's seconds per photo (`store.meta("pace_s_per_photo")`, written after a
+  finished real run), else 1.9 s per photo (the dept card).
+- **Compare.** Lines one photo of the folder up against the matched camera's flag photo and the stamp camera's, with
+  the run's own RoMa alignment (`Real.align_score`), one model load for both, and hands the card back after. The
+  dialog first asks which photos (at once) and shows them with "Checking…", then asks for the scores. "Lines up
+  well" is 1,000 points or more (`batch.COMPARE_GOOD`): RoMa samples 10,000 matches, the right camera gets thousands
+  and the wrong one hundreds. That number is the dialog's only; the researcher may want it tuned. Each alignment is
+  about 1.3 s; loading the model is most of the wait (121 s the first time after start on the workstation, 25.5 s
+  after).
+- **Open FlagLabel** opens https://flaglabel.vercel.app/ in the default browser through the engine
+  (`dialogs.open_flaglabel`), that address only. This replaces ticket 26's "no FlagLabel web address".
+- **RESULTS, DENSITY and TABLE for a site folder.** A folder scope now includes the folders inside it
+  (`report._in_folder`), which reverses the earlier "directly inside it, not below it": a site folder answers for
+  its cameras. The folder is resolved before comparing, so a typed path or a Windows short name (SIU856~4) finds the
+  photos the store keeps under their long names (RESULTS showed 0 for the demo site until this). TABLE names a site
+  folder's photos by their path inside it ("MAS_CAM01\IMG_1032.JPG"), Export there is "this site folder", and its
+  per-photo Measure goes through the site run, each photo against its own flag photo. RESULTS and DENSITY start on
+  all cameras for a site folder.
+- **Not done.** "Open in Measure" from TABLE is hidden for a site folder: MEASURE shows the cameras there, not one
+  photo. The stamp check runs only for site folders; the single folder that produced the MAS_CAM14 mistake still
+  has only the MIN_INLIERS alarm. Reading a big site folder the first time takes a while on a cold disk (about 8 ms
+  a photo here); the page shows "Reading the photos, N of M", and what was read is kept for the engine's life.
+
+Evidence: 375 passed, 1 skipped (22 in tests/test_batch.py). `npm run build`, tsc and oxlint clean. Live, on a copy
+of the dev store in the scratchpad (never synced, so the FlagLabel session was not refreshed), one engine at a time:
+`D:\research\photo` as a site folder gives 3 rows, MAS_CAM14 matched to MAS_CAM14 (27 photos, stamp MAS14),
+MAS_CAM07_filtered to MAS_CAM07 (2,835 photos), MAS_CAM01 (11, all already measured), "Measure 3 cameras · 2,873
+photos, About 1 hour 31 minutes". A demo site built from those photos (MAS_CAM14's photos filed as MAS_CAM04, a
+duplicate MAS_CAM07 pair, "card 3", unlabelled SRF_CAM16, an empty "notes") shows every state. Compare with the
+real models: MAS_CAM04 118 to 184 points, MAS_CAM14 4,781 to 5,037 (a night photo). The run, Stop and the summary
+were taken in test mode (made-up numbers): 4 cameras, 59 photos, stopped at camera 3. Headless Edge screenshots
+in the session scratchpad (`batch-*.png`).
