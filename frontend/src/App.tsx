@@ -634,11 +634,11 @@ export default function App() {
                        onOpen={siteMode ? undefined : (p) => { setFocus(p); setSection('measure') }} />
           )}
           {section === 'results' && (
-            <Results site={scope.site} cameras={cameras} folder={scope.folder}
+            <Results site={siteMode ? '' : scope.site} cameras={cameras} folder={scope.folder}
               onClear={clearResults} onChooseFolder={chooseFolder} onGoMeasure={() => setSection('measure')} />
           )}
           {section === 'density' && (
-            <Density site={scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder}
+            <Density site={siteMode ? '' : scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder}
               onChooseFolder={chooseFolder} onGoMeasure={() => setSection('measure')} />
           )}
         </div>

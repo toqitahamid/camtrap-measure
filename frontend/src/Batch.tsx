@@ -353,7 +353,7 @@ function CompareDialog({ site, row, onClose, onChoose }: {
           ))}
         </div>
         <div className="batch-foot">
-          <span className="small dim">{error ?? verdict ?? 'Checking how well each flag photo lines up. This can take a minute the first time.'}</span>
+          <span className="small dim">{error ?? verdict ?? 'Checking how well each flag photo lines up. The first check can take two minutes while the models load.'}</span>
           <div className="spacer" />
           <button className={`btn${scored && own.lines_up && !other.lines_up ? ' btn-amber' : ''}`} onClick={() => onChoose({ keep: mine })}>
             Keep {mine}

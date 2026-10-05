@@ -519,13 +519,12 @@ def compare(path: str, folder: str, score: bool = True) -> dict:
     when = next(p["captured_at"] for p in row["_scan"]["photos"] if p["path"] == photo)
     other = row["stamp"]["camera"]
     theirs = [c for c in store.calibrations() if c["site"] == other and c["ok"]]
-    out = {"folder": want, "photo": str(photo), "name": photo.name, "stamp": row["stamp"]["text"], "flags": []}
-    for cam, cal in ((row["camera"], row["_got"][str(photo)]),
-                     (other, assign({"p": when}, theirs)["p"] if theirs else None)):
-        if cal is None:
-            out["flags"].append({"site": cam, "image_name": None, "score": None, "lines_up": False})
-            continue
-        points = inference.alignment(photo, {**cal, "ref_path": str(store.ref_path(cam, cal["image_name"]))})             if score else None
-        out["flags"].append({"site": cam, "image_name": cal["image_name"], "score": points,
-                             "lines_up": points is not None and points >= COMPARE_GOOD})
-    return out
+    pairs = [(row["camera"], row["_got"][str(photo)]), (other, assign({"p": when}, theirs)["p"] if theirs else None)]
+    refs = [{**cal, "ref_path": str(store.ref_path(cam, cal["image_name"]))} for cam, cal in pairs if cal]
+    points = iter(inference.alignment(photo, refs) if score else [None] * len(refs))
+    flags = []
+    for cam, cal in pairs:
+        n = next(points) if cal else None
+        flags.append({"site": cam, "image_name": cal and cal["image_name"], "score": n,
+                      "lines_up": n is not None and n >= COMPARE_GOOD})
+    return {"folder": want, "photo": str(photo), "name": photo.name, "stamp": row["stamp"]["text"], "flags": flags}

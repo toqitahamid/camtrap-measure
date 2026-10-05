@@ -479,18 +479,18 @@ def release() -> None:
 _aligning = threading.Lock()  # one alignment at a time: two would load the models twice
 
 
-def alignment(photo: Path, calibration: dict) -> int:
-    """Points of `photo` that line up with the flag photo in `calibration` (which carries `ref_path`). The real
-    backend loads RoMa for it (seconds the first time) and hands the card back after; the test backend makes
-    up a stable number per photo and flag photo."""
+def alignment(photo: Path, calibrations: list[dict]) -> list[int]:
+    """Points of `photo` that line up with each flag photo (each calibration carries `ref_path`). The real backend
+    loads RoMa once for all of them (seconds) and hands the card back after; the test backend makes up a stable
+    number per photo and flag photo."""
     with _aligning:
         score = getattr(backend, "align_score", None)
         if score is None:
             if FAKE_DELAY_S:
                 time.sleep(FAKE_DELAY_S)
-            return random.Random(f"{photo.name}|{calibration['site']}|{calibration['image_name']}").choice(
-                [54, 150, 276, 8600, 8900, 9100])
+            return [random.Random(f"{photo.name}|{c['site']}|{c['image_name']}").choice([54, 150, 276, 8600, 8900, 9100])
+                    for c in calibrations]
         try:
-            return score(photo, calibration)
+            return [score(photo, c) for c in calibrations]
         finally:
             release()
