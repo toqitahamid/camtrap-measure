@@ -144,7 +144,7 @@ def listed(path: str) -> bool:
     """Is this a JPEG sitting directly in a folder this process has listed? Strict on purpose: the parent must
     be a listed folder itself, so no path is served merely for looking like it is somewhere below one."""
     p = Path(path).expanduser().resolve()
-    return p.suffix.lower() in measure.JPEG and p.parent in LISTED_FOLDERS
+    return p.parent in LISTED_FOLDERS and measure.is_photo(p)
 
 
 def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METHOD) -> dict:

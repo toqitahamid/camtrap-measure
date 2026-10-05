@@ -1574,3 +1574,22 @@ from the next start, 18:52:17: the file is rewritten at every start, so it never
 Evidence: 351 passed, 1 skipped. Dev repo with -NoUpdate: close the window, click 50 ms later: "no window on
 screen - starting or closing", "the running app ended (it was closing) - starting it again" 2 s later, and the
 new window 5.7 s after the click.
+
+## Files that only look like photos are not photos (2026-10-05)
+
+`D:\research\photo\MAS_CAM07_filtered` holds 2,835 photos and 2,835 macOS AppleDouble files (`._IMG_0037.JPG`,
+4 KB each), which a Mac writes beside every file it copies to an exFAT or FAT drive. The app listed all 5,670 as
+photos, and counted the 2,835 twins as unreadable.
+
+- **One question, asked everywhere:** `measure.is_photo`. A JPEG by its name, not starting with "." (which covers
+  `._`), and not marked hidden or system by Windows (`st_file_attributes`; elsewhere the dot is the rule). The
+  folder listing, Measure all, a picked photo and the photo endpoint all ask it, so the count on screen and the
+  photos measured always agree. The site-folder scan (ticket 27) reads its folders through the same listing.
+- **Skipped, not unreadable.** These files are not counted anywhere: "unreadable" stays for a real photo that is
+  damaged.
+- `measure.jpegs` lists with `os.scandir`: on Windows the attributes come with the listing, so the check costs
+  no extra disk reads on a 9,000-photo card.
+
+Evidence: 353 passed, 1 skipped (two new tests: `._IMG_1.JPG` and `.hidden.jpg` beside `IMG_1.JPG` list and
+measure one photo, none unreadable, and the twin is not served; a file set hidden or system with
+SetFileAttributesW is not listed). `measure.jpegs` on the real folder: 2,835 (was 5,670).

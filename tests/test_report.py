@@ -196,10 +196,16 @@ def test_folder_that_is_not_there_is_refused_in_plain_words(synced, tmp_path):
 def test_folder_that_cannot_be_read_is_refused_in_plain_words(synced, tmp_path, monkeypatch):
     d = folder(tmp_path)
 
-    def denied(self):  # the share dropped, or this Windows account may not read the folder
-        raise PermissionError(13, "Access is denied")
+    import os
 
-    monkeypatch.setattr(Path, "iterdir", denied)
+    scandir = os.scandir
+
+    def denied(path):  # the share dropped, or this Windows account may not read the folder
+        if Path(path) == d:
+            raise PermissionError(13, "Access is denied")
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", denied)
     r = synced.get("/api/folder", params={"path": str(d), "site": SITE, "flag": FLAG})
     assert r.status_code == 400 and "Could not read" in r.json()["detail"] and "Access is denied" in r.json()["detail"]
 

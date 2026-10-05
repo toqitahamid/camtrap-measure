@@ -389,3 +389,27 @@ def test_a_pick_that_is_not_a_photo_in_the_folder_is_refused(synced, tmp_path):
 def test_a_run_with_nothing_picked_is_refused(synced, tmp_path):
     r = picked(synced, folder(tmp_path), [])
     assert r.status_code == 400 and "No photos picked" in r.json()["detail"]
+
+
+# --- files that only look like photos (2026-10-05) -------------------------------------------------------------
+
+def test_mac_appledouble_and_dot_files_are_not_photos(synced, tmp_path):
+    """A Mac copying to an exFAT card writes ._IMG_1.JPG beside IMG_1.JPG: 4 KB, not a photo, never "unreadable"."""
+    d = folder(tmp_path, photos={"IMG_1.JPG": jpeg(IN_WINDOW), "._IMG_1.JPG": b"\x00\x05\x16\x07" + b"\x00" * 60,
+                                 ".hidden.jpg": jpeg(IN_WINDOW)})
+    g = synced.get("/api/folder", params={"path": str(d), "site": SITE, "flag": FLAG}).json()
+    assert [r["name"] for r in g["rows"]] == ["IMG_1.JPG"] and g["total"] == 1 and g["unreadable"] == 0
+    st = run(synced, d)
+    assert st["total"] == 1 and st["unreadable"] == 0
+    assert synced.get("/api/photo", params={"path": str(d / "._IMG_1.JPG")}).status_code == 404
+
+
+@pytest.mark.skipif(not hasattr(__import__("os").stat_result, "st_file_attributes"), reason="Windows file attributes")
+def test_a_file_windows_marks_hidden_or_system_is_not_a_photo(synced, tmp_path):
+    import ctypes
+
+    d = folder(tmp_path, photos={"IMG_1.JPG": jpeg(IN_WINDOW), "IMG_2.JPG": jpeg(IN_WINDOW), "IMG_3.JPG": jpeg(IN_WINDOW)})
+    ctypes.windll.kernel32.SetFileAttributesW(str(d / "IMG_2.JPG"), 0x2)  # FILE_ATTRIBUTE_HIDDEN
+    ctypes.windll.kernel32.SetFileAttributesW(str(d / "IMG_3.JPG"), 0x4)  # FILE_ATTRIBUTE_SYSTEM
+    g = synced.get("/api/folder", params={"path": str(d), "site": SITE, "flag": FLAG}).json()
+    assert [r["name"] for r in g["rows"]] == ["IMG_1.JPG"] and g["unreadable"] == 0

@@ -11,6 +11,8 @@ then the distance models measure only the photos it found an animal in. The phot
 are finished and written during the first stage, which on a real card-dump is most of them.
 """
 
+import os
+import stat
 import threading
 import time
 from dataclasses import asdict
@@ -21,18 +23,35 @@ from PIL import Image
 from . import calibration, inference, store
 
 JPEG = {".jpg", ".jpeg"}
+HIDDEN = stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM
 # ponytail: in-memory progress + daemon thread, forgotten on restart — the store is the record, a restart
 # just means pressing Measure again. Persist `current` if the dept asks where last night's run got to.
 current: dict | None = None
 _lock = threading.Lock()
 
 
-def jpegs(d: Path) -> list[Path]:
-    """Every JPEG directly in the folder, name order. Not recursive: one folder is one SD-card dump, and a
-    subfolder is another camera's. The folder listing shows exactly this set, so what is on screen is what
-    Measure all measures."""
+def is_photo(f: Path | os.DirEntry) -> bool:
+    """Is this file a photo a camera took? A JPEG by its name, and not one of the files that only look like it:
+    a name starting with "." (macOS writes an AppleDouble twin, ._IMG_0037.JPG, 4 KB, beside every photo it
+    copies to an exFAT or FAT card: seen on 2,835 of them, 2026-10-05), or a file Windows marks hidden or
+    system. Every listing asks this one question, so the listing, the count and Measure all always agree."""
+    name = f.name
+    if os.path.splitext(name)[1].lower() not in JPEG or name.startswith("."):
+        return False
     try:
-        return sorted(p for p in d.iterdir() if p.suffix.lower() in JPEG)
+        attrs = getattr(f.stat(), "st_file_attributes", 0)  # Windows only; elsewhere the dot is the rule
+    except OSError:
+        return False
+    return not attrs & HIDDEN
+
+
+def jpegs(d: Path) -> list[Path]:
+    """Every photo directly in the folder (`is_photo`), name order. Not recursive: one folder is one SD-card
+    dump, and a subfolder is another camera's. The folder listing shows exactly this set, so what is on screen
+    is what Measure all measures."""
+    try:
+        with os.scandir(d) as entries:  # on Windows the attributes come with the listing: no extra disk reads
+            return sorted(Path(e.path) for e in entries if is_photo(e))
     except OSError as e:  # a share that dropped, or a folder this Windows account may not read
         raise ValueError(f"Could not read {d}: {e}")
 
@@ -64,7 +83,7 @@ def prepare(folder: str, site: str, flag: str, method: str, photos: list[str] | 
     chosen = []
     for name in photos:
         p = Path(name).expanduser().resolve()
-        if p.suffix.lower() not in JPEG or p.parent != d or not p.is_file():
+        if not is_photo(p) or p.parent != d or not p.is_file():
             raise ValueError(f"{name} is not a photo in {d}. Pick photos from the folder you are measuring.")
         chosen.append(p)
     if not chosen:
