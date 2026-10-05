@@ -59,10 +59,31 @@ export type Row = {
 }
 export type Folder = { folder: string; total: number; unreadable: number; rows: Row[] }
 
-export type Run = {
+/** One camera of a site run: how far it has got, then (once done) what it adds up to. */
+export type RunCamera = {
   folder: string
-  site: string
-  flag: string
+  name: string            // the folder's path inside the site folder, as the table shows it
+  site: string            // the camera
+  prefix: string          // how TABLE names this folder's photos, to filter on
+  flags: { image_name: string; captured_at: string | null }[]
+  total: number
+  done: number
+  deer: number
+  needs_look: number
+  status: 'waiting' | 'running' | 'done' | 'stopped'
+  photos: number | null
+  median_m: number | null
+}
+
+export type Run = {
+  id: number
+  kind: 'folder' | 'site'
+  folder: string
+  site: string | null
+  flag: string | null
+  cameras?: RunCamera[]   // a site run only
+  camera_i?: number
+  left_out?: { name: string; why: string }[]
   method: string
   status: 'running' | 'done' | 'cancelled' | 'error'
   phase: string           // which stage the run is in: loading, finding animals, measuring distances
@@ -123,6 +144,52 @@ export type Density = {
   density: { per_km2: number; lo: number; hi: number; p: number; edr_m: number } | null
 }
 
+/* A site folder (a folder of camera folders), as the engine reads it: one row per camera folder. */
+export type SiteFlag = { image_name: string; captured_at: string | null; photos: number; visit: 'setup' | 'service' | null }
+export type SiteAction = 'compare' | 'use' | 'keep' | 'flaglabel'
+export type SiteRow = {
+  folder: string
+  name: string
+  photos: number
+  camera: string | null
+  candidates: string[]
+  state: 'ok' | 'ambiguous' | 'unknown' | 'unlabelled'
+  note: string | null
+  stamp: { text: string; camera: string | null; mismatch: boolean; kept: boolean } | null
+  flags: SiteFlag[]
+  flag_choice: string     // '' = each photo's flag photo is chosen by date
+  options: { image_name: string; captured_at: string | null }[]
+  measured: number
+  warnings: string[]
+  actions: SiteAction[]
+  tickable: boolean
+  ticked: boolean
+  group: 'attention' | 'ready'
+}
+export type Site = {
+  status: 'ready'
+  folder: string
+  rows: SiteRow[]
+  skipped: { name: string; why: string }[]
+  counts: { check: number; cannot: number; ready: number; skipped: number }
+  ticked: { cameras: number; photos: number; measured: number }
+  pace_s: number
+}
+export type SiteState =
+  | Site
+  | { status: 'reading'; done: number; total: number }
+  | { status: 'single' }
+  | { status: 'error'; error: string }
+export type Comparison = {
+  folder: string
+  photo: string
+  name: string
+  stamp: string
+  flags: { site: string; image_name: string | null; score: number | null; lines_up: boolean }[]
+}
+/** A row change the confirmation table posts: one menu or one button. */
+export type SiteChange = { camera?: string; keep?: string; flag?: string; tick?: boolean }
+
 /** What every section is pointed at: one camera, one of its flag photos, one folder, one method. */
 export type Scope = { site: string; flag: string; folder: string; method: string }
 
@@ -143,6 +210,17 @@ export const clock = (iso: string | null) =>
 export const stamp = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : 'no capture date')
 export const duration = (s: number) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`)
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+/** A long wait in words, ready to start a sentence: "About 4 hours 40 minutes", "Less than a minute". */
+export function about(s: number): string {
+  const min = Math.round(s / 60)
+  if (min < 1) return 'Less than a minute'
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return `About ${[h ? plural(h, 'hour') : '', m ? plural(m, 'minute') : ''].filter(Boolean).join(' ')}`
+}
+/** A visit date the way the field notes write it: "19 Dec 2025". */
+export const visitDay = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'undated'
 export const thousands = (n: number) => n.toLocaleString()
 
 /** The one distance a row shows: the nearest animal's, since that is the one a reviewer checks first. */

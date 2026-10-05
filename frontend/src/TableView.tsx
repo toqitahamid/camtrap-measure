@@ -91,19 +91,24 @@ export default function TableView({
   onMeasure,
   onOpen,
   error,
+  initial,
+  exportFolder,
 }: {
   scope: Scope
   folder: Folder | null
   methods: Methods
   busy: boolean
   onMeasure: (paths: string[]) => void
-  onOpen: (path: string) => void
+  onOpen?: (path: string) => void // none for a site folder: MEASURE shows its cameras, not one photo
+  // where another screen sends the user: the needs-a-look rows, or one camera folder's photos (ticket 27)
+  initial?: { filter?: Filter; find?: string }
+  exportFolder?: string // a site folder exports its own photos, not one camera's
   // ponytail: optional because the ticket's signature stops above; the shell hands the folder-listing
   // failure over so the table says why there are no rows instead of blaming the user for not picking one.
   error?: string | null
 }) {
-  const [filter, setFilter] = useState<Filter>('all')
-  const [find, setFind] = useState('')
+  const [filter, setFilter] = useState<Filter>(initial?.filter ?? 'all')
+  const [find, setFind] = useState(initial?.find ?? '')
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 })
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set())
   const [at, setAt] = useState<string | null>(null)
@@ -175,6 +180,13 @@ export default function TableView({
           <span className="tiny faint">
             {plural(rows.length, 'row')} · {plural(animals, 'animal')}
           </span>
+          {exportFolder ? (
+            <a className="btn btn-sm" href={`/api/export.csv?folder=${encodeURIComponent(exportFolder)}`} download
+               title="Every measured photo in this site folder, every camera">
+              <Icon name="download" size={12} />
+              Export this site folder
+            </a>
+          ) : (
           <a
             className="btn btn-sm"
             href={`/api/export.csv?site=${encodeURIComponent(scope.site)}`}
@@ -185,6 +197,7 @@ export default function TableView({
             {/* the CSV is the camera's, not this folder's or this filter's: say so rather than imply a count */}
             Export {scope.site || 'all cameras'}
           </a>
+          )}
         </div>
 
         {picked.length > 0 && (
@@ -370,10 +383,12 @@ export default function TableView({
           <span className="cap">Preview</span>
           <span className="tiny dim ellipsis">{cur?.name}</span>
           <div className="spacer" />
-          <button className="btn btn-sm" disabled={cur === null} onClick={() => cur && onOpen(cur.path)}>
-            Open in Measure
-            <Icon name="right" size={11} />
-          </button>
+          {onOpen && (
+            <button className="btn btn-sm" disabled={cur === null} onClick={() => cur && onOpen(cur.path)}>
+              Open in Measure
+              <Icon name="right" size={11} />
+            </button>
+          )}
         </div>
 
         {cur === null ? (

@@ -36,8 +36,23 @@ export const HELP: Record<string, Topic> = {
   folder: {
     title: 'Photo folder',
     body: [
-      'The photos to measure, usually one memory card copied onto this computer.',
-      'Only photos directly in this folder are measured, not ones in folders inside it.',
+      'One camera\'s photos, usually one memory card copied onto this computer.',
+      'Or a site folder with one folder per camera inside it. Then every camera is measured in one go.',
+    ],
+  },
+  site: {
+    title: 'Site folder',
+    body: [
+      'Each folder is matched to its camera by name, even when written differently: "mas cam 2" is MAS_CAM02.',
+      'The camera name stamped in the photos is checked too, so a folder in the wrong place is caught first.',
+      'Change any camera or flag photo with its menu.',
+    ],
+  },
+  byDate: {
+    title: 'Flag photo, chosen by date',
+    body: [
+      'Each photo uses the flag photo from the last visit before it was taken. A card that runs past a service visit switches on its own.',
+      'Photos from before the first visit use the setup flag photo.',
     ],
   },
   method: {

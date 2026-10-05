@@ -6,6 +6,7 @@ import Help, { About } from './Help'
 import Icon from './Icon'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
+import Batch, { type TablePreset } from './Batch'
 import Measure from './Measure'
 import RangeScene from './RangeScene'
 import Density from './Density'
@@ -23,6 +24,8 @@ import {
   type Run,
   type Inference,
   type Scope,
+  type SiteChange,
+  type SiteState,
   type Status,
 } from './ui'
 
@@ -86,6 +89,11 @@ export default function App() {
   const [rerun, setRerun] = useState(false)
   const [run, setRun] = useState<Run | null>(null)
   const [focus, setFocus] = useState<string | null>(null) // a row the table handed to the measure section
+  // A site folder (camera folders inside it) is read by the engine first; 'single' means one camera's folder.
+  const [siteScan, setSiteScan] = useState<{ of: string; data: SiteState } | null>(null)
+  const scannedPath = useRef('') // the folder the last site check was for: a new one is read again
+  // what TABLE opens on when another screen sends the user there; n remounts it so the preset applies again
+  const [preset, setPreset] = useState<{ n: number; to: TablePreset }>({ n: 0, to: {} })
 
   const usable = cameras.filter((c) => c.flags.some((f) => f.ok))
   const cam = usable.find((c) => c.site === picked.site) ?? usable[0]
@@ -100,7 +108,11 @@ export default function App() {
     folder: picked.folder,
     method: methods.methods[picked.method] ? picked.method : methods.default,
   }
-  const of = [scope.folder, scope.site, scope.flag, scope.method].join('\u0000')
+  const site = siteScan && siteScan.of === scope.folder ? siteScan.data : null
+  const siteMode = site !== null && site.status !== 'single'
+  // a site folder's listing is every camera folder in it, each photo against its own flag photo
+  const listingMode = site === null ? null : site.status === 'single' ? 'single' : site.status === 'ready' ? 'site' : null
+  const of = (listingMode === 'site' ? [scope.folder, '', '', scope.method] : [scope.folder, scope.site, scope.flag, scope.method]).join('\u0000')
   // only ever show a listing that was fetched for the scope now on screen, never the previous camera's
   const folder = listing && listing.of === of ? listing.data : null
 
@@ -118,6 +130,7 @@ export default function App() {
     void refresh()
     fetch('/api/methods').then((r) => r.json()).then(setMethods).catch(() => {})
     fetch('/api/health').then((r) => r.json()).then(setBuild).catch(() => {})
+    fetch('/api/run').then((r) => r.json()).then(setRun).catch(() => {}) // a run started before this page opened
   }, [refresh])
 
   const loading = status?.inference.status === 'loading'
@@ -134,11 +147,39 @@ export default function App() {
     return () => clearTimeout(id)
   }, [typedPath])
 
-  const { site, flag, folder: path, method } = scope
+  const { site: camera, flag, folder: path, method } = scope
+
+  // Is the folder a site folder? Asked first, for every folder; its photos are read while the page polls.
   useEffect(() => {
-    if (!path || !site || !flag || !method) return
+    if (!path || !method) return
+    let live = true
+    let timer = 0
+    const again = scannedPath.current !== path // a folder chosen anew is looked at again: new cards may be in it
+    scannedPath.current = path
+    const ask = (refresh: boolean) => {
+      const q = new URLSearchParams({ path, method, ...(refresh ? { refresh: 'true' } : {}) })
+      fetch(`/api/site?${q}`)
+        .then(async (r) => {
+          if (!live) return
+          // a folder that cannot be read is the folder listing's to explain, as it always was
+          const data: SiteState = r.ok ? await r.json() : { status: 'single' }
+          setSiteScan({ of: path, data })
+          if (data.status === 'reading') timer = window.setTimeout(() => ask(false), 700)
+        })
+        .catch(() => live && setSiteScan({ of: path, data: { status: 'single' } }))
+    }
+    ask(again)
+    return () => {
+      live = false
+      clearTimeout(timer)
+    }
+  }, [path, method, stale])
+
+  useEffect(() => {
+    if (!path || !method || !listingMode || (listingMode === 'single' && (!camera || !flag))) return
     let live = true // a slower answer for a folder the user has already left must not land
-    const q = new URLSearchParams({ path, site, flag, method })
+    const key = listingMode === 'site' ? [path, '', '', method] : [path, camera, flag, method]
+    const q = new URLSearchParams(listingMode === 'site' ? { path, method } : { path, site: camera, flag, method })
     fetch(`/api/folder?${q}`)
       .then(async (r) => {
         if (!live) return
@@ -147,13 +188,13 @@ export default function App() {
           return
         }
         setFolderError(null)
-        setListing({ of: [path, site, flag, method].join('\u0000'), data: await r.json() })
+        setListing({ of: key.join('\u0000'), data: await r.json() })
       })
       .catch((e) => live && setFolderError(`The app is not answering. Restart it. (${e})`))
     return () => {
       live = false
     }
-  }, [path, site, flag, method, stale])
+  }, [path, camera, flag, method, stale, listingMode])
 
   // A report of something already finished should not sit on screen until the next click clears it
   // (reported 2026-08-25). Anything still worth reading - a warning, an error - stays.
@@ -190,6 +231,38 @@ export default function App() {
       return
     }
     setRun(await r.json())
+  }
+
+  /** Measure a site folder: every ticked camera, or exactly the photos picked in the table. */
+  async function measureSite(photos?: string[]) {
+    setNotice(null)
+    const r = await post('/api/site/run', { path: scope.folder, method: scope.method, rerun, photos })
+    if (!r.ok) {
+      setNotice({ text: (await r.json()).detail ?? `Could not start (${r.status})`, kind: 'error' })
+      return
+    }
+    setRun(await r.json())
+  }
+
+  /** One click in the site table: a camera, a flag photo, a tick, Use or Keep. The engine answers with the table. */
+  async function siteClick(url: string, body: object) {
+    const r = await post(url, { path: scope.folder, method: scope.method, ...body })
+    if (!r.ok) {
+      setNotice({ text: (await r.json()).detail ?? `That did not work (${r.status})`, kind: 'error' })
+      return
+    }
+    setSiteScan({ of: scope.folder, data: await r.json() })
+    setStale((n) => n + 1) // which flag photo each photo uses may have changed: the table's listing too
+  }
+
+  async function openFlagLabel() {
+    const r = await post('/api/flaglabel/open')
+    if (!r.ok) setNotice({ text: (await r.json()).detail ?? 'FlagLabel did not open.', kind: 'warn' })
+  }
+
+  function openTable(to: TablePreset) {
+    setPreset((p) => ({ n: p.n + 1, to }))
+    setSection('table')
   }
 
   /** Forget measurements: one photo, or every photo of one camera. Nothing on disk is touched. */
@@ -344,7 +417,7 @@ export default function App() {
     )
   }
 
-  const shownError = path && site && flag && method ? folderError : null
+  const shownError = path && method && (siteMode || (camera && flag)) ? folderError : null
   const inf = status.inference
   const measured = folder ? folder.rows.filter((r) => r.measured).length : 0
   const flagged = folder ? folder.rows.filter((r) => r.reasons.length > 0).length : 0
@@ -407,6 +480,7 @@ export default function App() {
           <div className="ctxbar">
             {/* width is what each field would like; minWidth is what it must keep to stay readable —
                 the bar wraps to a second row before anything is squeezed past it */}
+            {!siteMode && (<>
             <label className="field" style={{ width: 152, minWidth: 116 }}>
               <span className="cap">Camera <Help topic="camera" /></span>
               <span className="field-val">
@@ -450,8 +524,9 @@ export default function App() {
               </span>
             </label>
             <div className="sep" />
+            </>)}
 
-            <div className="field" style={{ flex: 1, minWidth: 210, maxWidth: 380 }}>
+            <div className="field" style={{ flex: 1, minWidth: 210, maxWidth: siteMode ? 560 : 380 }}>
               <span className="cap">Photo folder <Help topic="folder" /></span>
               <span className="field-val">
                 {/* picked, never typed — except where there is no native dialog to pick with, which is
@@ -464,7 +539,7 @@ export default function App() {
                   <input className="path" value={typedPath} placeholder="Type or paste the folder" spellCheck={false}
                          onChange={(e) => setTypedPath(e.target.value)} />
                 )}
-                <button className="btn btn-sm" onClick={browse} title="Choose the folder that holds this camera's photos">
+                <button className="btn btn-sm" onClick={browse} title="Choose one camera's folder, or a site folder that holds them">
                   <Icon name="folder" size={12} width={1.8} />
                   {scope.folder ? 'Change…' : 'Browse…'}
                 </button>
@@ -484,12 +559,19 @@ export default function App() {
             </label>
 
             <div className="spacer" />
+            {!siteMode && (
             <label className="check tiny" style={{ alignItems: 'center' }}>
               <input type="checkbox" checked={rerun} onChange={(e) => setRerun(e.target.checked)} />
               Redo measured photos
               <Help topic="rerun" align="right" />
             </label>
-            {running ? (
+            )}
+            {siteMode ? running && section !== 'measure' && ( // MEASURE shows the batch's own Stop
+              <button className="btn btn-danger" onClick={() => post('/api/run/cancel')}>
+                <Icon name="stop" size={14} width={2.1} />
+                Stop
+              </button>
+            ) : running ? (
               <button className="btn btn-danger" onClick={() => post('/api/run/cancel')}>
                 <Icon name="stop" size={14} width={2.1} />
                 Stop
@@ -508,7 +590,19 @@ export default function App() {
         )}
 
         <div className={summing ? 'body' : 'work'}>
-          {section === 'measure' && (
+          {section === 'measure' && siteMode && site && (
+            <Batch key={scope.folder} site={site} run={run} running={running} ready={ready} rerun={rerun} onRerun={setRerun}
+                   cameras={usable.map((c) => c.site)}
+                   onChoose={(f, change: SiteChange) => void siteClick('/api/site/choose', { folder: f, ...change })}
+                   onTickAll={(on) => void siteClick('/api/site/tick', { on })}
+                   onMeasure={() => void measureSite()}
+                   onCancel={() => setTypedPath('')}
+                   onStop={() => void post('/api/run/cancel')}
+                   onFlagLabel={() => void openFlagLabel()}
+                   onResults={() => setSection('results')}
+                   onTable={openTable} />
+          )}
+          {section === 'measure' && !siteMode && (
             <Measure scope={scope} folder={folder} methods={methods} busy={running || !ready} running={running}
               onClear={clearResults}
                      onMeasure={measure} focus={focus} error={shownError} onChooseFolder={chooseFolder} />
@@ -533,8 +627,11 @@ export default function App() {
             </div>
           )}
           {section === 'table' && folder !== null && (
-            <TableView scope={scope} folder={folder} methods={methods} busy={running || !ready} onMeasure={measure}
-                       error={shownError} onOpen={(p) => { setFocus(p); setSection('measure') }} />
+            <TableView key={preset.n} initial={preset.to} scope={scope} folder={folder} methods={methods}
+                       busy={running || !ready} error={shownError}
+                       onMeasure={siteMode ? (paths) => void measureSite(paths.length ? paths : undefined) : measure}
+                       exportFolder={siteMode ? scope.folder : undefined}
+                       onOpen={siteMode ? undefined : (p) => { setFocus(p); setSection('measure') }} />
           )}
           {section === 'results' && (
             <Results site={scope.site} cameras={cameras} folder={scope.folder}
