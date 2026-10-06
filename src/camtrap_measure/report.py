@@ -171,9 +171,14 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
     if not d.is_dir():
         raise ValueError(f"Folder not found: {d}")
     files = measure.jpegs(d)  # raises ValueError with a plain message if the folder cannot be read
+    known = {p["path"]: p for p in store.photos()}
     if not files and batch.walk(d) is not None:
         scan = batch.ready_scan(d)
         given = batch.assignments(str(d))
+        # a photo not measured under this method shows its date and whether it opens; the scan read only the
+        # dates the plan needed, so read the rest now (once: they are kept in the store's photo_dates)
+        batch.fill_dates([p for f in scan["folders"] for p in f["photos"]
+                          if (known.get(str(p["path"])) or {}).get("method") != method])
         photos = [(p["path"], str(p["path"].relative_to(d)), given.get(str(p["path"])), (p["captured_at"], p["ok"]))
                   for f in scan["folders"] for p in f["photos"]]
         LISTED_FOLDERS.update(f["path"] for f in scan["folders"])
@@ -181,7 +186,6 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
         cal = next((c for c in store.calibrations() if c["site"] == site and c["image_name"] == flag), None)
         photos = [(p, p.name, cal, None) for p in files]
         LISTED_FOLDERS.add(d)
-    known = {p["path"]: p for p in store.photos()}
     dets: dict[str, list[dict]] = {}
     for r in store.detections():
         if r["method"] == method:

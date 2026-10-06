@@ -6,13 +6,15 @@ it is one camera's card, as before, and none of this applies.
 
 The page only renders what `plan()` returns and posts clicks: which camera a row is, whether its flag photo is
 chosen by date, whether it is ticked. Those choices live here, per site folder, for as long as the engine runs.
-Reading the photos (every capture date, a few camera stamps) can take a minute on a cold disk, so it runs in a
-thread and the page polls; what was read is kept, so choosing the folder again reads only new files.
+Reading a photo's capture date takes tens of milliseconds on a cold disk, and a site folder holds thousands, so only
+the dates the plan needs are read (`_needed`), in a thread while the page polls, and kept in the store's photo_dates
+table: a folder is read once, and only a new or changed photo is read again.
 """
 
 import os
 import re
 import threading
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -142,7 +144,10 @@ def assign(times: dict[str, str | None], cals: list[dict]) -> dict[str, dict]:
 _lock = threading.Lock()
 SCANS: dict[Path, dict] = {}  # site folder -> {status, done, total, folders, empty}
 CHOICES: dict[Path, dict[str, dict]] = {}  # site folder -> row folder -> {camera, keep, flag, tick}
-_EXIF: dict[tuple, tuple] = {}  # (path, size, mtime) -> (captured_at, readable)
+_EXIF: dict[tuple, tuple] = {}  # (path, size, mtime_ns) -> (captured_at, readable): this engine's copy of
+# the store's photo_dates cache, which keeps them across restarts
+FLUSH = 200  # photos read between writes to the store's cache
+PROGRESS_S = 0.25  # seconds between progress updates while dates are read (the page polls every 0.7 s)
 
 
 def _dirs(d: Path) -> list[Path]:
@@ -186,22 +191,6 @@ def walk(root: Path) -> tuple[list[tuple[Path, list[Path]]], list[str]] | None:
     return (found, empty) if found else None
 
 
-def _exif(p: Path) -> tuple[str | None, bool]:
-    try:
-        st = p.stat()
-    except OSError:
-        return None, False
-    key = (str(p), st.st_size, st.st_mtime_ns)
-    if key not in _EXIF:
-        try:
-            with Image.open(p):
-                ok = True
-        except Exception:
-            ok = False
-        _EXIF[key] = (calibration.read_exif(p)["captured_at"] if ok else None, ok)
-    return _EXIF[key]
-
-
 def _samples(photos: list[Path]) -> list[Path]:
     if len(photos) <= STAMP_SAMPLES:
         return list(photos)
@@ -209,32 +198,129 @@ def _samples(photos: list[Path]) -> list[Path]:
     return [photos[round(i * step)] for i in range(STAMP_SAMPLES)]
 
 
-def read(root: Path, progress=None) -> dict:
-    """Walk the site folder and read every photo's capture date and a few camera stamps. Synchronous; the API
-    runs it in a thread. -> {status: "ready", folders, empty} or {status: "single"}."""
+def _list(root: Path) -> dict | None:
+    """The site folder as found, nothing read yet: each photo's captured_at and ok stay None until its date is
+    read (`_pending`, `_read_dates`), and a folder's stamps None until they are. None when `root` is not a site
+    folder."""
     w = walk(root)
     if w is None:
-        return {"status": "single"}
+        return None
     found, empty = w
-    total, done = sum(len(j) for _, j in found), 0
     folders = []
     for d, jpegs in found:
-        photos = []
-        for p in jpegs:
-            t, ok = _exif(p)
-            photos.append({"path": p, "name": p.name, "captured_at": t, "ok": ok})
-            done += 1
-            if progress:
-                progress(done, total)
         samples = _samples(jpegs)
-        folders.append({"path": d, "rel": str(d.relative_to(root)), "photos": photos,
-                        "stamps": [t for t in map(read_stamp, samples) if t], "sample": samples[len(samples) // 2]})
+        folders.append({"path": d, "rel": str(d.relative_to(root)), "stamps": None, "samples": samples,
+                        "sample": samples[len(samples) // 2],
+                        "photos": [{"path": p, "name": p.name, "captured_at": None, "ok": None} for p in jpegs]})
     return {"status": "ready", "folders": folders, "empty": empty}
 
 
+def _camera(root: Path, folder: Path, cameras: list[str], pick: dict) -> tuple[str | None, str | None, str | None, list]:
+    """(camera, chosen, matched_from, candidates) of one row: the camera the user chose, else the one camera its
+    name, or the nearest folder above it that names one, fits."""
+    matched_from, candidates = None, []
+    for d in [folder, *folder.parents]:  # the folder itself, then the nearest folder above it
+        if d == root:
+            break
+        if found := matches(d.name, cameras):
+            matched_from, candidates = d.name, found
+            break
+    chosen = pick.get("camera") if pick.get("camera") in cameras else None
+    return chosen or (candidates[0] if len(candidates) == 1 else None), chosen, matched_from, candidates
+
+
+def _needed(root: Path, folders: list[dict], cameras: list[str], cals: list[dict]) -> list[dict]:
+    """The folders whose capture dates decide something. Dates choose between a camera's flag photos and find two
+    folders of one camera with the same photos, so a folder needs them only when its camera has two or more
+    usable flag photos with a date (`assign` chooses among dated ones only), or another folder is the same
+    camera. A folder with no camera, or whose camera has one flag photo, needs none: every photo gets that one."""
+    picks = CHOICES.get(root, {})
+    dated = Counter(c["site"] for c in cals if c["ok"] and c["captured_at"])
+    cams = [_camera(root, f["path"], cameras, picks.get(str(f["path"]), {}))[0] for f in folders]
+    per_camera = Counter(c for c in cams if c)
+    return [f for f, cam in zip(folders, cams) if cam and (dated[cam] >= 2 or per_camera[cam] >= 2)]
+
+
+def _pending(photos: list[dict]) -> list[tuple[dict, tuple]]:
+    """Fill in the photos whose date is known (this engine read it, or the store's cache has it for the same
+    size and modification time) and return the rest, each with its (path, size, mtime_ns) key, to be read."""
+    ask = []
+    for ph in photos:
+        if ph["ok"] is not None:
+            continue
+        try:
+            st = ph["path"].stat()
+        except OSError:  # gone since the walk: as unreadable
+            ph["captured_at"], ph["ok"] = None, False
+            continue
+        key = (str(ph["path"]), st.st_size, st.st_mtime_ns)
+        if key in _EXIF:
+            ph["captured_at"], ph["ok"] = _EXIF[key]
+        else:
+            ask.append((ph, key))
+    cached = store.photo_dates([key for _, key in ask]) if ask else {}
+    todo = []
+    for ph, key in ask:
+        if key[0] in cached:
+            ph["captured_at"], ph["ok"] = _EXIF[key] = cached[key[0]]
+        else:
+            todo.append((ph, key))
+    return todo
+
+
+def _read_dates(todo: list[tuple[dict, tuple]], progress=None) -> None:
+    """Open each photo once (does it open, and its capture date), keep the answer in memory, and write it to the
+    store's cache every FLUSH photos. Progress is told at most every PROGRESS_S seconds, and at the end."""
+    rows, told = [], 0.0
+    try:
+        for i, (ph, key) in enumerate(todo, 1):
+            got = calibration.read_exif(ph["path"], readable=True)
+            ph["captured_at"], ph["ok"] = _EXIF[key] = (got["captured_at"], got["readable"])
+            rows.append((*key, got["captured_at"], got["readable"]))
+            if len(rows) >= FLUSH:
+                store.save_photo_dates(rows)
+                rows = []
+            if progress and (i == len(todo) or time.monotonic() - told >= PROGRESS_S):
+                progress(i, len(todo))
+                told = time.monotonic()
+    finally:  # stopped part way (a share that vanished): what was read is still kept
+        store.save_photo_dates(rows)
+
+
+def _finish(scan_: dict, todo: list[tuple[dict, tuple]], progress=None) -> dict:
+    """Read what the scan still lacks: a few camera stamps per folder, then the dates in `todo`."""
+    for f in scan_["folders"]:
+        if f["stamps"] is None:
+            f["stamps"] = [t for t in map(read_stamp, f["samples"]) if t]
+    _read_dates(todo, progress)
+    return scan_
+
+
+def _todo(root: Path, scan_: dict) -> list[tuple[dict, tuple]]:
+    """The photos whose dates the plan needs (`_needed`) and that are not known yet."""
+    need = _needed(root, scan_["folders"], store.sites(), store.calibrations())
+    return _pending([p for f in need for p in f["photos"]])
+
+
+def fill_dates(photos: list[dict]) -> None:
+    """Make sure these scanned photos carry their date and whether they open: from the caches, else read now."""
+    _read_dates(_pending(photos))
+
+
+def read(root: Path, progress=None) -> dict:
+    """Walk the site folder and read what the plan needs: a few camera stamps per folder, and the capture dates
+    of the folders that need them. Synchronous. -> {status: "ready", folders, empty} or {status: "single"}; a
+    single folder reads nothing."""
+    scan_ = _list(root)
+    if scan_ is None:
+        return {"status": "single"}
+    return _finish(scan_, _todo(root, scan_), progress)
+
+
 def scan(path: str, refresh: bool = False) -> dict:
-    """What GET /api/site answers: reading progress, "single" (not a site folder), or the scan. Starts a read in
-    a thread when there is none for this folder, or when asked to look again. Raises ValueError with the message."""
+    """What GET /api/site answers: reading progress, "single" (not a site folder), or the scan. Dates still to be
+    read (the first time a folder is opened) are read in a thread while the page polls {status: "reading", done,
+    total}; with none to read the scan is ready at once. Raises ValueError with the message."""
     root = Path(path).expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"Folder not found: {root}")
@@ -242,16 +328,21 @@ def scan(path: str, refresh: bool = False) -> dict:
         s = SCANS.get(root)
         if s and (s["status"] == "reading" or not refresh):
             return s
-        if walk(root) is None:
+        scan_ = _list(root)
+        if scan_ is None:
             SCANS[root] = {"status": "single"}
             return SCANS[root]
-        s = SCANS[root] = {"status": "reading", "done": 0, "total": 0}
+        todo = _todo(root, scan_)
+        if not todo:
+            SCANS[root] = _finish(scan_, todo)
+            return SCANS[root]
+        s = SCANS[root] = {"status": "reading", "done": 0, "total": len(todo)}
 
     def work():
         def tick(done, total):
             s["done"], s["total"] = done, total
         try:
-            got = read(root, tick)
+            got = _finish(scan_, todo, tick)
         except Exception as e:  # a share that vanished mid-read: say so, do not leave it "reading" for ever
             got = {"status": "error", "error": f"Could not read {root}: {e}"}
         SCANS[root] = got
@@ -327,6 +418,8 @@ def _build(root: Path, method: str = inference.DEFAULT_METHOD) -> tuple[list[dic
         raise ValueError(f"{root} is not a site folder: it holds photos itself, or no folder in it does.")
     cameras = store.sites()
     cals = store.calibrations()
+    # dates the plan needs now and the first read skipped: a row the user moved to a camera with two flag photos
+    fill_dates([p for f in _needed(root, scan_["folders"], cameras, cals) for p in f["photos"]])
     usable = {c: [r for r in cals if r["site"] == c and r["ok"]] for c in cameras}
     sites = {_site_of(c) for c in cameras}
     known = {p["path"]: p for p in store.photos()}
@@ -349,15 +442,7 @@ def _build(root: Path, method: str = inference.DEFAULT_METHOD) -> tuple[list[dic
 
 def _row(root: Path, f: dict, cameras: list[str], usable: dict, sites: set[str], pick: dict, known: dict,
          method: str, fid: str) -> dict:
-    matched_from, candidates = None, []
-    for d in [f["path"], *f["path"].parents]:  # the folder itself, then the nearest folder above it
-        if d == root:
-            break
-        if found := matches(d.name, cameras):
-            matched_from, candidates = d.name, found
-            break
-    chosen = pick.get("camera") if pick.get("camera") in cameras else None
-    camera = chosen or (candidates[0] if len(candidates) == 1 else None)
+    camera, chosen, matched_from, candidates = _camera(root, f["path"], cameras, pick)
     row = {"folder": str(f["path"]), "name": f["rel"], "photos": len(f["photos"]), "camera": camera,
            "candidates": candidates, "state": "ok", "note": None, "stamp": None, "flags": [], "flag_choice": "",
            "options": [], "measured": 0, "warnings": [], "actions": [], "tickable": False,
@@ -516,7 +601,9 @@ def compare(path: str, folder: str, score: bool = True) -> dict:
     if row is None or not row["stamp"] or not row["stamp"]["camera"] or not row["_got"]:
         raise ValueError("Nothing to compare for this folder.")
     photo = row["_scan"]["sample"]
-    when = next(p["captured_at"] for p in row["_scan"]["photos"] if p["path"] == photo)
+    sample = next(p for p in row["_scan"]["photos"] if p["path"] == photo)
+    fill_dates([sample])  # a folder with one flag photo was not dated; the other camera may need it
+    when = sample["captured_at"]
     other = row["stamp"]["camera"]
     theirs = [c for c in store.calibrations() if c["site"] == other and c["ok"]]
     pairs = [(row["camera"], row["_got"][str(photo)]), (other, assign({"p": when}, theirs)["p"] if theirs else None)]

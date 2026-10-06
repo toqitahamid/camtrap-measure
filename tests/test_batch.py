@@ -2,14 +2,16 @@
 each photo given its flag photo by date, duplicates caught, and one queue that measures the ticked cameras.
 Supabase is faked at its seam and inference at its boundary, as in test_measure."""
 
+import os
 import time
+from collections import Counter
 from io import BytesIO
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
-from camtrap_measure import api, batch, inference, measure, report
+from camtrap_measure import api, batch, calibration, inference, measure, report, store
 
 from tests.conftest import ANN, flag_photo_data, jpeg
 from tests.test_measure import wait
@@ -280,6 +282,129 @@ def test_two_folders_with_the_same_photos_are_flagged_and_only_the_smaller_is_ti
     assert full["warnings"] == [text] and filtered["warnings"] == [text]
     assert filtered["ticked"] and not full["ticked"] and full["tickable"]
     assert full["group"] == filtered["group"] == "attention" and row(p, "MAS_CAM10")["warnings"] == []
+
+
+# --- reading only the dates that are needed, once ------------------------------------------------------------
+
+@pytest.fixture
+def reads(monkeypatch):
+    """Every photo whose capture date is read, by file name and folder."""
+    seen = []
+    real = calibration.read_exif
+
+    def spy(src, *a, **kw):
+        seen.append(f"{Path(src).parent.name}/{Path(src).name}")
+        return real(src, *a, **kw)
+
+    monkeypatch.setattr(calibration, "read_exif", spy)
+    return seen
+
+
+def restart():
+    """What the engine forgets when it stops: everything but the store."""
+    batch.SCANS.clear()
+    batch.CHOICES.clear()
+    batch._EXIF.clear()
+
+
+def test_only_folders_whose_camera_has_two_flag_photos_have_their_dates_read(c, tmp_path, reads):
+    """MAS_CAM02 has one flag photo, so its photos need no date; "card 3" has no camera, MAS_CAM06 no flag photo."""
+    root = make(tmp_path / "site", {"MAS_CAM01": {"IMG_1.JPG": shot("2026:01:10 08:00:00"), "IMG_2.JPG": shot("2026:04:05 08:00:00")},
+                                     "MAS_CAM02": {f"IMG_{i}.JPG": shot() for i in range(3)},
+                                     "card 3": {"IMG_1.JPG": shot()}, "MAS_CAM06": {"IMG_1.JPG": shot()}})
+    p = plan(c, root)
+    assert sorted(reads) == ["MAS_CAM01/IMG_1.JPG", "MAS_CAM01/IMG_2.JPG"]
+    one = row(p, "MAS_CAM02")
+    assert [(f["image_name"], f["visit"], f["photos"]) for f in one["flags"]] == [("IMG_0001.JPG", "setup", 3)]
+    assert one["ticked"] and len(row(p, "MAS_CAM01")["flags"]) == 2
+
+    # moved to a camera with two flag photos: its dates are read then, and split it
+    moved = c.post("/api/site/choose", json={"path": str(root), "folder": one["folder"], "camera": "MAS_CAM01"}).json()
+    assert sorted(r for r in reads if r.startswith("MAS_CAM02/")) == [f"MAS_CAM02/IMG_{i}.JPG" for i in range(3)]
+    assert [(f["image_name"], f["photos"]) for f in row(moved, "MAS_CAM02")["flags"]] == [("IMG_0004.JPG", 3)]
+
+    # the table shows every new photo's date: the two folders left are read when it is asked for, once
+    listing = c.get("/api/folder", params={"path": str(root)}).json()
+    assert all(x["captured_at"] == "2026-01-22T08:40:56" for x in listing["rows"] if "card 3" in x["name"])
+    assert len(reads) == 7
+    c.get("/api/folder", params={"path": str(root)})
+    assert len(reads) == 7
+
+
+def test_two_folders_of_a_one_flag_camera_are_dated_to_find_duplicates(c, tmp_path, reads):
+    every = {f"IMG_{i}.JPG": shot(f"2026:01:0{i + 1} 08:00:00") for i in range(4)}
+    root = make(tmp_path / "site", {"MAS_CAM07": every, "MAS_CAM07_filtered": dict(list(every.items())[:2])})
+    p = plan(c, root)
+    assert len(reads) == 6 and row(p, "MAS_CAM07")["warnings"]
+
+
+def test_untouched_photos_are_not_read_again_after_a_restart_and_need_no_progress(c, tmp_path, reads):
+    root = make(tmp_path / "site", {"MAS_CAM01": {f"IMG_{i}.JPG": shot(f"2026:0{i + 1}:10 08:00:00") for i in range(5)}})
+    first = c.get("/api/site", params={"path": str(root)}).json()
+    assert first["status"] == "reading" and first["total"] == 5  # the first time: the page shows how far
+    before = plan(c, root)
+    assert len(reads) == 5
+
+    restart()
+    again = c.get("/api/site", params={"path": str(root)}).json()
+    assert again["status"] == "ready" and again["rows"] == before["rows"]  # at once: no reading state at all
+    assert len(reads) == 5
+
+    store.clear_measurements(everything=True)  # forgetting measurements is not forgetting file facts
+    restart()
+    assert c.get("/api/site", params={"path": str(root)}).json()["status"] == "ready" and len(reads) == 5
+
+
+def test_a_changed_photo_is_read_again(c, tmp_path, reads):
+    root = make(tmp_path / "site", {"MAS_CAM01": {"IMG_1.JPG": shot("2026:01:10 08:00:00"), "IMG_2.JPG": shot("2026:02:10 08:00:00")}})
+    plan(c, root)
+    changed = root / "MAS_CAM01" / "IMG_2.JPG"
+    changed.write_bytes(shot("2026:04:05 08:00:00"))
+    st = changed.stat()
+    os.utime(changed, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))  # a clock too coarse to see the write
+    restart()
+    reads.clear()
+    p = plan(c, root)
+    assert reads == ["MAS_CAM01/IMG_2.JPG"]
+    assert [(f["image_name"], f["photos"]) for f in p["rows"][0]["flags"]] == [("IMG_0004.JPG", 1), ("IMG_2868.JPG", 1)]
+
+
+def test_each_photo_is_opened_once_for_its_date(c, tmp_path, monkeypatch):
+    root = make(tmp_path / "site", {"MAS_CAM01": {f"IMG_{i}.JPG": shot(f"2026:01:1{i} 08:00:00") for i in range(8)},
+                                     "MAS_CAM02": {"IMG_1.JPG": shot()}})
+    opened = Counter()
+    real = Image.open
+
+    def spy(fp, *a, **kw):
+        opened[Path(fp).name if isinstance(fp, (str, Path)) else "?"] += 1
+        return real(fp, *a, **kw)
+
+    monkeypatch.setattr(Image, "open", spy)
+    got = batch.read(root)
+    samples = {p.name for p in got["folders"][0]["samples"]}
+    assert len(samples) == batch.STAMP_SAMPLES
+    # MAS_CAM01: once each for the date, a sample once more for its stamp; MAS_CAM02 needs no date, so only its stamp
+    assert opened == Counter({f"IMG_{i}.JPG": 1 + (f"IMG_{i}.JPG" in samples) for i in range(8)}) + Counter({"IMG_1.JPG": 1})
+    assert all(p["ok"] and p["captured_at"] for p in got["folders"][0]["photos"])
+
+
+def test_a_single_camera_folder_reads_no_dates(c, tmp_path, monkeypatch):
+    d = make(tmp_path / "MAS_CAM01", {".": {f"IMG_{i}.JPG": shot() for i in range(3)}})
+    monkeypatch.setattr(calibration, "read_exif", lambda *a, **kw: pytest.fail("read a date of a single folder"))
+    assert batch.read(d) == {"status": "single"}
+    assert plan(c, d) == {"status": "single"}
+
+
+def test_reading_progress_is_told_now_and_then_and_at_the_end(c, tmp_path, monkeypatch):
+    root = make(tmp_path / "site", {"MAS_CAM01": {f"IMG_{i}.JPG": shot() for i in range(7)}})
+    told = []
+    monkeypatch.setattr(batch, "PROGRESS_S", 3600)
+    batch.read(root, lambda done, total: told.append((done, total)))
+    assert told == [(1, 7), (7, 7)]  # the first straight away, then not before PROGRESS_S, and the last
+    restart()
+    told.clear()
+    batch.read(root, lambda done, total: told.append((done, total)))
+    assert told == []  # read before: nothing to tell
 
 
 # --- the queue ----------------------------------------------------------------------------------------------
