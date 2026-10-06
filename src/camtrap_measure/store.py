@@ -29,6 +29,8 @@ create table if not exists detections (
     x1 real, y1 real, x2 real, y2 real, species text, confidence real,
     distance_m real, q05_m real, q95_m real, match_score integer,
     primary key (path, idx, method));
+create table if not exists photo_dates (
+    path text primary key, size integer not null, mtime_ns integer not null, captured_at text, ok integer not null);
 """
 
 
@@ -172,6 +174,34 @@ def meta(key: str) -> str | None:
 def save_meta(key: str, value: str) -> None:
     with closing(_db()) as con, con:
         con.execute("insert or replace into meta values (?, ?)", (key, value))
+
+
+# --- photo dates: a cache of file facts ---------------------------------------
+# What the site-folder scan read from a photo (its capture date, whether it opens), keyed by path and only
+# trusted while the file's size and modification time still match, so a changed file is read again. It is not
+# a measurement: clear_measurements leaves it alone.
+
+def photo_dates(files: list[tuple[str, int, int]]) -> dict[str, tuple[str | None, bool]]:
+    """{path: (captured_at, ok)} for each (path, size, mtime_ns) cached with that same size and mtime."""
+    out = {}
+    with closing(_db()) as con:
+        for i in range(0, len(files), 500):
+            chunk = files[i:i + 500]
+            want = {p: (size, mtime) for p, size, mtime in chunk}
+            marks = ",".join("?" * len(chunk))
+            for r in con.execute(f"select * from photo_dates where path in ({marks})", [p for p, _, _ in chunk]):
+                if want[r["path"]] == (r["size"], r["mtime_ns"]):
+                    out[r["path"]] = (r["captured_at"], bool(r["ok"]))
+    return out
+
+
+def save_photo_dates(rows: list[tuple[str, int, int, str | None, bool]]) -> None:
+    """Remember (path, size, mtime_ns, captured_at, ok) rows, in one transaction."""
+    if not rows:
+        return
+    with closing(_db()) as con, con:
+        con.executemany("insert or replace into photo_dates values (?, ?, ?, ?, ?)",
+                        [(p, size, mtime, t, int(ok)) for p, size, mtime, t, ok in rows])
 
 
 def summary() -> dict:

@@ -18,19 +18,25 @@ from .calib.model_b import MIN_DISTINCT_DISTS, MIN_GROUND_OBS, ModelB
 _DATE_TIME_ORIGINAL, _EXIF_IFD, _MAKE, _MODEL = 0x9003, 0x8769, 0x010F, 0x0110
 
 
-def read_exif(src) -> dict:
+def read_exif(src, readable: bool = False) -> dict:
     """{captured_at, make, model} from a path or file object; every field None if unreadable.
     captured_at is DateTimeOriginal as naive local ISO ('2026-03-13T12:37:33') — naive on purpose:
-    trail cameras have no zone, and flag photos and local photos are matched on the same field."""
+    trail cameras have no zone, and flag photos and local photos are matched on the same field.
+    readable=True adds "readable": whether Pillow could open the file at all, from the same single open
+    (the site-folder scan asks both of every photo)."""
     out = {"captured_at": None, "make": None, "model": None}
+    opened = False
     try:
         with Image.open(src) as im:
+            opened = True
             exif = im.getexif()
             out["make"], out["model"] = exif.get(_MAKE), exif.get(_MODEL)
             raw = exif.get_ifd(_EXIF_IFD).get(_DATE_TIME_ORIGINAL)
         out["captured_at"] = datetime.strptime(raw, "%Y:%m:%d %H:%M:%S").isoformat()
     except Exception:  # truncated file, corrupt EXIF (Pillow raises SyntaxError/struct.error), missing/odd date
         pass
+    if readable:
+        out["readable"] = opened
     return out
 
 
