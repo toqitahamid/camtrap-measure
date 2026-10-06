@@ -58,10 +58,8 @@ export default function Batch(props: Props) {
         <div className="card" style={{ flex: 1 }}>
           <div className="empty">
             <span className="spin" style={{ color: 'var(--amber)' }}><Icon name="spinner" size={26} width={1.8} /></span>
-            <b className="grot">Reading the photos</b>
-            <span className="small dim">
-              {site.total ? `${thousands(site.done)} of ${thousands(site.total)} photos` : 'Looking for camera folders…'}
-            </span>
+            <b className="grot">Reading photo dates: {thousands(site.done)} of {thousands(site.total)}</b>
+            <span className="small dim">Only the first time you open this folder.</span>
           </div>
         </div>
       </div>
