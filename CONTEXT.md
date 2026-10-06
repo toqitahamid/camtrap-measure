@@ -1673,3 +1673,46 @@ duplicate MAS_CAM07 pair, "card 3", unlabelled SRF_CAM16, an empty "notes") show
 real models: MAS_CAM04 118 to 184 points, MAS_CAM14 4,781 to 5,037 (a night photo). The run, Stop and the summary
 were taken in test mode (made-up numbers): 4 cameras, 59 photos, stopped at camera 3. Headless Edge screenshots
 in the session scratchpad (`batch-*.png`).
+
+## A site folder reads only the photo dates it needs, once per file (2026-10-05, after ticket 27)
+
+The researcher: opening `D:\research\photo` as a site folder sat on "Reading 1 / N" for a long time. Every photo
+of every camera folder had its capture date read, each file was opened twice (Pillow to see it opens, then
+`calibration.read_exif`), and what was read lived only for the engine's life, so every start read it all again.
+This replaces ticket 27's "what was read is kept for the engine's life".
+
+- **Only the dates that decide something.** Dates choose a photo's flag photo and find two folders of one camera
+  with the same photos. So a folder's dates are read only when its camera has two or more usable flag photos with
+  a date (`assign` chooses among dated ones only, so a second, undated one changes nothing), or another folder is
+  the same camera (`batch._needed`). A folder with no camera, an ambiguous name, no flag photo, or one flag photo
+  reads none; its row says "<date> setup visit, all N photos" as before. The five stamp samples per folder are
+  still read. Dates skipped first are read when they come to matter: a row moved to a camera with two flag photos
+  (`_build`), TABLE's listing of new photos, the Compare photo.
+- **One open per photo.** `calibration.read_exif(p, readable=True)` also says whether Pillow could open the file,
+  from the same open. Its other callers get the same dict as before.
+- **Kept across restarts.** A `photo_dates(path, size, mtime_ns, captured_at, ok)` table in the store, created
+  like the other tables. A cached row counts only while size and mtime_ns match, so a changed file is read again.
+  Written every 200 photos and at the end, also when a read stops part way. `clear_measurements` leaves it alone:
+  it holds facts about files, not answers.
+- **The page.** When dates must be read, "Reading photo dates: 1,200 of 8,930" and "Only the first time you open
+  this folder."; progress is updated at most every 0.25 s (the page polls every 0.7 s). With nothing to read the
+  table comes at once, with no reading state. A single camera folder reads no dates at all, as before (`walk`
+  returns None, tested).
+
+Measured on `D:\research\photo` (MAS_CAM01 11 photos, MAS_CAM07_filtered 2,835, MAS_CAM14 27; 2,873 in all), on a
+copy of the dev store in the scratchpad, `batch.read` in a new process each time. All three cameras have two dated
+flag photos in the dev store (MAS_CAM01 IMG_0004 / IMG_2868, MAS_CAM07 IMG_0001 / IMG_4161, MAS_CAM14 IMG_0001 /
+IMG_2118), so here every date is still needed and the gain is the open count and the cache:
+
+| | first scan | second scan, new process | Pillow opens |
+|---|---|---|---|
+| before | 94.3 s (cold disk) | 19.8 s | 5,761 each time |
+| after | 2.2 s (disk warm by then) | 0.17 s | 2,888, then 15 (the stamps) |
+
+The before and after first scans are not on the same disk state; on a warm disk the old two opens took 2.7 s for
+the 2,873 photos and the new one open 1.9 s. On a cold disk the first open of each file is most of the time, so
+the first scan of a new folder stays about as slow as the disk; every later start costs a fraction of a second.
+
+Evidence: 382 passed, 1 skipped (29 in tests/test_batch.py: the skip rule, a moved row read then, duplicates
+still dated, the cache across a restart and `clear_measurements`, a changed file read again, one open per photo,
+no dates for a single folder, throttled progress). `npm run build` and oxlint clean.
