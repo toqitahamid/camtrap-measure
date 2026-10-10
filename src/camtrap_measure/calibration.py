@@ -15,6 +15,12 @@ from PIL import Image
 
 from .calib.data import from_annotation
 from .calib.model_b import MIN_DISTINCT_DISTS, MIN_GROUND_OBS, ModelB
+
+# How a flag photo is fitted. A calibration fitted under another version is fitted again at the next sync, and an
+# answer measured under one is measured again once (measure.current_answer). Before 1 (stored as None): roll fitted
+# only when direct ground marks cover two transects. 1: also when vertical-span ground points do (research folder 47).
+VERSION = 1
+
 _DATE_TIME_ORIGINAL, _EXIF_IFD, _MAKE, _MODEL = 0x9003, 0x8769, 0x010F, 0x0110
 
 
@@ -44,11 +50,11 @@ LABEL_KEYS = ("wire_ground_points", "flag_to_ground_spans", "flag_vertical_spans
 
 
 def fit(annotation: dict, jpeg: bytes | None) -> dict:
-    """→ {site, image_name, updated_at, captured_at, ok, reason, model}. jpeg=None: not in storage.
+    """→ {site, image_name, updated_at, captured_at, ok, reason, model, fit_version}. jpeg=None: not in storage.
     Never raises: a broken row becomes a red reason, not a failed sync."""
     image = annotation["image_name"]
     row = {"site": annotation["site"], "image_name": image, "updated_at": annotation.get("updated_at"),
-           "captured_at": None, "ok": False, "reason": None, "model": None}
+           "captured_at": None, "ok": False, "reason": None, "model": None, "fit_version": VERSION}
     if jpeg is None:
         row["reason"] = f"{image} is missing from FlagLabel's storage. Upload it again in FlagLabel."
         return row

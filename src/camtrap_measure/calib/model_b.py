@@ -75,10 +75,32 @@ MIN_DISTINCT_DISTS = 3
 SIZE_LAMBDA = 1.0  # relative weight of size residual block vs ground block
 
 # Ground-obs sources that directly annotate a ground marker (vs. vspan_proj,
-# which is a downward extrapolation of a vertical span). Only direct markers
-# pin camera roll: a single direct transect gives one azimuth of markers, which
-# cannot break the roll rotation ambiguity. See experiments/refnet/30_*.
+# which is a downward extrapolation of a vertical span). A single transect gives
+# one azimuth of markers, which cannot break the roll rotation ambiguity
+# (experiments/refnet/30_*), so roll needs ground points on two transects.
 DIRECT_GROUND_SOURCES = ("wire_point", "f2g_end")
+# Roll rule (experiments/refnet/47_app_roll_rule): roll is also fitted when two
+# transects each carry ground points of any source at two or more distances,
+# because vertical-span projections pin the second azimuth too. On held-out
+# flag markers this lowered q50 MAE from 1.386 to 0.811 m on the 10 flag photos
+# it changes, and made no camera worse. The paper (rollfix) keeps direct only.
+ANY_GROUND_SOURCES = ("wire_point", "f2g_end", "vspan_proj")
+MIN_ROLL_TRANSECTS = 2
+MIN_TRANSECT_OBS = 2    # ground obs of any source on one transect ...
+MIN_TRANSECT_DISTS = 2  # ... at this many distinct distances
+
+
+def roll_identifiable(ground):
+    """Fit roll iff >= 2 transects carry a direct ground obs, or >= 2 transects
+    each carry >= 2 ground obs of any source at >= 2 distinct distances."""
+    if len({o.transect for o in ground if o.source in DIRECT_GROUND_SOURCES}) >= MIN_ROLL_TRANSECTS:
+        return True
+    dists = {}
+    for o in ground:
+        if o.source in ANY_GROUND_SOURCES:
+            dists.setdefault(o.transect, []).append(o.dist)
+    spread = [t for t, ds in dists.items() if len(ds) >= MIN_TRANSECT_OBS and len(set(ds)) >= MIN_TRANSECT_DISTS]
+    return len(spread) >= MIN_ROLL_TRANSECTS
 
 
 class ModelB:
@@ -100,11 +122,11 @@ class ModelB:
         scm = np.array([o.cm_len for o in s]); sw = np.array([o.weight for o in s])
         svert = np.array([o.vertical for o in s])
 
-        # Roll-identifiability prior: with ≤1 distinct direct-marker transect,
-        # camera roll is not identifiable, so hold it at 0 and fit the other 3
-        # params instead of letting it wander to a wild/clamped value.
-        n_direct = len({o.transect for o in g if o.source in DIRECT_GROUND_SOURCES})
-        fix_roll = n_direct <= 1
+        # Roll-identifiability prior: when the ground points do not cover two
+        # transects (roll_identifiable), camera roll is not identifiable, so hold
+        # it at 0 and fit the other 3 params instead of letting it wander to a
+        # wild/clamped value.
+        fix_roll = not roll_identifiable(g)
 
         def residuals(q):
             p = PlaneParams(q[0], q[1], q[2], 0.0 if fix_roll else q[3])

@@ -18,12 +18,12 @@ create table if not exists annotations (
 create table if not exists meta (key text primary key, value text);
 create table if not exists calibrations (
     site text not null, image_name text not null, updated_at text,
-    captured_at text, ok integer not null, reason text, model text,
+    captured_at text, ok integer not null, reason text, model text, fit_version integer,
     primary key (site, image_name));
 create table if not exists photos (
     path text primary key, site text not null, captured_at text, make text, model text,
     calibration_image text, held_reason text, measured_at text not null, match_score integer, method text,
-    calibration_version text, fidelity text);
+    calibration_version text, fidelity text, fit_version integer);
 create table if not exists detections (
     path text not null, idx integer not null, method text not null,
     x1 real, y1 real, x2 real, y2 real, species text, confidence real,
@@ -41,7 +41,8 @@ def _db() -> sqlite3.Connection:
     con.executescript(_SCHEMA)
     for table, col, typ in (("photos", "match_score", "integer"), ("detections", "match_score", "integer"),
                             ("photos", "method", "text"), ("photos", "calibration_version", "text"),
-                            ("photos", "fidelity", "text")):  # pre-07/08/10/19 databases
+                            ("photos", "fidelity", "text"),  # pre-07/08/10/19 databases
+                            ("calibrations", "fit_version", "integer"), ("photos", "fit_version", "integer")):  # pre roll rule
         if col not in {r["name"] for r in con.execute(f"pragma table_info({table})")}:
             try:
                 con.execute(f"alter table {table} add column {col} {typ}")
@@ -116,8 +117,8 @@ def replace_mirror(annotations: list[dict], sites: list[dict], fits: list[dict] 
         )
         con.executemany("insert into sites values (?)", [(s["name"],) for s in sites])
         con.executemany(
-            "insert or replace into calibrations values "
-            "(:site, :image_name, :updated_at, :captured_at, :ok, :reason, :model)",
+            "insert or replace into calibrations (site, image_name, updated_at, captured_at, ok, reason, model, "
+            "fit_version) values (:site, :image_name, :updated_at, :captured_at, :ok, :reason, :model, :fit_version)",
             fits,
         )
         con.execute(
@@ -138,12 +139,14 @@ def sites() -> list[str]:
         return [r["name"] for r in con.execute("select name from sites order by name")]
 
 
-def calibration_versions() -> dict[tuple[str, str], str | None]:
-    """{(site, image_name): annotation updated_at} of every green calibration whose flag photo is on
-    disk — skip their refits. A missing flag photo (pre-07 sync, deleted cache) refetches."""
+def calibration_versions(fit_version: int) -> dict[tuple[str, str], str | None]:
+    """{(site, image_name): annotation updated_at} of every green calibration fitted under `fit_version` whose
+    flag photo is on disk — skip their refits. A missing flag photo (pre-07 sync, deleted cache) refetches, and a
+    fit under other rules (calibration.VERSION) is fitted again."""
     with closing(_db()) as con:
         return {(r["site"], r["image_name"]): r["updated_at"]
-                for r in con.execute("select site, image_name, updated_at from calibrations where ok")
+                for r in con.execute("select site, image_name, updated_at from calibrations where ok and fit_version=?",
+                                     (fit_version,))
                 if ref_path(r["site"], r["image_name"]).exists()}
 
 
@@ -225,10 +228,11 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
     photo = {**photo, "measured_at": datetime.now().astimezone().isoformat(timespec="seconds")}
     with closing(_db()) as con, con:
         con.execute("insert or replace into photos (path, site, captured_at, make, model, calibration_image, held_reason, "
-                    "measured_at, match_score, method, calibration_version, fidelity) values (:path, :site, :captured_at, "
-                    ":make, :model, :calibration_image, :held_reason, :measured_at, :match_score, :method, "
-                    ":calibration_version, :fidelity)",
-                    {"match_score": None, "calibration_version": None, "fidelity": None, **photo, "method": method})
+                    "measured_at, match_score, method, calibration_version, fidelity, fit_version) values (:path, :site, "
+                    ":captured_at, :make, :model, :calibration_image, :held_reason, :measured_at, :match_score, :method, "
+                    ":calibration_version, :fidelity, :fit_version)",
+                    {"match_score": None, "calibration_version": None, "fidelity": None, "fit_version": None, **photo,
+                     "method": method})
         if photo["held_reason"]:
             con.execute("delete from detections where path=?", (photo["path"],))
         else:

@@ -167,9 +167,13 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str) ->
 
     Fidelity counts for the same reason a relabel does: it is a different set of settings and so a
     different number. Switching it re-measures the folder rather than leaving two kinds of metres side by
-    side with nothing on screen to tell them apart."""
+    side with nothing on screen to tell them apart.
+
+    So do the fit rules: a calibration fitted again under a new `calibration.VERSION` (the roll rule, research
+    folder 47) keeps its annotation `updated_at`, so the answer also records the calibration's `fit_version`."""
     return bool(known and known["method"] == method and known.get("fidelity") == fidelity
-                and known["site"] == cal["site"] and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at"))
+                and known["site"] == cal["site"] and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at")
+                and known.get("fit_version") == cal.get("fit_version"))
 
 
 def readable(p: Path) -> bool:
@@ -247,7 +251,7 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
             continue
         batch.append((p, {"path": str(p), "site": cal["site"], **calibration.read_exif(p), "held_reason": None,
                           "calibration_image": cal["image_name"], "calibration_version": cal.get("updated_at"),
-                          "fidelity": fidelity}))
+                          "fidelity": fidelity, "fit_version": cal.get("fit_version")}))
     if not batch or run["cancel"]:
         return 0
     ref = {**cal, "ref_path": str(store.ref_path(cal["site"], cal["image_name"]))}

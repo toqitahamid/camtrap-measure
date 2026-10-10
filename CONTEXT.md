@@ -1753,3 +1753,45 @@ Evidence: 376 passed, 11 skipped (no torch or OpenCV in the dev .venv). tests/te
 `seed()` seeds torch only; `align` forks, seeds, matches, samples, restores, then fits the homography, in that
 order; a second thread's `align` waits for the first; and, with real torch only (skipped here), a fake RoMa
 drawing with `torch.multinomial` returns the same keypoints twice and leaves torch's global state unchanged.
+
+## Camera roll fitted from vertical spans on two transects (2026-10-10, ticket 29)
+
+**Rule.** The flag-photo fit (`calib/model_b.py`, `ModelB.fit`) fits camera roll when ground points cover two
+transects (`roll_identifiable`). Before: only direct ground marks (`wire_point`, `f2g_end`) counted, and with
+direct marks on at most one transect roll was held at 0 (the rollfix rule, research folder 30). Now roll is also
+fitted when at least 2 transects each carry at least 2 ground marks of any source (`wire_point`, `f2g_end`,
+`vspan_proj`) at at least 2 distinct distances. Otherwise roll stays 0. The bounds are unchanged. The rule only
+relaxes the old one: a photo whose roll the old rule fitted gets the identical fit.
+
+**Evidence.** Research folder 47 (`../distance_estimation/experiments/refnet/47_app_roll_rule/results.md`),
+pre-registered. The rule changes exactly 10 of the 122 flag photos, one per camera (MAS_CAM07, 08, 10, 17;
+TON_CAM12, 18, 19, 23, 25, 29). On held-out markers (each camera's other flag photo, measured through the app
+path against the changed photo), pooled q50 MAE fell from 1.386 to 0.811 m, paired camera-bootstrap 95% CI of the
+difference [-0.950, -0.252]. No camera got worse. The fitted rolls span -10.95 to +15.26 deg (MAS_CAM07 IMG_4161).
+
+**The paper keeps the old rule.** The CV4E paper is published and frozen; its numbers use the rollfix rule. The app
+therefore no longer reproduces the paper's numbers for these 10 cameras. Two of them are paper test cameras:
+MAS_CAM17 (flag photo IMG_2712) and TON_CAM19 (IMG_6156). Folder 45's paper cross-check (0.8444 vs 0.8408 m) holds
+only for the old rule.
+
+**Versions.** The fit rules have a version, `calibration.VERSION` = 1 (rows from before have none). It is stored in
+`calibrations.fit_version` and on each answer in `photos.fit_version`. The annotation's `updated_at` does not change
+when only the fit rules change, so:
+- `store.calibration_versions(fit_version)` returns only fits under today's version; every older fit is fitted again
+  at the next sync (its flag photo is downloaded again with it, as for a relabel).
+- `measure.current_answer` also requires the answer's `fit_version` to equal its calibration's. So after the first
+  sync every stored answer is measured once more, not only those of the 10 changed cameras: one full run, at about
+  1.9 s per photo on the dept card (ticket 27, "Time estimate"). The other 112 flag photos fit to the identical
+  model, so their answers come back the same, up to the line-up's draw on answers measured before ticket 30's seed.
+- `distance.Distance.reference` (the per-engine reference cache) keys on the fit version too, so a refit is never
+  served stale.
+
+This is step 2 of the one-fix-at-a-time plan, ported from the `feat/night-chain` working tree to branch
+`fix/roll-rule` (from `main` at 87b49a8) without the night chain: there `lineup.request` also keys on the fit
+version, and ticket 28's `lineup.VERSION` 2 re-measures every answer in the same release; neither exists here.
+At this step `calib/model_b.py` and `calib/data.py` are byte for byte those of `feat/night-chain`, where the app's `ModelB.fit`
+equals folder 47's `roll_rule.fit(photo, "new")` model dict exactly on all 122 flag photos of
+`../distance_estimation/flaglabel-dataset/`, with the same roll decision on all 122; against folder 47's
+`control.csv` (rounded) the largest differences are f 0.005 px, h 5.0e-5 m, pitch 0.0005 deg, roll 0.0005 deg, all
+within its rounding. Tests on `feat/night-chain`: 406 passed, 10 skipped (5 new: 4 in
+tests/calib/test_roll_identifiability.py, 1 in tests/test_measure.py). On `fix/roll-rule`: not yet run.

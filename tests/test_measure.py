@@ -3,12 +3,13 @@ inference faked at its boundary and Supabase faked at its seam."""
 
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from camtrap_measure import api, inference
+from camtrap_measure import api, calibration, inference, store
 
 from tests.conftest import ANN, flag_photo_data, jpeg
 
@@ -347,6 +348,27 @@ def test_relabeled_flag_photo_remeasures_its_photos_on_the_next_run(cloud, synce
     seen.clear()
     st = run(synced, d)
     assert st["skipped"] == 0 and [p.name for p in seen] == ["IMG_0005.JPG"]
+
+
+def test_a_fit_under_older_rules_is_fitted_again_and_its_photos_remeasured_once(cloud, synced, tmp_path, monkeypatch):
+    """The roll rule (research folder 47) changed how a flag photo is fitted, not its labels: `updated_at` stays,
+    so `calibration.VERSION` is what makes the next sync fit it again and the next run measure its photos again."""
+    spy, seen = spying()
+    monkeypatch.setattr(api.inference, "backend", spy)
+    d = folder(tmp_path)
+    run(synced, d)
+    assert [c["fit_version"] for c in store.calibrations()] == [calibration.VERSION]
+    with closing(store._db()) as con, con:  # a store written before the rule: no fit version anywhere
+        con.execute("update calibrations set fit_version=null")
+        con.execute("update photos set fit_version=null")
+    synced.post("/api/sync")
+    assert cloud["downloads"].count(ANN["storage_path"]) == 2  # fitted again (the flag photo comes with it)
+    assert [c["fit_version"] for c in store.calibrations()] == [calibration.VERSION]
+    seen.clear()
+    assert run(synced, d)["skipped"] == 0 and [p.name for p in seen] == ["IMG_0005.JPG"]
+    synced.post("/api/sync")
+    assert cloud["downloads"].count(ANN["storage_path"]) == 2  # once only
+    assert run(synced, d)["skipped"] == 1
 
 
 # --- measuring only the photos you picked (ticket 17) ----------------------------------

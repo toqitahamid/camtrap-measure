@@ -103,8 +103,10 @@ def logout():
 
 
 def _fit_changed(annotations: list[dict], token: str) -> list[dict]:
-    """Fit every annotation that is new, relabeled, or still unusable since the last sync (EXIF read from storage)."""
-    known = store.calibration_versions()  # usable rows only: the others are re-checked every sync (re-uploads, labels)
+    """Fit every annotation that is new, relabeled, still unusable since the last sync, or fitted under other fit
+    rules (`calibration.VERSION`) (EXIF read from storage)."""
+    known = store.calibration_versions(calibration.VERSION)  # usable rows under today's fit rules only: the others
+    # are re-checked every sync (re-uploads, labels), and a fit under older rules is fitted again once
     fits = []
     for a in annotations:
         if known.get((a["site"], a["image_name"]), "") == a.get("updated_at"):

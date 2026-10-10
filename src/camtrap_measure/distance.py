@@ -253,8 +253,9 @@ class Distance:
 
     def reference(self, calibration: dict) -> tuple:
         """Reference features for one calibration window, computed once and kept. Keyed on the annotation
-        version and the flag photo's mtime, so a relabel or re-upload after a sync is never served stale."""
-        key = (calibration["site"], calibration["image_name"], calibration.get("updated_at"),
+        version, the fit rules and the flag photo's mtime, so a relabel, a refit or a re-upload after a sync is never
+        served stale."""
+        key = (calibration["site"], calibration["image_name"], calibration.get("updated_at"), calibration.get("fit_version"),
                Path(calibration["ref_path"]).stat().st_mtime_ns)
         if key not in self.refs:
             with Image.open(calibration["ref_path"]) as im:
