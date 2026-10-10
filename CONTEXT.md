@@ -1716,3 +1716,40 @@ the first scan of a new folder stays about as slow as the disk; every later star
 Evidence: 382 passed, 1 skipped (29 in tests/test_batch.py: the skip rule, a moved row read then, duplicates
 still dated, the cache across a restart and `clear_measurements`, a changed file read again, one open per photo,
 no dates for a single folder, throttled progress). `npm run build` and oxlint clean.
+
+## A fixed seed for every line-up (2026-10-10, ticket 30)
+
+Every line-up is now seeded: on the same computer, with the same software, device and fidelity, the same photo
+against the same flag photo always gives the same homography, inlier count and distance. The spread came from
+one place: RoMa samples its matches with `torch.multinomial` (romatch/models/matcher.py, `sample`). MAGSAC is
+already deterministic on the same matches and needs no seed. `Distance.align` therefore seeds torch alone
+(`distance.seed()`, `distance.SEED` = 0, every device) inside `torch.random.fork_rng`, so the process's global
+random state is the same after a line-up as before it. A measurement (`Distance.read`) and Compare
+(`inference.Real.align_score`) both line up only through `align`. This settles ticket 08's open choice ("fixed
+seed, or matches averaged over draws") for repeatability; averaging over draws would also shrink the draw's
+error, which a seed does not.
+
+- **One line-up at a time.** torch's generators are process-wide, and Compare and a measurement can align in two
+  threads. A module lock in `distance.py` is held from the seed through the homography, so two line-ups never
+  interleave their draws.
+- **Measured** (research folder 53, job 3352633, GH200, MAS_CAM07 against IMG_0001, each photo twice in one
+  process). Unseeded: night burst IMG_0215 51 / 55 inliers and q50 up to 4.81 m apart, IMG_0216 53 / 137 and
+  4.43 m; day IMG_0235 9,458 / 9,446 and 6.2 cm. Seeded: all three identical (32, 58, 9,456 inliers; q50 equal
+  to the last digit), and Compare's count equals the measurement's. That run predates the fork and the lock;
+  both leave the seed and the draws after it unchanged.
+- **Where repeatability is proven.** Only on one GH200, within one process. Another GPU (the dept's RTX 2060
+  SUPER), the CPU fallback or another torch version may draw different matches from the same seed: each is
+  repeatable with itself, not necessarily with the others.
+- **What it does not fix.** Seeding makes a re-run of the same photo repeatable. It does not make two photos of a
+  still deer agree when their line-up is weak: seeded, burst frames IMG_0215 and IMG_0216 read 9.875 m and
+  7.000 m at the same ground pixel. That needs the night chain (ticket 28).
+- **Stored answers stay.** No version bump: answers measured before this were unseeded and are kept; new ones
+  are seeded. An old answer is one draw of the same random line-up, not a wrong one. Re-measuring them all would
+  need an alignment version in `photos` compared by `current_answer` (as ticket 28 does) and costs a full run,
+  about 1.9 s per photo on the dept card.
+- **Found alongside, not fixed here.** Compare's `release()` can drop the models while a run uses them (ticket 31).
+
+Evidence: 376 passed, 11 skipped (no torch or OpenCV in the dev .venv). tests/test_distance.py has 4 new tests:
+`seed()` seeds torch only; `align` forks, seeds, matches, samples, restores, then fits the homography, in that
+order; a second thread's `align` waits for the first; and, with real torch only (skipped here), a fake RoMa
+drawing with `torch.multinomial` returns the same keypoints twice and leaves torch's global state unchanged.

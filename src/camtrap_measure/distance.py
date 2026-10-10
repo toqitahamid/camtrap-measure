@@ -16,6 +16,7 @@ The numpy half (distance_map, read_at, crop_banner) has no torch dependency and 
 """
 
 import json
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -46,6 +47,9 @@ FIDELITIES = (RESEARCH, FAST)
 # which of the app's steps is running, and the architecture it was fine-tuned from tells them nothing.
 MODELS = ["RoMa", "distance model"]
 MIN_INLIERS = 15  # published gate (reports/gate_57cam.md): fewer homography inliers = misfiled or moved camera
+SEED = 0  # RoMa samples its matches with torch.multinomial; every line-up seeds torch with this first, so the same two
+          # photos line up the same way on the same computer, software, device and fidelity (ticket 30).
+          # MAGSAC needs no seed: it is already deterministic on the same matches.
 HALF = 2  # 5×5 readout window
 
 
@@ -114,6 +118,17 @@ def homography(src: np.ndarray, dst: np.ndarray):
         return None, 0
     Hm, inl = cv2.findHomography(src, dst, cv2.USAC_MAGSAC, 3.0)
     return Hm, int(inl.sum()) if inl is not None else 0
+
+
+def seed() -> None:
+    """Seed torch (every device) before RoMa samples its matches, so a re-run of the same photo lines up the same way."""
+    import torch
+
+    torch.manual_seed(SEED)
+
+
+# torch's generators are process-wide: Compare and a measurement aligning in two threads would interleave their draws.
+_aligning = threading.Lock()
 
 
 def normalize(im: Image.Image) -> np.ndarray:
@@ -228,8 +243,8 @@ class Distance:
         needs 6.3 GB, more than Windows leaves free with a browser open, so the driver quietly serves the
         overflow from system memory over PCIe and a photo takes 3.6 to 26 seconds - the same run, the same
         settings, a lottery. At 672 it needs 4.4 GB, fits, and takes about 2. The metres move by ~8 cm,
-        which is inside the 3-17 cm the method already moves between repeat runs of identical settings
-        (RoMa samples its matches at random). A card big enough for 864 keeps the research default.
+        which is inside the 3-17 cm that repeat runs of identical settings moved before ticket 30 seeded
+        RoMa's match sampling (the draw-to-draw spread). A card big enough for 864 keeps the research default.
         """
         if self.device != "cuda" or self.fidelity == RESEARCH:
             return UPSAMPLE_RES
@@ -248,11 +263,16 @@ class Distance:
         return self.refs[key]
 
     def align(self, ref_crop: Image.Image, tgt_crop: Image.Image):
-        """Homography target → reference pixels from RoMa's dense warp. → (H | None, inliers)."""
-        warp, cert = self.roma.match(ref_crop, tgt_crop, device=self.device)
-        matches, cert = self.roma.sample(warp, cert)
-        k_ref, k_tgt = self.roma.to_pixel_coordinates(matches, ref_crop.height, ref_crop.width, tgt_crop.height, tgt_crop.width)
-        return homography(k_tgt.cpu().numpy(), k_ref.cpu().numpy())
+        """Homography target → reference pixels from RoMa's dense warp, seeded. → (H | None, inliers).
+        The seed is forked: torch's global random state is the same after a line-up as before it."""
+        torch = self.torch
+        with _aligning:
+            with torch.random.fork_rng(devices=[torch.cuda.current_device()] if self.device == "cuda" else []):
+                seed()
+                warp, cert = self.roma.match(ref_crop, tgt_crop, device=self.device)
+                matches, cert = self.roma.sample(warp, cert)
+            k_ref, k_tgt = self.roma.to_pixel_coordinates(matches, ref_crop.height, ref_crop.width, tgt_crop.height, tgt_crop.width)
+            return homography(k_tgt.cpu().numpy(), k_ref.cpu().numpy())
 
     def read(self, im: Image.Image, calibration: dict, contacts: list[tuple[float, float]]) -> tuple[list[tuple | None], int]:
         """contacts = (x, y) fractions of the image. → ([(q05, q50, q95) | None per contact], inliers).
