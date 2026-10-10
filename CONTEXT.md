@@ -1795,3 +1795,37 @@ equals folder 47's `roll_rule.fit(photo, "new")` model dict exactly on all 122 f
 `control.csv` (rounded) the largest differences are f 0.005 px, h 5.0e-5 m, pitch 0.0005 deg, roll 0.0005 deg, all
 within its rounding. Tests on `feat/night-chain`: 406 passed, 10 skipped (5 new: 4 in
 tests/calib/test_roll_identifiability.py, 1 in tests/test_measure.py). On `fix/roll-rule`: not yet run.
+
+## Vertical spans projected 4.8 span lengths down (2026-10-10, ticket 32)
+
+A vertical span's ground point (`vspan_proj`) now lies 4.8 span lengths below the span's bottom end, not 6.8
+(`calib.data.VSPAN_PROJ_RATIO`). The 6.8 came from the flag's nominal size, (49.53 - 6.35) / 6.35. The labels say
+otherwise: research folder 49 (`../distance_estimation/experiments/refnet/49_projected_ground_check/results.md`)
+measured 4.59 (10 flags with both a span and a direct contact), 4.50 (66 flag-to-ground spans) and 4.81 (2,226 spans
+read through a calibration fitted without projected points). The flag top stands about 36 cm above the labelled
+ground, not 49.53 cm; the labels cannot say whether the wires went deeper or the contact was marked above the soil.
+
+- **Measured** (research folder 52, `52_app_ratio_4p8/results.md`, pre-registered, job 3352606). The app's full
+  path, seeded line-up plus net, on 120 cross pairs (one flag photo measured against its camera's other one), 905
+  held-out direct ground contacts on 60 cameras, whose pixels do not depend on the ratio. Pooled q50 MAE 0.549 ->
+  0.426 m (paired camera-bootstrap 95% CI of the difference [-0.156, -0.092]); 90% coverage 0.982 -> 0.989; intervals
+  0.26 m narrower. Far (>= 8 m): 0.825 -> 0.686 m. The 12 paper test cameras: 0.613 -> 0.471 m. 51 of 60 cameras
+  improve, none gets worse by more than 0.30 m. The median signed error falls from +0.312 to +0.065 m.
+- **Same line as folder 52.** Its patched loader (`ratio_patch.py`, variant B) changed only
+  `drop_px = 4.8 * L`; `from_annotation` now computes exactly that. Like folder 52, the ratio is fixed and does not
+  follow `reference_dimensions_cm`. Folder 52 ran with ticket 29's roll rule, as this branch does.
+- **What it does not change.** The projected-point weight (0.5), the size model (`model_b.FLAG_MID_M` = 0.46 m,
+  still from 49.53 cm), the roll decision (the same under 6.8 and 4.8 on all 122 flag photos) and the net, which
+  was trained on 6.8 prompts. Folder 52 shows the net keeps about two thirds of the geometry's gain (D_R MAE 0.611
+  -> 0.428 m); a net retrained on 4.8 prompts is a separate question.
+- **A second version.** Every calibration with vertical spans changes (roll by a median 0.25 deg, camera height
+  by a median 0.024 m). This ticket bumps `calibration.VERSION` from 1 (ticket 29, the roll rule) to 2, so a database
+  fitted under ticket 29 alone is fitted again once and every answer is measured once more. With this ticket, the
+  112 flag photos that ticket 29 leaves alone change too.
+- **The paper keeps 6.8.** The CV4E paper is frozen. The app no longer reproduces its numbers for any camera with
+  vertical spans.
+
+Tests: `tests/calib/test_data.py` pins the projected point at 4.8 span lengths. In
+`tests/calib/test_roll_identifiability.py` the synthetic flags stand (4.8 + 1) x 6.35 = 36.8 cm high, so their
+spans project onto the true ground; the pinned old-rule numbers set the ratio back to 6.8 and the flags to 49.53 cm,
+the code they were pinned from. Not yet run on this branch.

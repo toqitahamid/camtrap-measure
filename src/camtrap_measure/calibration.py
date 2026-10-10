@@ -18,8 +18,10 @@ from .calib.model_b import MIN_DISTINCT_DISTS, MIN_GROUND_OBS, ModelB
 
 # How a flag photo is fitted. A calibration fitted under another version is fitted again at the next sync, and an
 # answer measured under one is measured again once (measure.current_answer). Before 1 (stored as None): roll fitted
-# only when direct ground marks cover two transects. 1: also when vertical-span ground points do (research folder 47).
-VERSION = 1
+# only when direct ground marks cover two transects, and vertical spans projected 6.8 span lengths down to the ground.
+# 1: roll also fitted when vertical-span ground points cover two transects (research folder 47, ticket 29).
+# 2: those points lie 4.8 span lengths below the span, not 6.8 (calib.data.VSPAN_PROJ_RATIO, folder 52, ticket 32).
+VERSION = 2
 
 _DATE_TIME_ORIGINAL, _EXIF_IFD, _MAKE, _MODEL = 0x9003, 0x8769, 0x010F, 0x0110
 

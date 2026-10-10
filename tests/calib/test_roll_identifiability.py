@@ -6,7 +6,8 @@ roll, so roll is hard-fixed to 0 and only f/h/pitch are fitted; a photo with
 >=2 direct transects fits all 4 params (roll free) exactly as before.
 Relaxed by experiments/refnet/47_app_roll_rule: roll is also fitted when >=2
 transects each carry >=2 ground obs of any source (vertical-span projections
-count) at >=2 distinct distances.
+count) at >=2 distinct distances. The synthetic flags stand at the height the
+projection ratio assumes (data.VSPAN_PROJ_RATIO, folder 52).
 
 Run standalone:
     PYTHONPATH=. ./depthenv/bin/python tests/test_roll_identifiability.py
@@ -14,7 +15,8 @@ Or via pytest.
 """
 import math
 
-from camtrap_measure.calib.data import GroundObs, PhotoData, from_annotation
+from camtrap_measure.calib import data
+from camtrap_measure.calib.data import VSPAN_PROJ_RATIO, GroundObs, PhotoData, from_annotation
 from camtrap_measure.calib.model_b import ModelB, PlaneParams, roll_identifiable, world_to_pixel
 
 CX, CY = 960.0, 540.0
@@ -62,11 +64,14 @@ def test_one_transect_fixes_roll_to_zero():
 
 # --- folder 47: vertical spans on two transects also pin roll -----------------------------------------------
 
-WIRE_M, BODY_H_M = 0.4953, 0.0635  # flag wire above ground, flag body height (the data.py defaults)
+BODY_H_M = 0.0635  # flag body height (the data.py default)
+# Flag top above the ground: (VSPAN_PROJ_RATIO + 1) body heights, 36.8 cm, so the rendered spans project onto the
+# true ground under the app's ratio. Before folder 52: the wire's nominal 49.53 cm, with ratio (49.53 - 6.35) / 6.35.
+TOP_M, OLD_TOP_M, OLD_RATIO = (VSPAN_PROJ_RATIO + 1) * BODY_H_M, 0.4953, (49.53 - 6.35) / 6.35
 P_ROLLED = PlaneParams(3000.0, 1.2, 0.12, 0.10)
 
 
-def _annotation(p, direct=("C",), spans=("L", "C", "R"), dists=(4.0, 6.0, 8.0, 10.0, 12.0, 14.0)):
+def _annotation(p, direct=("C",), spans=("L", "C", "R"), dists=(4.0, 6.0, 8.0, 10.0, 12.0, 14.0), top_m=TOP_M):
     """A schema-v2 FlagLabel annotation rendered from camera p: wire ground points on the `direct` transects and
     flag-body vertical spans on the `spans` transects, flags at 4-14 m on azimuths -12, 0, +12 deg."""
     pts, vspans = [], []
@@ -77,7 +82,7 @@ def _annotation(p, direct=("C",), spans=("L", "C", "R"), dists=(4.0, 6.0, 8.0, 1
                 u, v = world_to_pixel(x, p.h, z, p, CX, CY)
                 pts.append({"u": u, "v": v, "transect": transect, "distance": d})
             if transect in spans:  # top and bottom of the flag body; the ground is at y = h
-                (u1, v1), (u2, v2) = (world_to_pixel(x, p.h - y, z, p, CX, CY) for y in (WIRE_M, WIRE_M - BODY_H_M))
+                (u1, v1), (u2, v2) = (world_to_pixel(x, p.h - y, z, p, CX, CY) for y in (top_m, top_m - BODY_H_M))
                 vspans.append({"u1": u1, "v1": v1, "u2": u2, "v2": v2, "transect": transect, "distance": d})
     return {"site": "SYN", "image": "SYN.JPG", "image_w": 1920, "image_h": 1080, "wire_ground_points": pts,
             "flag_vertical_spans": vspans, "flag_horizontal_spans": [], "flag_to_ground_spans": []}
@@ -114,10 +119,12 @@ def test_a_second_transect_needs_two_distances():
     assert roll_identifiable(from_annotation(two).ground)
 
 
-def test_two_direct_transects_fit_exactly_as_before():
+def test_two_direct_transects_fit_exactly_as_before(monkeypatch):
     """The old rule's case is untouched: same decision, and the same numbers as the code before folder 47
-    (pinned from git HEAD's ModelB.fit, 2026-10-10)."""
-    photo = from_annotation(_annotation(P_ROLLED, direct=("L", "R")))
+    (pinned from git HEAD's ModelB.fit, 2026-10-10). Pinned under the projection ratio of that code, 6.8, which
+    folder 52 changed; so this test sets it back and renders the flags at 49.53 cm."""
+    monkeypatch.setattr(data, "VSPAN_PROJ_RATIO", OLD_RATIO)
+    photo = from_annotation(_annotation(P_ROLLED, direct=("L", "R"), top_m=OLD_TOP_M))
     assert roll_identifiable(photo.ground)
     p = ModelB.fit(photo).params
     for got, want in ((p.f, 3050.3959378015134), (p.h, 1.1820915767554494), (p.pitch, 0.11807870183083646),

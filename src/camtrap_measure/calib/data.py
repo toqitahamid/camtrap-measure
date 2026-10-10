@@ -7,6 +7,11 @@ W_GROUND_DIRECT = 1.0
 W_GROUND_PROJECTED = 0.5
 W_SIZE_BODY = 1.0
 W_SIZE_F2G = 0.3  # flag-to-ground length is a fleet average (burial varies), ADR-0002
+# A vertical span's ground point (vspan_proj) lies this many span lengths below its bottom end. The flag's nominal
+# size gives (49.53 - 6.35) / 6.35 = 6.8, but the labelled ground contacts lie 4.5-4.8 span lengths below
+# (experiments/refnet/49_projected_ground_check), and 4.8 cut the app's held-out q50 MAE from 0.549 to 0.426 m
+# (experiments/refnet/52_app_ratio_4p8). The paper (rollfix) keeps 6.8.
+VSPAN_PROJ_RATIO = 4.8
 
 
 @dataclass
@@ -56,7 +61,6 @@ def from_annotation(d):
     body_h = ref.get("flag_body_h", 6.35)
     body_w = ref.get("flag_body_w", 8.89)
     wire_ag = ref.get("wire_above_ground", 49.53)
-    bottom_cm = wire_ag - body_h  # height of flag-body bottom above ground
 
     ph = PhotoData(d["site"], d["image"], d["image_w"], d["image_h"])
 
@@ -98,7 +102,7 @@ def from_annotation(d):
             ph.skipped.append({"source": "vspan", "distance": s["distance"],
                                "transect": s["transect"], "lean_deg": lean_deg})
             continue
-        drop_px = bottom_cm * L / body_h  # local scale: L px per body_h cm
+        drop_px = VSPAN_PROJ_RATIO * L  # fixed ratio, not (wire_ag - body_h) / body_h: see VSPAN_PROJ_RATIO
         ph.ground.append(GroundObs(ub + dx * drop_px, vb + dy * drop_px,
                                    s["distance"], s["transect"],
                                    "vspan_proj", W_GROUND_PROJECTED))

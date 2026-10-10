@@ -37,7 +37,7 @@ def test_vertical_span_projection_follows_lean():
     assert len(ph.ground) == 1
     g = ph.ground[0]
     L = math.hypot(10.0, 60.0)
-    drop = 43.18 * L / 6.35          # px along the span axis
+    drop = 4.8 * L                   # px along the span axis: 4.8 span lengths (folder 52), not 43.18 / 6.35
     assert math.isclose(g.u, 210.0 + (10.0 / L) * drop)
     assert math.isclose(g.v, 760.0 + (60.0 / L) * drop)
     assert g.weight == 0.5 and g.source == "vspan_proj"
