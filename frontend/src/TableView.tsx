@@ -31,7 +31,7 @@ const because = (reasons: string[], word: string) => reasons.some((why) => why.i
 const weakBox = (d: Det | null) => !!d && because(d.reasons, 'confidence')
 const unsure = (d: Det | null) => !!d && because(d.reasons, 'unsure')
 // alignment is the photo's, not a box's, so this one reads the photo's reasons
-const weakFit = (r: Row) => r.measured && linesUp(r) !== 'Good'
+const weakFit = (r: Row) => r.measured && (linesUp(r) === 'Check' || linesUp(r) === 'No')
 
 const TONE: Record<State, string> = {
   clean: 'var(--ok)',
@@ -328,7 +328,7 @@ export default function TableView({
                         <span className="num small" style={{ color: weakBox(d) ? 'var(--bad)' : d ? 'var(--dim)' : 'var(--faint)' }}>
                           {d ? sure(d) : NONE}
                         </span>
-                        <span className="num small" style={{ color: weakFit(r) ? 'var(--bad)' : r.measured ? 'var(--dim)' : 'var(--faint)' }}
+                        <span className="num small" style={{ color: weakFit(r) ? 'var(--bad)' : r.measured && linesUp(r) !== NONE ? 'var(--dim)' : 'var(--faint)' }}
                               title={r.match_score === null ? undefined : plural(r.match_score, 'matching point')}>
                           {r.measured ? linesUp(r) : NONE}
                         </span>

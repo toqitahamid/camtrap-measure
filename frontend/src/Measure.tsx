@@ -447,7 +447,7 @@ export default function Measure({
                 <span className="cap">Flag photo <Help topic="flag" /></span>
                 <span>{cur.flag_image ?? NONE}</span>
                 <span className="cap">Lines up with flag photo <Help topic="alignment" /></span>
-                <span className={linesUp(cur) === 'Good' ? undefined : 'warn'}
+                <span className={linesUp(cur) === 'Check' || linesUp(cur) === 'No' ? 'warn' : undefined}
                       title={cur.match_score === null ? undefined : plural(cur.match_score, 'matching point')}>
                   {linesUp(cur)}
                 </span>

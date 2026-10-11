@@ -203,6 +203,25 @@ Applied after a review of the final rule; CONTEXT.md "Night photos: the Night ru
 - F. Frontend rebuild: `linesUp` (frontend/src/ui.tsx:255) reads an empty `match_score` as "No". For a night row it
   must read `align_status` (ok -> "Good"), so a night photo that copies the flag photo itself does not show "Lines
   up: No". Also the "Lined up" line (Q11 keeps it out of the UI marks).
+  **Status (2026-10-11): source fixed, bundle not rebuilt, not committed** (branch `fix/lines-up` from `main`
+  1ac10b8). Affected: only an answered night photo whose borrowed line-up is the job's flag photo itself (Copy with
+  the flag photo nearer, One side with only the flag photo, Fallback with the flag photo nearer). Its `match_score` is
+  empty (`lineup.IDENTITY` has no inliers), so the window said "No" (Measure panel, table cell and detail, the cell
+  in red). A Chain never uses the flag photo; a later flag photo standing as B has measured points; day photos are
+  unchanged. Fix: `Row` gains `align_source` and `align_status` (the engine already sent them), and `linesUp` reads a
+  night row by them first: ok -> "Good", else "No". No new UI element. The committed bundle
+  (`src/camtrap_measure/ui/assets/`) keeps the old rule until `cd frontend && npm ci && npm run build` runs on a
+  machine with Node and the rebuilt `ui/` is committed. Test
+  `test_a_night_photo_that_copies_the_flag_photo_itself_is_listed_as_lined_up_with_no_points` pins the listing fields
+  `linesUp` reads (passed alone on the login node, 1.6 s). Left open: the "Lined up" line (not built).
+  **No-animal photos (researcher's option (a), 2026-10-11):** a measured photo with no animal also had an empty
+  `match_score` and showed "No" (since 2026-09-29, day or night). Empty frames are never lined up, so `linesUp` now
+  returns the empty mark "–" (`NONE`) when `measured` and `detections` is empty, before the night rule. "–" is not a
+  warning: the Measure panel warns and the table colours red only on "Check" or "No"; the table cell shows "–" in
+  `--faint`, as the empty "Sure" cell beside it. Unchanged: a photo not yet measured ("–" as before) and a night photo
+  with no answer ("No"; it keeps its boxes, so `detections` is not empty). Test
+  `test_a_measured_photo_with_no_animal_is_listed_apart_from_a_night_photo_with_no_answer` pins those listing fields
+  (passed alone on the login node, 1.3 s). No backend change.
 - G. The researcher log `night-rule.jsonl` is never trimmed.
 - H. A flag-photo copy in the folder that lost its capture time (re-saved without EXIF) is not recognised as a flag
   photo and could vote; a file hash would catch it. Not built.

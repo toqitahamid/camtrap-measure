@@ -54,6 +54,8 @@ export type Row = {
   method: string | null
   flag_image: string | null
   flag_site: string | null   // the camera it was measured under - travels with flag_image or the pair is a 404
+  align_source: string | null  // 'direct' (a day photo's own line-up), 'night' (the Night rule), null (none recorded)
+  align_status: string | null  // 'ok' or 'none'
   reasons: string[]
   detections: Det[]
 }
@@ -251,8 +253,13 @@ export const STATE_LABEL: Record<State, string> = {
 }
 
 /** Whether the photo lined up with its flag photo, in the words the screen uses. The engine's two alignment
-    reasons are the only ones that name the flag photo, so matching that is how the window knows which one it is. */
-export function linesUp(r: Row): 'Good' | 'Check' | 'No' {
+    reasons are the only ones that name the flag photo, so matching that is how the window knows which one it is.
+    A night photo borrows a day photo's line-up (ticket 33), so its status decides: one that copies the flag photo
+    itself lines up with no points of its own, and an empty match_score there is not a failed line-up.
+    A measured photo with no animal was never lined up (empty frames skip the line-up), so it shows the empty mark. */
+export function linesUp(r: Row): 'Good' | 'Check' | 'No' | typeof NONE {
+  if (r.measured && r.detections.length === 0) return NONE
+  if (r.align_source === 'night') return r.align_status === 'ok' ? 'Good' : 'No'
   if (r.match_score === null) return 'No'
   return r.reasons.some((why) => why.includes('flag photo')) ? 'Check' : 'Good'
 }

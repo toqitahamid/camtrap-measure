@@ -816,6 +816,41 @@ def test_with_the_flag_photo_as_day_photo_a_the_run_still_never_links_a_night_ph
         (SITE_FLAG, "IMG_0005.JPG", "chain", {"B": [8000, got["vote"]["B"][1]]})
 
 
+def test_a_night_photo_that_copies_the_flag_photo_itself_is_listed_as_lined_up_with_no_points(full_flag, tmp_path,
+                                                                                               monkeypatch):
+    """Follow-up F. The flag photo's own line-up is the identity, so the night photo has no points (match_score
+    empty, review fix 10). The window's `linesUp` therefore reads a night row by align_source and align_status
+    (night + ok -> "Good"), never by the empty match_score; the listing must carry both."""
+    monkeypatch.setattr(inference, "backend", fake_models())
+    d = camera(tmp_path, {n: RUN_CAM[n] for n in ("IMG_0002.JPG", "IMG_0003.JPG")}, SITE)  # no day photo: flag is A
+    run(full_flag, d)
+    row = listing(full_flag, d)["IMG_0002.JPG"]
+    assert (row["align_source"], row["align_status"], row["anchor"], row["match_score"], row["reasons"]) == \
+        ("night", "ok", SITE_FLAG, None, [])
+    assert row["measured"] and row["detections"][0]["distance_m"] is not None
+    assert {r["photo"]: r["check"] for r in export_rows(full_flag)}["IMG_0002.JPG"] == \
+        "Check by eye: camera move not checked"
+
+
+def test_a_measured_photo_with_no_animal_is_listed_apart_from_a_night_photo_with_no_answer(synced, tmp_path, monkeypatch):
+    """Follow-up F, option (a). The window's `linesUp` shows the empty mark for a measured photo with no animal (day or
+    night: an empty frame is never lined up) and "No" for a night photo with no answer. It tells them apart by
+    `measured` and `detections`, not by the empty match_score both share; the listing must carry those fields."""
+    monkeypatch.setattr(inference, "backend", fake_models(boxes={"IMG_0001.JPG": []},
+                                                          links={("IMG_0001.JPG", SITE_FLAG): 100}))  # too few for A
+    d = camera(tmp_path, {n: RUN_CAM[n] for n in ("IMG_0001.JPG", "IMG_0002.JPG", "IMG_0004.JPG")}, SITE)
+    run(synced, d)
+    rows = listing(synced, d)
+    for empty in ("IMG_0001.JPG", "IMG_0004.JPG"):  # a day and a night photo with no animal
+        r = rows[empty]
+        assert (r["measured"], r["detections"], r["match_score"], r["align_source"], r["align_status"]) == \
+            (True, [], None, None, None)
+    unanswered = rows["IMG_0002.JPG"]  # no day photo before (100 points) or after it: no distance
+    assert (unanswered["measured"], unanswered["align_source"], unanswered["align_status"], unanswered["match_score"]) \
+        == (True, "night", "none", None)
+    assert unanswered["detections"] and unanswered["detections"][0]["distance_m"] is None
+
+
 def test_a_day_photo_arriving_later_gives_the_one_sided_night_photos_a_checked_answer(synced, tmp_path, monkeypatch):
     first = fake_models()
     monkeypatch.setattr(inference, "backend", first)
