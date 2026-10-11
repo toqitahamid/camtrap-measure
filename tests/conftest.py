@@ -30,6 +30,7 @@ def hermetic(monkeypatch, tmp_path):
     """Every test writes to its own data dir and sees no inference extra, whatever the machine has."""
     monkeypatch.setattr(store, "DATA_DIR", tmp_path)
     monkeypatch.setattr(inference, "models_installed", lambda: False)
+    monkeypatch.delenv("CAMTRAP_LAUNCHER_LOG", raising=False)  # the researcher log goes to the test's data dir
 
 
 def flag_photo_data(site="TON_CAM02", image="IMG_5304.JPG", relabel=None, n=None) -> dict:

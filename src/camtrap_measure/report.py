@@ -10,12 +10,13 @@ marked in the listing and left out of the export unless asked — and the file s
 
 import csv
 import io
+import json
 import statistics
 from datetime import datetime
 from ntpath import basename  # splits on / and \ alike: paths come from the dept's Windows machine or a Linux test box
 from pathlib import Path
 
-from . import calibration, inference, measure, store
+from . import calibration, inference, lineup, measure, store
 from .distance import MIN_INLIERS
 from .inference import DEFAULT_METHOD, MIN_SPECIES_SCORE
 
@@ -24,7 +25,7 @@ DEER = {"white-tailed deer", "unsure"}  # default export: the survey target plus
 BIN_M = 2  # histogram bin width, metres
 
 COLUMNS = ["photo", "camera", "site", "timestamp", "species", "distance_m", "q05_m", "q95_m", "confidence", "method",
-           "fidelity", "match_score", "flag"]
+           "fidelity", "match_score", "check", "flag"]
 DOC = """\
 # photo: file name; camera: the camera (the photo folder's name); timestamp: EXIF capture time in the camera's local time, no zone
 # site: the survey site, the part of the camera name before its last '_CAM' (MAS_CAM01 -> MAS); a name with no '_CAM' is its own site
@@ -34,9 +35,16 @@ DOC = """\
 # confidence: how sure the detector is that the box holds an animal, 0-1; method: md = distance read at the bottom of the MegaDetector box, sam3 = where the SAM3 outline meets the ground
 # fidelity: research = the published settings, fast = quicker settings for a small graphics card (see the app's docs);
 #           distances differ between the two by a few centimetres, well inside the q05-q95 band, but do not mix them silently
-# match_score: points that line up between this photo and its flag photo (fewer than {min_inliers} = needs a look)
+# match_score: points that line up between this photo and its flag photo (fewer than {min_inliers} = needs a look); a night
+#              photo is measured through a day photo of the same camera, and this is that day photo's number
+# check: empty when the number is fine; otherwise look at the photo yourself before you use the number:
+#        "Check by eye: camera moved" = the camera moved during the night, and the night photo used the nearer day photo
+#        "Check by eye: camera move not checked" = only one day photo (before or after the night) was found
+#        "Check by eye: no photo date" = the photo, or a day photo it used, has no date; it was placed by its file number or file time
 # flag: empty for a row that looks fine, else why the row needs a look (such rows are in this file only if you asked for them)
 """.format(min_inliers=MIN_INLIERS, min_species=MIN_SPECIES_SCORE)
+CHECK_WORDS = {lineup.MOVED: "camera moved", lineup.UNCHECKED: "camera move not checked",
+               lineup.UNDATED: "no photo date"}
 
 
 def site_of(camera: str) -> str:
@@ -46,14 +54,45 @@ def site_of(camera: str) -> str:
     return head if cam else camera
 
 
+def _detail(row: dict) -> dict:
+    got = row.get("align_detail")
+    return (json.loads(got) if isinstance(got, str) else got) or {}
+
+
+def _not_lined_up(why: dict) -> str:
+    """Why a night photo has no line-up the distance can be read through (ticket 33). Under the Night rule this is
+    rare: no day photo and no flag photo on either side, a photo that could not be placed in time, or a folder that
+    could not be listed when the photo was measured."""
+    if why.get("why") == lineup.NO_DAY:
+        return (f"night photo with no day photo before or after it to measure through (a day photo of this camera must "
+                f"line up with the flag photo with {lineup.DAY_MIN:,} points; {lineup.TRIES} tried a side), so no distance")
+    if why.get("why") == lineup.UNPLACED:
+        return "night photo that could not be placed in time among the photos of its folder, so no distance"
+    if why.get("why") == lineup.NO_FOLDER:
+        return ("night photo whose folder could not be read to find a day photo to measure through, so no distance "
+                "(tried again on the next run)")
+    return "night photo that could not be lined up, so no distance"
+
+
 def reasons(row: dict) -> list[str]:
-    """Why a detection row is suspicious; [] when it is clean. Thresholds are named so the gallery explains itself."""
+    """Why a detection row is suspicious; [] when it is clean. Thresholds are named so the gallery explains itself.
+    The line-up fields (align_source, align_status, align_detail) are absent on rows measured before ticket 33 and on
+    stand-in backends; those rows read as before. A day photo whose own line-up found no homography (direct, status
+    none) reads as a poor or failed line-up, by its points. A night answer (the Night rule) is lined up when its status
+    is ok, whatever its score: a night photo that copies the flag photo itself has no points of its own. What a night
+    answer asks the reader to check by eye goes to the export's `check` column, not here (Q11)."""
     out = []
-    aligned = row["match_score"] is not None and row["match_score"] >= MIN_INLIERS
-    if row["match_score"] is None:
-        out.append("did not line up with its flag photo, so no distance")
-    elif not aligned:
-        out.append(f"lines up poorly with its flag photo ({row['match_score']} points, needs {MIN_INLIERS}). Wrong camera, or was it moved?")
+    status, score = row.get("align_status"), row["match_score"]
+    if row.get("align_source") in (lineup.NIGHT, "bracket"):  # "bracket": a first-design row, measured again next run
+        aligned = status == lineup.OK
+        if not aligned:
+            out.append(_not_lined_up(_detail(row)))
+    else:
+        aligned = score is not None and score >= MIN_INLIERS and status != lineup.NONE
+        if score is None or (status == lineup.NONE and score >= MIN_INLIERS):
+            out.append("did not line up with its flag photo, so no distance")
+        elif not aligned:
+            out.append(f"lines up poorly with its flag photo ({score} points, needs {MIN_INLIERS}). Wrong camera, or was it moved?")
     if row["confidence"] < LOW_CONF:
         out.append(f"low confidence it is an animal ({row['confidence']:.2f}, needs {LOW_CONF})")
     if row["species"] == "unsure":
@@ -61,6 +100,15 @@ def reasons(row: dict) -> list[str]:
     if row["distance_m"] is None and aligned:
         out.append("could not find the ground under the animal, so no distance")
     return out
+
+
+def check_text(row: dict) -> str:
+    """The export's `check` column (Q11): empty when the number is fine, else "Check by eye: ..." in plain words.
+    Only a night answer with a number can ask for one; a row with no distance says why in `flag` instead."""
+    if row.get("align_source") != lineup.NIGHT or row.get("align_status") != lineup.OK:
+        return ""
+    words = [CHECK_WORDS[c] for c in _detail(row).get("checks", []) if c in CHECK_WORDS]
+    return "Check by eye: " + ", ".join(words) if words else ""
 
 
 def _in_range(captured_at: str | None, date_from: str | None, date_to: str | None) -> bool:
@@ -191,20 +239,23 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
         if r["method"] == method:
             dets.setdefault(r["path"], []).append(r)
     fid = inference.fidelity()
+    check = lineup.Check()  # one folder signature per folder for the whole listing; photos are not opened here
     out, unreadable = [], 0
     for p, name, cal, read in photos:
         seen = known.get(str(p))
         if seen and seen["method"] != method:
             seen = None  # measured, but not under the method being asked about: no answer to this question
         row = {"name": name, "path": str(p), "captured_at": None, "measured": seen is not None, "stale": False,
-               "match_score": None, "method": None, "flag_image": None, "flag_site": None, "reasons": [], "detections": []}
+               "match_score": None, "method": None, "flag_image": None, "flag_site": None, "reasons": [], "detections": [],
+               "align_source": None, "align_status": None, "anchor": None}
         if seen:
             # flag_site travels with flag_image or the pair is meaningless: the window shows the flag photo a
             # number was read against, and a camera chosen in the meantime is not the camera that produced it.
             # Asking for one camera's flag under another camera's name is a 404 and a blank frame (2026-08-25).
             row.update(captured_at=seen["captured_at"], match_score=seen["match_score"], method=seen["method"],
                        flag_image=seen["calibration_image"], flag_site=seen["site"],
-                       stale=cal is not None and not measure.current_answer(seen, cal, method, fid),
+                       **{k: seen.get(k) for k in ("align_source", "align_status", "anchor")},
+                       stale=cal is not None and not measure.current_answer(seen, cal, method, fid, check),
                        reasons=[seen["held_reason"]] if seen["held_reason"] else [])
             for r in sorted(dets.get(str(p), []), key=lambda r: r["idx"]):
                 why = reasons(r)
@@ -263,7 +314,7 @@ def export_csv(site=None, date_from=None, date_to=None, all_species=False, inclu
     w.writeheader()
     for r in kept:
         w.writerow({**r, "photo": basename(r["path"]), "camera": r["site"], "site": site_of(r["site"]),
-                    "timestamp": r["captured_at"]})
+                    "timestamp": r["captured_at"], "check": check_text(r)})
     return buf.getvalue()
 
 

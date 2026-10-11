@@ -20,7 +20,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import calibration, inference, measure, store
+from . import calibration, inference, lineup, measure, store
 
 DEPTH = 3  # levels below a camera folder searched for its photos (MAS_CAM07\filtered\ is one)
 STAMP_SAMPLES = 5  # photos per folder whose camera stamp is read: enough to outvote one odd file
@@ -490,7 +490,8 @@ def _row(root: Path, f: dict, cameras: list[str], usable: dict, sites: set[str],
         row["flags"].append({"image_name": c["image_name"], "captured_at": c["captured_at"],
                              "photos": used[c["image_name"]],
                              "visit": None if not c["captured_at"] else "setup" if c is first else "service"})
-    row["measured"] = sum(1 for p, c in got.items() if measure.current_answer(known.get(p), c, method, fid))
+    check = lineup.Check()  # one folder signature for the row; photos are not opened here
+    row["measured"] = sum(1 for p, c in got.items() if measure.current_answer(known.get(p), c, method, fid, check))
     row["tickable"], row["_default_tick"], row["_got"] = True, not mismatch, got
     return row
 

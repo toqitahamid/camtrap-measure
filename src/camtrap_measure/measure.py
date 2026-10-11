@@ -16,6 +16,7 @@ in the status saying how far each camera has got.
 """
 
 import itertools
+import json
 import os
 import stat
 import threading
@@ -25,7 +26,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import calibration, inference, store
+from . import calibration, inference, lineup, store
 
 JPEG = {".jpg", ".jpeg"}
 HIDDEN = stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM
@@ -156,7 +157,7 @@ def status() -> dict | None:
     return r
 
 
-def current_answer(known: dict | None, cal: dict, method: str, fidelity: str) -> bool:
+def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, check: lineup.Check | None = None) -> bool:
     """Does the store already hold this photo's answer under this method, this fidelity and this very
     calibration? The calibration's annotation `updated_at` is its version: a relabel changes it → measure
     again. Versions are compared, never clocks (the dept machine's and the cloud's need not agree).
@@ -170,10 +171,27 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str) ->
     side with nothing on screen to tell them apart.
 
     So do the fit rules: a calibration fitted again under a new `calibration.VERSION` (the roll rule, research
-    folder 47) keeps its annotation `updated_at`, so the answer also records the calibration's `fit_version`."""
+    folder 47) keeps its annotation `updated_at`, so the answer also records the calibration's `fit_version`.
+
+    And the line-up rules (ticket 33, `lineup.current`): a night photo measured under an earlier line-up version
+    (lined up with the flag photo directly, or by the first bracket design) is measured again, once; a day photo's
+    answer stands. A night photo that lacked a day photo on a side is planned again once its folder or the camera's
+    flag photos change. `check` carries what that asks of the disk across one listing or run (a run passes
+    `lineup.Check(read=True)`)."""
     return bool(known and known["method"] == method and known.get("fidelity") == fidelity
                 and known["site"] == cal["site"] and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at")
-                and known.get("fit_version") == cal.get("fit_version"))
+                and known.get("fit_version") == cal.get("fit_version") and lineup.current(known, check))
+
+
+def lined_up(alignment: dict | None) -> dict:
+    """The photo-row fields of a backend's line-up (lineup.Line.public): how the photo got to the job's flag photo.
+    The stored detail is what report.reasons and the export's `check` column read. None from a backend that does not
+    say (an empty frame, the fake)."""
+    al = alignment or {}
+    night = al.get("night")
+    return {"alignment_version": lineup.VERSION, "night": None if night is None else int(night),
+            "align_source": al.get("source"), "align_status": al.get("status"), "anchor": al.get("anchor"),
+            "align_detail": json.dumps(al["detail"]) if al.get("detail") else None, "align_folder": al.get("folder")}
 
 
 def readable(p: Path) -> bool:
@@ -242,8 +260,9 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
             cam["done"] += 1
 
     batch = []
+    check = lineup.Check(read=True)  # an answer from before ticket 33 is read once here: was it a night photo?
     for p in job["photos"]:
-        if not rerun and current_answer(known.get(str(p)), cal, method, fidelity):
+        if not rerun and current_answer(known.get(str(p)), cal, method, fidelity, check):
             count(skipped=1)
             continue
         if not readable(p):
@@ -264,13 +283,22 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
     # has looked at it, one with a deer in it not until the distance stage - so each result names
     # its own photo instead of arriving in the order the photos were handed over.
     for res in inference.backend([p for p, _ in batch], ref, method, progress=progress):
-        photo = rows[str(res.path)]
+        if res.alignment and res.alignment.get("status") == lineup.UNREAD:
+            # day or night could not be read just now (locked, half copied): no answer is kept, so the next run
+            # reads the photo again; neither a direct line-up nor night=0 is guessed for it (ticket 33)
+            count(unreadable=1)
+            if run["cancel"]:
+                break
+            continue
+        photo = {**rows[str(res.path)], **lined_up(res.alignment), "match_score": res.match_score}
         dets = [asdict(d) for d in res.detections]
-        store.record({**photo, "match_score": res.match_score}, method, dets)
+        store.record(photo, method, dets)
+        if res.alignment and res.alignment.get("night"):
+            lineup.log_night(res.path, res.alignment)  # the researcher log (Q12): how the night photo was measured
         count(detections=len(dets))
         if cam:
             cam["deer"] += sum(1 for d in dets if d["species"] in DEER)
-            cam["needs_look"] += any(reasons({**d, "match_score": res.match_score}) for d in dets)
+            cam["needs_look"] += any(reasons({**photo, **d}) for d in dets)
         if run["cancel"]:
             break
     return len(batch)

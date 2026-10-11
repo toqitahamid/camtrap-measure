@@ -1829,3 +1829,108 @@ Tests: `tests/calib/test_data.py` pins the projected point at 4.8 span lengths. 
 `tests/calib/test_roll_identifiability.py` the synthetic flags stand (4.8 + 1) x 6.35 = 36.8 cm high, so their
 spans project onto the true ground; the pinned old-rule numbers set the ratio back to 6.8 and the flags to 49.53 cm,
 the code they were pinned from. Not yet run on this branch.
+
+## Night photos: the Night rule (2026-10-11, ticket 33)
+
+**Rule.** A night photo (EXIF Flash bit 0; no tag: a grey thumbnail) is never lined up with the flag photo. It is
+measured through a day photo of its camera. Walking its camera folder in time order, the planner finds the day photo
+before it (A) and after it (B) that lines up with the job's flag photo with at least 4,000 points (3 tries a side,
+burst mates within 120 s of a rejected try skipped, no time limit). Then:
+
+1. Both found: B is lined up onto A (the move check). Shift p95 <= 20 px with >= 1,000 points: **Copy** the line-up of
+   the nearer day photo (a tie goes to A).
+2. Otherwise the camera moved: the night photo is lined up to A and to B, and the side with more points wins (a tie
+   goes to the nearer). If that night -> day line-up has >= 2,000 points and a shift p95 < 300 px: **Chain**,
+   H(night -> flag) = H(day -> flag) . H(night -> day). Otherwise **Fallback**: copy the nearer day photo.
+3. Only one found: Copy it. None found: no distance.
+
+Day photos line up directly, as before. `lineup.py` (`Planner.night_rule`); decisions in
+`.scratch/app/issues/33-night-bracket-grilling.md` (Q1-Q13) and `docs/adr/0001-night-photos-borrow-a-day-line-up.md`.
+
+- **Why.** Against the daytime flag photo a night photo gets a few dozen points (labpc: MAS_CAM07 IMG_0215, 34 against
+  9,465 for a day photo; `MIN_INLIERS` = 15 lets it through), and the two frames IMG_0215 / IMG_0216 of one still deer
+  read 6.6 m and 9.9 m. The researcher: "i dont want the night to flag line up ... it will bring wrong answer" (Q10).
+- **Evidence.** Copy against the research night chain (folder 43): q50 within a median 0.017 m, p95 0.090 m at 73
+  box points. Moved nights (folder 60; 33 nights, 1,353 night photos): Chain + Fallback leaves 0 of 896 box points
+  with strong references over 1 m (max 0.997 m); Copy of the nearer leaves 29 of 1,120. 4,000 points (folder 59):
+  same-position error at 15 m 0.230 m for 4,000-4,999 against 0.287 m at >= 5,000 (3 photos only).
+- **Flag photos as day photos (Q5).** The camera's flag photos (usable calibrations with a capture time and their flag
+  photo on this computer, `lineup.flag_photos`) take part at their EXIF capture times: each goes before the first
+  dated photo of the folder taken after it. The job's flag photo is its own line-up (identity, no points, no RoMa
+  call) and always passes; a later flag photo needs 4,000 points to the job's flag photo, like a day photo. So the
+  flag photo is A at the start of a deployment, and the next flag photo is B at the end. With A the flag photo, the
+  move check B -> A is B's own line-up to it. A flag photo takes no part in the vote: no night photo is lined up with
+  any flag photo. A folder photo with a flag photo's capture time is that flag photo, whatever its name: a renamed
+  copy on the card must not stand as a day photo and vote (review 2026-10-11; before, only the same name counted).
+  The cost: another photo taken in the same second as a flag photo is left out of the A/B search; the flag photo
+  stands at that moment anyway. A copy that lost its capture time is not recognised (follow-up). A flag photo of
+  another pixel size than the night photo is passed over: its line-up (the identity, for the job's flag photo) maps
+  its own pixels, not the night photo's.
+- **"Not comparable".** B -> A under 1,000 points (or no homography) is read as moved and goes to the vote, so there
+  is an answer. It never occurred in folder 58 (minimum 4,838 points).
+- **No answer.** Only when no day photo and no dated flag photo is found on either side. With a dated job flag photo
+  this cannot happen: the flag photo is always on one side. An undated flag photo cannot be placed in time; then a
+  night photo with no day photo on either side gets no distance, with a reason in `flag`.
+- **No capture time (Q13).** The dated photos always stay in capture-time order; one undated photo never reorders
+  the folder (review 2026-10-11; before, one undated photo sent the whole folder to number or file-time order). Each
+  undated photo is placed alone: by the camera counter in its file name (the last number, IMG_0215 -> 215), between
+  the dated photos with the next lower and the next higher number when those two are neighbours in time; when the
+  number cannot place it (no number, a shared number, a counter restart between them), after the dated photo with
+  the latest file modification time not after its own. "Nearer" is then counted in photos along the order, not
+  seconds; burst mates need two capture times. `detail.order` says how the night photo was placed (time / number /
+  mtime); "Check by eye: no photo date" marks a night photo, or an A or B it used, placed by number or file time.
+- **Read just now.** When day or night of the photo itself cannot be read at the moment it is measured (locked, half
+  copied), neither rule runs: a direct line-up could be a night photo's link to the flag photo. No answer is kept
+  (not night = 0), the run counts it unreadable, and the next run reads it again. A camera folder that cannot be
+  listed (a share that dropped) does not end the run: the night photo gets no distance, with the reason "night photo
+  whose folder could not be read ..." and `align_folder` "unreadable", so it is planned again on the next run.
+- **Export (Q11).** The `lineup` column is gone; one `check` column replaces it: empty when the number is fine,
+  "Check by eye: camera moved" (Fallback), "Check by eye: camera move not checked" (one day photo), "Check by eye: no
+  photo date" (the night photo or a day photo it used has no date); several join with commas. No mark in the app UI:
+  an answered night photo has no "needs a look" reason.
+- **Researcher log (Q12).** One JSON line per night answer (photo, flag photo, path, A and B with their tries and
+  points, move check, vote, score) in `night-rule.jsonl` in the app's own logs folder: the folder of the launcher's
+  `CAMTRAP_LAUNCHER_LOG` (logs\ in the app folder), else `logs/` in the data folder. Never beside an export. A line is
+  written only when an answer is measured, so a run that skips current answers adds none; "Measure again" adds a new,
+  timestamped line per night photo (the last one is the stored answer). Any failure to write is printed and ignored.
+  The file is never trimmed (follow-up).
+- **Links are kept.** Every link (a photo onto the flag photo, B onto A, night onto a day photo) is stored in `links`,
+  keyed by both files' paths and modification times, the setting (`Real.link_setting`: fidelity, RoMa's refinement
+  resolution, weights version) and `lineup.LINK_VERSION` (still 1: a link is measured as before). "Measure again"
+  after a weights update or a fidelity change lines the photos up again. A day photo's own answer and the night
+  photos using it share one stored homography; the planner is lazy, so the run needs no ordering. Day or night is
+  cached in `nights` (path, size, mtime). The shift of a link is p95 |H(p) - p| over a 40 px grid starting 20 px in,
+  over the target's banner-cropped frame, as folders 43, 46 and 60 measured it.
+- **A photo that will not decode** does not stop the run. Its link fails: no homography, 0 points. As a day photo it
+  is a rejected try; as B -> A it reads as moved; in the vote it has 0 points. The failed link is kept with both files'
+  mtimes; a file that was gone or locked gives a failed link for that run only.
+- **Stored and shown.** `photos` keeps `alignment_version`, `night`, `align_source` (direct / night), `align_status`
+  (ok / none), `anchor` (the day photo whose line-up is used; for a Chain, the winner), `align_detail` (JSON: path,
+  A and B with tries, gaps, move points and px, vote, checks, order) and `align_folder`. A night answer's
+  `match_score` is the weakest link it uses (the day photo's points; the lower of the Chain's two), empty when it
+  copies the flag photo itself. Kept empty on purpose (review 2026-10-11): the flag photo has no line-up points of
+  its own, and B's points would be a number for a line-up the photo did not use. The built frontend's `linesUp` reads
+  an empty match_score as "Lines up: No"; the rebuild must read a night row by `align_status` (follow-up).
+- **Versions.** `lineup.VERSION` = 2. Under an earlier line-up version (1: the first bracket design, 5 px / 5,000
+  points) a night answer is measured again, once; a day answer and an empty frame stand. Answers from before line-up
+  versions behave as in version 1 (a night photo once; whether it was night is read once and kept). An answer that
+  lacked a day photo on a side keeps a signature of its folder (photo count, newest mtime) and of the camera's flag
+  photos, and is planned again when either changes: a card copied in two goes, or a service visit's flag photo synced.
+  A day photo edited in place, or a photo inserted into an old night, is not noticed: "Measure again" re-plans.
+- **Scope of "same camera".** One folder. A camera split over two folders looks for day photos within each.
+- **Compare unchanged.** `Real.align_score` still scores one photo's own direct line-up.
+
+Tests: `tests/test_lineup.py` (the rules on a stub: the 20 px and 1,000-point boundaries, 4,000 points, tries and
+burst mates, the vote, the Chain gate at 1,999 / 2,000 points and 299 / 300 px, the composition order, Fallback, one
+side, flag photos at both ends, no answer, file-number and mtime order, the check column; `current` for versions 1 and
+2; FakeModels end to end through the API, asserting no night photo is ever linked to a flag photo, the researcher log,
+measure-again-once after the version bump; review 2026-10-11: one undated photo and a counter restart keep the dated
+order, a flag photo of another pixel size is passed over, a renamed flag-photo copy never votes, day or night unread
+now keeps no answer and asks no link, an unlistable folder gives no answer and is planned again, a log that cannot be
+written does not raise). Check job `logs/night_bracket_check/` (final rule, not yet run): folder 43's photos by path
+with Q1 for Copy photos, folder 60's moved nights on the app path, flag photos as day photos on MAS_CAM01 / 04 / 09
+(every photo copied before the first planner; "unplaced" counted, must be 0), MAS_CAM07 end to end, day photos
+bit-equal to main, then the suite on branch and main.
+Follow-ups: one SQLite connection per run instead of per call; re-plan a one-sided answer only when a day photo
+arrives on its missing side; the frontend "Lined up" line, and `linesUp` reading a night row by `align_status`;
+the researcher log is never trimmed; a flag-photo copy that lost its capture time is not recognised.

@@ -31,7 +31,19 @@ create table if not exists detections (
     primary key (path, idx, method));
 create table if not exists photo_dates (
     path text primary key, size integer not null, mtime_ns integer not null, captured_at text, ok integer not null);
+create table if not exists nights (
+    path text primary key, size integer not null, mtime_ns integer not null, night integer not null);
+create table if not exists links (
+    target text not null, reference text not null, setting text not null, version integer not null,
+    target_mtime_ns integer not null, reference_mtime_ns integer not null, h text, inliers integer not null, shift real,
+    primary key (target, reference, setting, version));
 """
+
+# How a photo was lined up with its flag photo (ticket 33): the line-up version, day or night, source direct /
+# night, status ok / none, the day photo whose line-up a night photo uses, the detail (JSON: Copy / Chain / Fallback,
+# the day photos, the move check, the vote, what the export's `check` column says), and (only when a side had no day
+# photo) the folder's signature then.
+ALIGN_KEYS = ("alignment_version", "night", "align_source", "align_status", "anchor", "align_detail", "align_folder")
 
 
 def _db() -> sqlite3.Connection:
@@ -42,7 +54,11 @@ def _db() -> sqlite3.Connection:
     for table, col, typ in (("photos", "match_score", "integer"), ("detections", "match_score", "integer"),
                             ("photos", "method", "text"), ("photos", "calibration_version", "text"),
                             ("photos", "fidelity", "text"),  # pre-07/08/10/19 databases
-                            ("calibrations", "fit_version", "integer"), ("photos", "fit_version", "integer")):  # pre roll rule
+                            ("calibrations", "fit_version", "integer"), ("photos", "fit_version", "integer"),  # pre roll rule
+                            ("photos", "alignment_version", "integer"), ("photos", "night", "integer"),
+                            ("photos", "align_source", "text"), ("photos", "align_status", "text"),
+                            ("photos", "anchor", "text"), ("photos", "align_detail", "text"),
+                            ("photos", "align_folder", "text")):  # pre bracket rule (ticket 33)
         if col not in {r["name"] for r in con.execute(f"pragma table_info({table})")}:
             try:
                 con.execute(f"alter table {table} add column {col} {typ}")
@@ -207,6 +223,56 @@ def save_photo_dates(rows: list[tuple[str, int, int, str | None, bool]]) -> None
                         [(p, size, mtime, t, int(ok)) for p, size, mtime, t, ok in rows])
 
 
+# --- line-ups: day or night, and links between two photos (ticket 33) -----------------------------------------
+# Facts the line-up rules (lineup.py) read from a file or measured with RoMa. A link is seeded, so the same pair gives
+# the same answer whenever it is measured; it is trusted while both files keep their modification times and under the
+# same `setting` (inference.Real.link_setting: fidelity, RoMa's refinement resolution, weights version). These are
+# not answers: clear_measurements leaves them alone.
+
+def night(path: str, size: int, mtime_ns: int) -> tuple[bool, bool | None]:
+    """(found, night) of a photo whose day or night was read before with this same size and mtime."""
+    with closing(_db()) as con:
+        r = con.execute("select size, mtime_ns, night from nights where path=?", (path,)).fetchone()
+    if r is None or (r["size"], r["mtime_ns"]) != (size, mtime_ns):
+        return False, None
+    return True, bool(r["night"])
+
+
+def save_night(path: str, size: int, mtime_ns: int, value: bool | None) -> None:
+    """Keep a photo's day or night. An unreadable file (None) is not kept and is asked again."""
+    if value is None:
+        return
+    with closing(_db()) as con, con:
+        con.execute("insert or replace into nights values (?, ?, ?, ?)", (path, size, mtime_ns, int(value)))
+
+
+def save_photo_night(path: str, night: int) -> None:
+    """Note on a stored answer whether its photo is a night photo (lineup.current, for answers from before ticket 33)."""
+    with closing(_db()) as con, con:
+        con.execute("update photos set night=? where path=?", (night, path))
+
+
+def link(target: str, reference: str, setting: str, version: int, target_mtime: int, reference_mtime: int):
+    """(H as an array or None, inliers, shift) of a link measured before between these very files under this setting;
+    else None. A failed link (a photo that would not decode) is (None, 0, None)."""
+    import numpy as np
+
+    with closing(_db()) as con:
+        r = con.execute("select * from links where target=? and reference=? and setting=? and version=?",
+                        (target, reference, setting, version)).fetchone()
+    if r is None or (r["target_mtime_ns"], r["reference_mtime_ns"]) != (target_mtime, reference_mtime):
+        return None
+    return (None if r["h"] is None else np.asarray(json.loads(r["h"]), float)), r["inliers"], r["shift"]
+
+
+def save_link(target: str, reference: str, setting: str, version: int, target_mtime: int, reference_mtime: int,
+              h, inliers: int, shift: float | None) -> None:
+    with closing(_db()) as con, con:
+        con.execute("insert or replace into links values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (target, reference, setting, version, target_mtime, reference_mtime,
+                     None if h is None else json.dumps([[float(x) for x in row] for row in h]), inliers, shift))
+
+
 def summary() -> dict:
     with closing(_db()) as con:
         last = con.execute("select value from meta where key='last_sync'").fetchone()
@@ -228,11 +294,13 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
     photo = {**photo, "measured_at": datetime.now().astimezone().isoformat(timespec="seconds")}
     with closing(_db()) as con, con:
         con.execute("insert or replace into photos (path, site, captured_at, make, model, calibration_image, held_reason, "
-                    "measured_at, match_score, method, calibration_version, fidelity, fit_version) values (:path, :site, "
+                    "measured_at, match_score, method, calibration_version, fidelity, fit_version, alignment_version, "
+                    "night, align_source, align_status, anchor, align_detail, align_folder) values (:path, :site, "
                     ":captured_at, :make, :model, :calibration_image, :held_reason, :measured_at, :match_score, :method, "
-                    ":calibration_version, :fidelity, :fit_version)",
-                    {"match_score": None, "calibration_version": None, "fidelity": None, "fit_version": None, **photo,
-                     "method": method})
+                    ":calibration_version, :fidelity, :fit_version, :alignment_version, :night, :align_source, "
+                    ":align_status, :anchor, :align_detail, :align_folder)",
+                    {"match_score": None, "calibration_version": None, "fidelity": None, "fit_version": None,
+                     **dict.fromkeys(ALIGN_KEYS), **photo, "method": method})
         if photo["held_reason"]:
             con.execute("delete from detections where path=?", (photo["path"],))
         else:
@@ -288,6 +356,7 @@ def detections() -> list[dict]:
     """Every detection row joined with its photo (camera, timestamp, EXIF make/model, calibration used)."""
     with closing(_db()) as con:
         rows = con.execute(
-            "select p.site, p.captured_at, p.make, p.model, p.calibration_image, p.fidelity, d.* from detections d "
+            "select p.site, p.captured_at, p.make, p.model, p.calibration_image, p.fidelity, p.align_source, "
+            "p.align_status, p.anchor, p.align_detail, d.* from detections d "
             "join photos p on p.path = d.path order by p.site, p.captured_at, d.path, d.method, d.idx").fetchall()
     return [dict(r) for r in rows]

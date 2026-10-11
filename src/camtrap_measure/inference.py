@@ -22,6 +22,7 @@ import os
 import random
 import threading
 import time
+import zlib
 from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import distance, weights
+from . import distance, lineup, weights
 
 METHODS = {
     "md": {"label": "MegaDetector box (faster)",
@@ -86,12 +87,15 @@ class Detection:
 @dataclass
 class PhotoResult:
     detections: list[Detection]
-    match_score: int | None  # homography inliers against the flag photo; < distance.MIN_INLIERS = misfiled / moved camera
+    match_score: int | None  # homography inliers of the line-up used: the photo's own against the flag photo by day,
+                             # the borrowed day photo's at night; < distance.MIN_INLIERS = misfiled / moved camera
     path: Path | None = None  # which photo this answers; the stages finish photos out of order, so results say so
+    alignment: dict | None = None  # how it was lined up (lineup.Line.public); None from backends that do not say
 
 
 def fake(paths: list[Path], calibration: dict, method: str, *, progress=None) -> Iterator[PhotoResult]:
-    """Deterministic per file name, so tests and demos get stable numbers."""
+    """Deterministic per file name, so tests and demos get stable numbers. Made-up numbers with no line-up rules
+    behind them; FakeModels below runs the real rules with stand-in models."""
     if progress:
         progress("finding animals", 0, len(paths))
     for i, p in enumerate(paths, 1):
@@ -240,6 +244,7 @@ class Real:
             self._detect = None
         if measure:
             self._dist, self.sam3 = None, None
+            self.__dict__.pop("_crops", None)  # the photos _link cropped: an idle app keeps none of them
         gc.collect()
         if self.device == "cuda":
             self.torch.cuda.empty_cache()
@@ -290,12 +295,54 @@ class Real:
         with Image.open(p) as im:
             return im.convert("RGB")
 
+    # --- the model calls the run makes; FakeModels replaces exactly these ---------------------------------------
+
+    def _find(self, im, p: Path) -> list[dict]:
+        """MegaDetector on one photo, at MD_CONF: every class it finds."""
+        md, _ = self.detecting()
+        with self.torch.no_grad(), self._autocast():
+            out = md.generate_detections_one_image(self.np.array(im), image_id=p.name, detection_threshold=MD_CONF)
+        return out.get("detections", [])
+
+    def _link(self, target: Path, reference: Path) -> tuple:
+        """One seeded RoMa + MAGSAC line-up target -> reference, both banner-cropped. -> (H | None, inliers).
+        The reference is the flag photo, or (the Night rule) a day photo of the camera: B -> A for the move check,
+        night -> A and night -> B for the vote.
+        A photo that will not decode raises here (lineup.UNREADABLE); the planner, the only caller, turns that
+        into a failed link, so one broken anchor does not stop the run."""
+        crops = self.__dict__.setdefault("_crops", {})
+        if len(crops) > 16:  # a run walks back and forth over the same few day photos; keep those, not the season
+            crops.clear()
+        keys = []
+        for q in (target, reference):
+            k = (q, q.stat().st_mtime_ns)  # a flag photo downloaded again after a relabel is a new picture
+            if k not in crops:
+                crops[k] = distance.crop_banner(self._open(q))
+            keys.append(k)
+        return self.measuring().align(crops[keys[1]], crops[keys[0]])
+
+    def _read(self, dist, im, calibration: dict, Hm, points: list[tuple[float, float]]) -> list[tuple | None]:
+        """[q05, q50, q95] at pixel points, read through the line-up Hm into the flag photo of `calibration`."""
+        return dist.quantiles(dist.predict(im, calibration, Hm), points)
+
+    def link_setting(self) -> str:
+        """What a stored link was measured under, beyond its two files: the fidelity, RoMa's refinement resolution
+        (fast fidelity picks it by the card) and the weights version. A link kept under another setting is measured
+        again, so "Measure again" after a weights update or a fidelity change lines the photos up again."""
+        res = distance.upsample_res(self.torch, self.device, self.fidelity)
+        return f"{self.fidelity} upsample {res} weights {self.manifest['version']}"
+
     def __call__(self, paths: list[Path], calibration: dict, method: str, *, progress=None) -> Iterator[PhotoResult]:
         """Every photo through stage one, then only the photos with an animal through stage two.
 
         Results come back as each photo gets its final answer, which is not the order they were given
         in: an empty frame is finished in stage one and says so at once, while a photo with a deer in it
         is not finished until stage two has aligned it. Each result names its own photo for that reason.
+
+        Each photo with an animal is lined up by the rules in lineup.py (ticket 33): directly by day; at night by the
+        Night rule, through a day photo of the same camera before or after it (Copy, or Chain when the camera moved),
+        never against the flag photo directly. The links a night photo needs are measured when it is measured,
+        whatever the order, and kept.
 
         Photos are decoded twice, once per stage — 47 ms against the seconds a stage costs, and the
         alternative is holding a whole SD card of 6 MB frames in RAM.
@@ -304,14 +351,13 @@ class Real:
             if progress:
                 progress(phase, done, total)
 
-        md, _ = self.detecting()
+        plan = lineup.Planner(self._link, calibration, self.link_setting())
+        self.detecting()
         tick("finding animals", 0, len(paths))
         found = []  # (path, animals, species names) — only the photos worth measuring
         for i, p in enumerate(paths, 1):
             im = self._open(p)
-            with self.torch.no_grad(), self._autocast():
-                out = md.generate_detections_one_image(self.np.array(im), image_id=p.name, detection_threshold=MD_CONF)
-            animals = [d for d in out.get("detections", []) if str(d["category"]) == "1"]  # 1 = animal
+            animals = [d for d in self._find(im, p) if str(d["category"]) == "1"]  # 1 = animal
             if not animals:
                 # An empty frame is done here: no species to name, nothing to align, and its answer is
                 # written now rather than held until the end of the run. Most of a season is this photo.
@@ -333,13 +379,16 @@ class Real:
             im = self._open(p)
             boxes = [d["bbox"] for d in animals]
             points = self._precise(im, boxes) if method == "sam3" else [(x + w / 2, y + h) for x, y, w, h in boxes]
-            quantiles, inliers = dist.read(im, calibration, points)
+            line = plan.plan(p)
+            width, height = im.size
+            px = [(u * width, v * height) for u, v in points]
+            quantiles = [None] * len(px) if line.H is None else self._read(dist, im, calibration, line.H, px)
             dets = []
             for d, name, q in zip(animals, names, quantiles):
                 x, y, w, h = d["bbox"]
                 q05, q50, q95 = q if q else (None, None, None)
                 dets.append(Detection(x, y, x + w, y + h, name, float(d["conf"]), q50, q05, q95))
-            yield PhotoResult(dets, inliers, p)
+            yield PhotoResult(dets, line.score, p, line.public())
             tick("measuring distances", i, len(found))
 
     def align_score(self, photo: Path, calibration: dict) -> int:
@@ -403,6 +452,78 @@ class Real:
                 c = pred.get("classifications")
                 names.append(species_label(c["classes"][0], c["scores"][0]) if c else "unsure")
         return names
+
+
+class FakeModels(Real):
+    """`Real`'s own two-stage run with made-up models in place of MegaDetector, SpeciesNet, RoMa and the net, so the
+    line-up rules, the staging and the store run end to end without a GPU (tests/test_lineup.py). Only the model
+    calls differ (`_find`, `_species`, `_link`, `_read`, loading and releasing); everything between them is Real's.
+
+    Deterministic per file name: `boxes` maps a file name to its detector boxes [(category, x, y, w, h), ...]
+    (default one small animal); `links` maps (target name, reference name) to inliers, or (inliers, dx, dy) for a
+    homography that shifts by (dx, dy) px (default 8,000 points and a sub-pixel shift). A link decodes both photos
+    first, as Real's does, so a broken file fails where it would fail there. The distance read is a plain function
+    of where the line-up puts the point, so two line-ups give two numbers. `weights` is the manifest version the
+    links are kept under. `calls` records every model call, and asking a model that is not loaded fails, as running
+    it off the card would."""
+
+    DEFAULT_BOX = ("1", 0.40, 0.30, 0.10, 0.20)
+
+    def __init__(self, boxes: dict | None = None, links: dict | None = None, fidelity_: str = distance.RESEARCH,
+                 weights: str = "test"):
+        self.np, self.torch, self.fidelity, self.device = np, None, fidelity_, "cpu"  # cpu: link_setting asks no torch
+        self.manifest = {"version": weights}
+        self.gpu, self.precision, self.warning, self.batch = "test models", None, None, None
+        self._detect = self._dist = self.sam3 = None
+        self.box_table, self.link_table = boxes or {}, links or {}
+        self.calls: list[tuple] = []
+
+    def detecting(self):
+        self._detect = self._detect or ("MegaDetector", "SpeciesNet")
+        return self._detect
+
+    def measuring(self):
+        self._dist = self._dist or "RoMa + net"
+        return self._dist
+
+    def release(self, detect: bool = True, measure: bool = True) -> None:
+        self.calls.append(("release", detect, measure))
+        if detect:
+            self._detect = None
+        if measure:
+            self._dist = None
+
+    def _find(self, im, p: Path) -> list[dict]:
+        assert self._detect is not None, "the detector was asked for while it was not loaded"
+        self.calls.append(("detect", p.name))
+        return [{"category": c, "conf": 0.9, "bbox": [x, y, w, h]}
+                for c, x, y, w, h in self.box_table.get(p.name, [self.DEFAULT_BOX])]
+
+    def _species(self, im, boxes) -> list[str]:
+        return ["white-tailed deer"] * len(boxes)
+
+    def _precise(self, im, boxes) -> list[tuple[float, float]]:
+        return [(x + w / 2, y + h) for x, y, w, h in boxes]
+
+    def _link(self, target: Path, reference: Path) -> tuple:
+        assert self._dist is not None, "RoMa was asked for while it was not loaded"
+        for q in (target, reference):
+            self._open(q)
+        self.calls.append(("link", target.name, reference.name))
+        got = self.link_table.get((target.name, reference.name))
+        if got is None:
+            got = (8000, (zlib.crc32(f"{target.name}>{reference.name}".encode()) % 7) / 10, 0.0)
+        inliers, dx, dy = got if isinstance(got, tuple) else (got, 0.0, 0.0)
+        return (np.array([[1, 0, dx], [0, 1, dy], [0, 0, 1]], float) if inliers >= 4 else None), inliers
+
+    def _read(self, dist, im, calibration: dict, Hm, points) -> list[tuple]:
+        assert self._dist is not None, "the distance model was asked for while it was not loaded"
+        out = []
+        for u, v in points:
+            q = Hm @ np.array([u, v, 1.0])
+            q50 = round(4 + (q[0] / q[2] - u) / 10 + (q[1] / q[2] - v) / 5 + 6 * v / im.height, 4)
+            out.append((round(q50 * 0.8, 4), q50, round(q50 * 1.25, 4)))
+        return out
 
 
 # --- choosing a backend at engine start -----------------------------------------------------

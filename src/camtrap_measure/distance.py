@@ -209,6 +209,25 @@ def load_unified(ckdir: Path, device: str):
     return model.to(device).eval()
 
 
+def upsample_res(torch, device: str, fidelity: str) -> int:
+    """RoMa's refinement resolution. The research default at research fidelity, always; under fast
+    fidelity, chosen by the size of the card and never by what is free at this moment, so that a given
+    computer still produces the same numbers every run. Answerable before RoMa is loaded: a stored line-up
+    is keyed on it (inference.Real.link_setting).
+
+    Measured on the dept's 8 GB RTX 2060 SUPER (2026-08-23, scripts/profile_run.py): at 864 one photo
+    needs 6.3 GB, more than Windows leaves free with a browser open, so the driver quietly serves the
+    overflow from system memory over PCIe and a photo takes 3.6 to 26 seconds - the same run, the same
+    settings, a lottery. At 672 it needs 4.4 GB, fits, and takes about 2. The metres move by ~8 cm,
+    which is inside the 3-17 cm that repeat runs of identical settings moved before ticket 30 seeded
+    RoMa's match sampling (the draw-to-draw spread). A card big enough for 864 keeps the research default.
+    """
+    if device != "cuda" or fidelity == RESEARCH:
+        return UPSAMPLE_RES
+    total_gb = torch.cuda.get_device_properties(0).total_memory / 2**30
+    return UPSAMPLE_RES_TIGHT if total_gb < TIGHT_CARD_GB else UPSAMPLE_RES
+
+
 class Distance:
     """RoMa + unified net, loaded once. `read()` gives [q05, q50, q95] per ground-contact point."""
 
@@ -235,21 +254,7 @@ class Distance:
             self.net = self.net.to(self.dtype)
 
     def _upsample_res(self) -> int:
-        """RoMa's refinement resolution. The research default at research fidelity, always; under fast
-        fidelity, chosen by the size of the card and never by what is free at this moment, so that a given
-        computer still produces the same numbers every run.
-
-        Measured on the dept's 8 GB RTX 2060 SUPER (2026-08-23, scripts/profile_run.py): at 864 one photo
-        needs 6.3 GB, more than Windows leaves free with a browser open, so the driver quietly serves the
-        overflow from system memory over PCIe and a photo takes 3.6 to 26 seconds - the same run, the same
-        settings, a lottery. At 672 it needs 4.4 GB, fits, and takes about 2. The metres move by ~8 cm,
-        which is inside the 3-17 cm that repeat runs of identical settings moved before ticket 30 seeded
-        RoMa's match sampling (the draw-to-draw spread). A card big enough for 864 keeps the research default.
-        """
-        if self.device != "cuda" or self.fidelity == RESEARCH:
-            return UPSAMPLE_RES
-        total_gb = self.torch.cuda.get_device_properties(0).total_memory / 2**30
-        return UPSAMPLE_RES_TIGHT if total_gb < TIGHT_CARD_GB else UPSAMPLE_RES
+        return upsample_res(self.torch, self.device, self.fidelity)
 
     def reference(self, calibration: dict) -> tuple:
         """Reference features for one calibration window, computed once and kept. Keyed on the annotation
@@ -278,22 +283,33 @@ class Distance:
     def read(self, im: Image.Image, calibration: dict, contacts: list[tuple[float, float]]) -> tuple[list[tuple | None], int]:
         """contacts = (x, y) fractions of the image. → ([(q05, q50, q95) | None per contact], inliers).
         A photo that does not align to its flag photo gets no numbers at all."""
-        torch = self.torch
-        import torch.nn.functional as F
-
-        ref_crop, ref_t, model = self.reference(calibration)
+        ref_crop, _, _ = self.reference(calibration)
         Hm, inliers = self.align(ref_crop, crop_banner(im))
         if Hm is None:
             return [None] * len(contacts), inliers
+        width, height = im.size
+        return self.quantiles(self.predict(im, calibration, Hm), [(fx * width, fy * height) for fx, fy in contacts]), inliers
+
+    def predict(self, im: Image.Image, calibration: dict, Hm: np.ndarray) -> np.ndarray:
+        """The [q05, q50, q95] maps of a photo, (3, H, W), read through a line-up Hm (photo -> flag photo pixels)
+        that was measured already: the photo's own, or the day photo's that a night photo borrows (lineup.py)."""
+        torch = self.torch
+        import torch.nn.functional as F
+
+        _, ref_t, model = self.reference(calibration)
         width, height = im.size
         d = np.nan_to_num(distance_map(Hm, model, width, height).astype(np.float32), nan=0.0)
         d_r = F.interpolate(torch.from_numpy(d)[None, None], (SIZE, SIZE), mode="nearest")[0, 0]
         x = torch.cat([torch.from_numpy(normalize(im)), ref_t, (d_r / PROMPT_SCALE)[None]], 0)[None].to(self.device)
         with torch.no_grad(), torch.autocast("cuda", dtype=self.dtype, enabled=self.device == "cuda"):
             pred = self.net(pixel_values=x).predicted_depth  # (1, 3, SIZE, SIZE) = [q05, q50, q95]
-        pred = F.interpolate(pred.float(), (height, width), mode="bilinear", align_corners=True)[0].cpu().numpy()
+        return F.interpolate(pred.float(), (height, width), mode="bilinear", align_corners=True)[0].cpu().numpy()
+
+    @staticmethod
+    def quantiles(pred: np.ndarray, points: list[tuple[float, float]]) -> list[tuple | None]:
+        """(q05, q50, q95) at each pixel (u, v), 5×5 nanmedian; None where the window holds nothing."""
         out = []
-        for fx, fy in contacts:
-            qs = [read_at(pred[i], fx * width, fy * height) for i in range(3)]
+        for u, v in points:
+            qs = [read_at(pred[i], u, v) for i in range(3)]
             out.append(None if None in qs else (qs[0], qs[1], qs[2]))
-        return out, inliers
+        return out
