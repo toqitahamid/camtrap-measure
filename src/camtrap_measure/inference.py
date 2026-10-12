@@ -88,7 +88,8 @@ class Detection:
 class PhotoResult:
     detections: list[Detection]
     match_score: int | None  # homography inliers of the line-up used: the photo's own against the flag photo by day,
-                             # the borrowed day photo's at night; < distance.MIN_INLIERS = misfiled / moved camera
+                             # the borrowed day photo's at night or by the day rule; < distance.MIN_INLIERS = misfiled
+                             # / moved camera
     path: Path | None = None  # which photo this answers; the stages finish photos out of order, so results say so
     alignment: dict | None = None  # how it was lined up (lineup.Line.public); None from backends that do not say
 
@@ -339,7 +340,8 @@ class Real:
         in: an empty frame is finished in stage one and says so at once, while a photo with a deer in it
         is not finished until stage two has aligned it. Each result names its own photo for that reason.
 
-        Each photo with an animal is lined up by the rules in lineup.py (ticket 33): directly by day; at night by the
+        Each photo with an animal is lined up by the rules in lineup.py (tickets 33 and 35): directly by day when its
+        own line-up is strong, else by the day rule (Copy or Fallback from a clear day photo near it); at night by the
         Night rule, through a day photo of the same camera before or after it (Copy, or Chain when the camera moved),
         never against the flag photo directly. The links a night photo needs are measured when it is measured,
         whatever the order, and kept.

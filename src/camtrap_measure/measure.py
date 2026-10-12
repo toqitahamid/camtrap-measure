@@ -176,8 +176,9 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, ch
 
     And the line-up rules (ticket 33, `lineup.current`): a night photo measured under an earlier line-up version
     (lined up with the flag photo directly, or by the first bracket design) is measured again, once; a day photo's
-    answer stands. A night photo that lacked a day photo on a side is planned again once its folder or the camera's
-    flag photos change. `check` carries what that asks of the disk across one listing or run (a run passes
+    answer stands, unless it was lined up directly with fewer than lineup.DAY_WEAK points (ticket 35: the day rule
+    measures it again, once). A photo that lacked a day photo on a side is planned again once its folder or the
+    camera's flag photos change. `check` carries what that asks of the disk across one listing or run (a run passes
     `lineup.Check(read=True)`)."""
     return bool(known and known["method"] == method and known.get("fidelity") == fidelity
                 and known["site"] == cal["site"] and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at")
@@ -264,7 +265,9 @@ def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment
     """One researcher-log line for a photo just measured and stored, day or night (user decision 2026-10-11: one log,
     and the reasons go there only). `reasons` are report.reasons of each stored box row, as the store holds it
     (photo fields under box fields), in order and without repeats; [] when there are none. A night photo also carries
-    its Night-rule detail under `night`."""
+    its Night-rule detail under `night`; a day photo lined up by the day rule (ticket 35: its own line-up was weak)
+    carries the day-rule detail under `day_borrow` (path, side, anchor, own points, A and B with their tries, the
+    move check, the checks by eye, and why there is no answer). A day photo lined up directly carries neither."""
     from .report import reasons  # report imports this module
 
     try:
@@ -278,7 +281,9 @@ def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment
                 "day_night": None if night is None else "night" if night else "day",
                 "distance": any(d["distance_m"] is not None for d in dets), "animals": len(dets), "reasons": why}
         if alignment and alignment.get("night"):  # lined up by the Night rule
-            line["night"] = lineup.night_detail(alignment)
+            line["night"] = lineup.rule_detail(alignment)
+        elif alignment and alignment.get("source") == lineup.DAY_BORROW:  # lined up by the day rule
+            line["day_borrow"] = lineup.rule_detail(alignment)
     except Exception as e:  # the log must never stop a run (log_research guards the write itself)
         print(f"research log not written: {e}", file=sys.stderr, flush=True)
         return

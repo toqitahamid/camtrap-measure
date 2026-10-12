@@ -292,7 +292,8 @@ class Distance:
 
     def predict(self, im: Image.Image, calibration: dict, Hm: np.ndarray) -> np.ndarray:
         """The [q05, q50, q95] maps of a photo, (3, H, W), read through a line-up Hm (photo -> flag photo pixels)
-        that was measured already: the photo's own, or the day photo's that a night photo borrows (lineup.py)."""
+        that was measured already: the photo's own, or the day photo's that a night photo or a weak day photo
+        borrows (lineup.py)."""
         torch = self.torch
         import torch.nn.functional as F
 

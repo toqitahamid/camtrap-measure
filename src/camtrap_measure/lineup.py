@@ -1,6 +1,8 @@
-"""How each photo is lined up with its flag photo before the distance model reads it: the Night rule (ticket 33).
+"""How each photo is lined up with its flag photo before the distance model reads it: the Night rule (ticket 33) and
+the day rule (ticket 35).
 
-A day photo lines up with the flag photo directly, as before. A night IR photo does not: against the daytime colour
+A day photo lines up with the flag photo directly when its own line-up has a homography and DAY_WEAK points or more,
+as before. A weaker day photo follows the day rule (below). A night IR photo does not: against the daytime colour
 flag photo it gets a few dozen matching points (MAS_CAM07 IMG_0215: 34, where a day photo gets 9,465), and two frames
 of one still deer read 6.6 m and 9.9 m. So a night photo is never lined up with the flag photo. It uses a day photo of
 its camera instead:
@@ -17,8 +19,22 @@ its camera instead:
    H(night -> flag) = H(day -> flag) . H(night -> day). Otherwise **Fallback**: copy the nearer day photo.
 4. Only one found: Copy it. None found: no distance.
 
+The day rule (ticket 35, user decisions 2026-10-12) borrows the same way. A day photo whose own line-up has no
+homography or fewer than DAY_WEAK points finds A and B as above (the photo itself is never its own neighbour), with
+two changes (review, 2026-10-12): its own burst (photos within BURST_S of it) is tried first on each side, with no
+burst-mate skip; and a flag photo stands as A or B only when the other side is a real day photo (the wrong-camera
+guard). Both found: the move check, then Copy the nearer; on a move (or B -> A too weak to tell) there is no vote
+and no Chain ("no chain"): Fallback, copy the nearer, with the check "moved". One found: Copy it. None found: keep the photo's own
+line-up when it has a homography and DAY_KEEP points or more, else no distance. Why: a frame-filling animal hides the
+background, and its own line-up breaks (8 verified weak frame-filling day photos, 86-2,339 points, shifted 400-5,300 px
+against 20-120 px for strong neighbours; TON_CAM04 IMG_0982 / IMG_0981 read 9.30 / 10.48 m where their burst mates
+read 11.18-11.40 m). 3.5% of 1,087 day animal photos are under 4,000 points (14% at a 50% box share or more), and 99.3%
+of frame-filling day photos have a clearer photo within 120 s. Small animals at dawn or dusk with 1,122-4,000 points
+were usually right (within about 30 px of strong neighbours), so with no neighbour an own line-up of 2,500 points or
+more is kept. On a wrong camera (54-276 points) the neighbours fail too: no distance instead of a wrong one.
+
 Every rule and threshold is from ../distance_estimation, experiments/refnet, and the design grilling
-(.scratch/app/issues/33-night-bracket-grilling.md, Q1-Q13):
+(.scratch/app/issues/33-night-bracket-grilling.md, Q1-Q13; the day rule: .scratch/app/issues/35-day-borrow.md):
   43_bracket_rule         Copy against the research night chain (Q1 median 0.017 m, p95 0.090 m)
   38_fleet_anchor_chain   the day-photo search (tries, burst mates) and the shift grid
   59_anchor_threshold     DAY_MIN 4,000 (Q6)
@@ -48,10 +64,15 @@ VERSION = 2  # how photos are lined up; a stored answer from another version is 
              # 1 (2026-10-10): night photos borrowed a day photo's line-up when the day photos agreed within 5 px.
              # 2 (2026-10-11): the Night rule: 4,000 points, 20 px, Chain on a move, flag photos as day photos, no
              # "no distance" for a moved camera or a missing side. Day answers are the same under 1 and 2: kept.
+             # Not bumped for the day rule (2026-10-12): a bump would measure every night answer again. The day
+             # rule changes only a day answer lined up directly with fewer than DAY_WEAK points, and `current` calls
+             # exactly those out of date, under any version.
 LINK_VERSION = 1  # how one link is measured (seeded RoMa + MAGSAC, target -> reference, both banner-cropped; shift
                   # p95 over the target's cropped frame). Apart from VERSION: a link is a fact about two files, the
                   # same under any rule that uses it, so a rule change re-plans from the stored links.
 DAY_MIN = 4000     # a day photo is A or B when it lines up with the flag photo this well (folder 59, Q6; was 5,000)
+DAY_WEAK = DAY_MIN  # a day photo keeps its own line-up (direct) with a homography and this many points; else day rule
+DAY_KEEP = 2500    # day rule, no A or B: the photo's own line-up is kept with a homography and this many points
 SAME_PX = 20.0     # B onto A shifts by at most this (p95): the camera did not move between A and B (Q3a; was 5)
 LINK_OK = 1000     # below this the B -> A shift is a guess (folder 38 sub-test D); read as "moved" (never seen, folder 58)
 CHAIN_MIN = 2000   # a night -> day line-up the Chain may use has this many points or more (folder 60, Q8)
@@ -65,9 +86,11 @@ _UNREACHED = (FileNotFoundError, PermissionError)  # the file was not there or w
 
 DIRECT, NIGHT, UNKNOWN = "direct", "night", "unknown"  # Line.source: a day photo's own line-up; a night photo by the
                                                        # Night rule; neither, day or night could not be read just now
+DAY_BORROW = "day_borrow"  # Line.source: a day photo by the day rule (its own line-up under DAY_WEAK points)
 OK, NONE, UNREAD = "ok", "none", "unread"  # Line.status; UNREAD: not measurable this run, no answer kept (measure._job)
-COPY, CHAIN, FALLBACK, ONE_SIDE = "copy", "chain", "fallback", "one_side"  # Line.detail["path"] of a night answer
-NO_DAY, UNPLACED, NO_FOLDER = "no_day", "unplaced", "no_folder"  # Line.detail["why"] of a night photo with no distance
+COPY, CHAIN, FALLBACK, ONE_SIDE = "copy", "chain", "fallback", "one_side"  # Line.detail["path"] of a borrowed answer
+OWN = "own"  # Line.detail["path"] of a day-rule answer that kept its own line-up (no A or B, DAY_KEEP points or more)
+NO_DAY, UNPLACED, NO_FOLDER = "no_day", "unplaced", "no_folder"  # Line.detail["why"]: no A or B was found or looked for
 NO_LISTING = "unreadable"  # Line.folder of a NO_FOLDER answer: folder_signature never gives it, so it is planned again
 # what a night answer asks a researcher to check by eye (Line.detail["checks"]); only the researcher log carries them
 MOVED, UNCHECKED, UNDATED = "moved", "unchecked", "undated"
@@ -265,9 +288,10 @@ IDENTITY = Link(np.eye(3), None, 0.0)  # the flag photo lined up with itself
 
 @dataclass
 class Line:
-    """How one photo lands in its flag photo. `score` = the points of the line-up used: the photo's own by day; at
-    night the weakest link of what it uses (the day photo's points, or the Chain's lower one), None when it copies the
-    flag photo itself or has no line-up. `detail` holds what the researcher log keeps (`night_detail`).
+    """How one photo lands in its flag photo. `score` = the points of the line-up used: the photo's own by day (also
+    when the day rule keeps it, or gives no distance); when borrowed (night, or the day rule) the weakest link of what
+    it uses (the day photo's points, or the Chain's lower one), None when it copies the flag photo itself or a night
+    photo has no line-up. `detail` holds what the researcher log keeps (`rule_detail`).
     `folder` is set only when a side had no day photo: the folder's signature then, so a photo arriving later re-plans
     it."""
     source: str
@@ -317,6 +341,7 @@ class Planner:
         self.lines: dict[Path, Line] = {}
         self.cams: dict[Path, Camera] = {}
         self.sizes: dict[Path, tuple[int, int]] = {}
+        self.unreached: set[tuple[str, str]] = set()  # links that failed for the moment (a file gone or locked)
 
     # facts, each read once and kept
     def camera(self, p: Path) -> Camera:
@@ -375,27 +400,62 @@ class Planner:
                 got = (None, 0, None)
                 if stamps and not isinstance(e, _UNREACHED):
                     store.save_link(*key, self.setting, LINK_VERSION, *stamps, *got)
+                else:  # about the moment: the day rule keeps no answer on it (day_rule)
+                    self.unreached.add(key)
             self.links[key] = Link(*got)
         return self.links[key]
 
     # the rules
-    def direct(self, p: Path) -> Line:
-        """A day photo's own line-up. One that found no homography is status NONE, with its points as the score (the
-        "lines up poorly" reason quotes them), as before ticket 33."""
-        L = self.link(p, self.ref)
-        return Line(DIRECT, NONE if L.H is None else OK, L.H, L.inliers, night=False)
+    def day_rule(self, p: Path) -> Line:
+        """A day photo. Its own line-up with a homography and DAY_WEAK points or more: direct, as before. Otherwise the
+        day rule (module docstring): Copy or Fallback through day photos A and B, never a vote or a Chain; with no A
+        or B, its own line-up when it has a homography and DAY_KEEP points or more, else no distance. Every day-rule
+        answer is source DAY_BORROW and keeps the own line-up's points in its detail.
 
-    def find_day(self, cam: Camera, p: Path, step: int) -> tuple[Path | None, Link | None, list]:
-        """Day photo A (step -1) or B (+1) of night photo p: the first day photo or flag photo in this direction that
+        When the own line-up failed only for the moment (the photo or the flag photo gone or locked: a link not
+        kept), no rule runs: the line is UNREAD, as when day or night cannot be read, so no answer is kept and the next
+        run tries again."""
+        own = self.link(p, self.ref)
+        if (str(p), str(self.ref)) in self.unreached:
+            return Line(UNKNOWN, UNREAD)
+        if own.H is not None and own.inliers >= DAY_WEAK:
+            return Line(DIRECT, OK, own.H, own.inliers, night=False)
+        mine = {"own_points": own.inliers, "own_px": _px(own)}
+        cam = self.camera(p)
+        if cam.unread:  # the folder could not be listed just now: no A or B to look for; planned again next run
+            return self._own_or_none(own, {"flag": self.ref.name, **mine, "why": NO_FOLDER, "error": cam.unread},
+                                     NO_LISTING)
+        if p not in cam.idx:  # the date scan could not open it, yet it reads as day now: not placed in time
+            return self._own_or_none(own, {"flag": self.ref.name, **mine, "why": UNPLACED}, None)
+        line, detail, checks = self._borrow(cam, p, DAY_BORROW, mine)
+        if line is not None:
+            return line
+        return self._own_or_none(own, {**detail, "why": NO_DAY, "needs": DAY_MIN, "tries": TRIES, "keeps": DAY_KEEP,
+                                       "checks": checks}, cam.signature)
+
+    @staticmethod
+    def _own_or_none(own: Link, detail: dict, folder: str | None) -> Line:
+        """A day photo with no A or B: its own line-up when it has a homography and DAY_KEEP points or more (path OWN),
+        else no distance (status NONE, no homography; the score is its own points, which the reason may quote)."""
+        if own.H is not None and own.inliers >= DAY_KEEP:
+            return Line(DAY_BORROW, OK, own.H, own.inliers, False, None, {**detail, "path": OWN}, folder)
+        return Line(DAY_BORROW, NONE, None, own.inliers, False, None, detail, folder)
+
+    def find_day(self, cam: Camera, p: Path, step: int, photos: list[Path] | None = None, tries: list | None = None,
+                 mates: bool = True) -> tuple[Path | None, Link | None, list]:
+        """Day photo A (step -1) or B (+1) of photo p: the first day photo or flag photo in this direction that
         lines up with the job's flag photo with DAY_MIN points or more, its link, and every try [name, points]. The
         job's flag photo is its own line-up and always passes. TRIES photos at most; one within BURST_S of a rejected
         one is the same burst and is skipped (photos with no capture time are never burst mates).
 
         A flag photo of another pixel size than p is passed over, not tried: its line-up (the identity for the job's
         flag photo) maps its own pixels, not p's, and the only other way to use it would be a link from the night
-        photo to a flag photo (Q10)."""
-        rejected, tries = [], []
-        for g in cam.step(p, step):
+        photo to a flag photo (Q10). p itself is never tried: the walk starts at its neighbour.
+
+        The Night rule calls it with p and the step only. The day rule (`find_near`) also hands it the `photos` to
+        walk, the `tries` so far, and `mates` False for p's own burst, where no try is skipped as a burst mate."""
+        rejected, tries = [], ([] if tries is None else tries)
+        for g in (cam.step(p, step) if photos is None else photos):
             if g in cam.flags and not self.same_size(g, p):
                 continue
             if g == self.ref:
@@ -403,8 +463,8 @@ class Planner:
                 return g, IDENTITY, tries
             if g not in cam.flags and self.night(g) is not False:
                 continue
-            if any(cam.at[g] is not None and cam.at[r] is not None and abs(cam.at[g] - cam.at[r]) <= BURST_S
-                   for r in rejected):
+            if mates and any(cam.at[g] is not None and cam.at[r] is not None and abs(cam.at[g] - cam.at[r]) <= BURST_S
+                             for r in rejected):
                 continue
             L = self.link(g, self.ref)
             tries.append([g.name, L.inliers])
@@ -415,6 +475,27 @@ class Planner:
                 break
         return None, None, tries
 
+    def find_near(self, cam: Camera, p: Path, step: int) -> tuple[Path | None, Link | None, list]:
+        """Day photo A (step -1) or B (+1) of a weak day photo p: burst first (review M1, 2026-10-12). A weak day
+        photo is usually one frame of a burst whose other frames show more background. So first every photo of p's
+        own burst on this side (the dated photos within BURST_S of p, nearest first, up to the first that is not) is
+        tried, with no burst-mate skip: a rejected frame must not hide a strong frame a few seconds away. Then the
+        normal search (`find_day`) goes on beyond the burst, with its own TRIES and burst-mate skip.
+
+        The burst has a TRIES budget of its own, and its rejected tries neither count against the normal search's
+        TRIES nor make its photos burst mates of what lies beyond: the burst is p's burst, not a rejected anchor's.
+        At most 2 x TRIES links to the flag photo a side, each kept in the store like any link. An undated p has no
+        burst: the normal search alone."""
+        side = list(cam.step(p, step))
+        k = 0
+        if cam.at[p] is not None:
+            while k < len(side) and cam.at[side[k]] is not None and abs(cam.at[side[k]] - cam.at[p]) <= BURST_S:
+                k += 1
+        g, L, tries = self.find_day(cam, p, step, side[:k], mates=False)
+        if g is not None:
+            return g, L, tries
+        return self.find_day(cam, p, step, side[k:], tries)
+
     def night_rule(self, p: Path) -> Line:
         """A night photo: Copy, Chain or Fallback through day photos A and B (module docstring). Never a link from the
         night photo to a flag photo: a flag photo standing as A or B takes no part in the vote."""
@@ -423,21 +504,45 @@ class Planner:
             return Line(NIGHT, NONE, night=True, folder=NO_LISTING, detail={"why": NO_FOLDER, "error": cam.unread})
         if p not in cam.idx:  # the date scan could not open it, yet it reads as night now: not placed in time
             return Line(NIGHT, NONE, night=True, detail={"why": UNPLACED})
-        a, to_a, tries_a = self.find_day(cam, p, -1)
-        b, to_b, tries_b = self.find_day(cam, p, +1)
-        # placed by file number or file time (Q13): the night photo, or a day photo it used (flag photos are dated)
+        line, detail, checks = self._borrow(cam, p, NIGHT)
+        if line is not None:
+            return line
+        return Line(NIGHT, NONE, night=True, folder=cam.signature,
+                    detail={**detail, "why": NO_DAY, "needs": DAY_MIN, "tries": TRIES, "checks": checks})
+
+    def _borrow(self, cam: Camera, p: Path, source: str, extra: dict | None = None) -> tuple[Line | None, dict, list]:
+        """What the Night rule and the day rule share, for photo p placed in `cam`: find day photos A and B, then one
+        side (Copy it), the move check (Copy the nearer), or a move. On a move the Night rule (source NIGHT) votes and
+        may Chain; the day rule (DAY_BORROW) never does ("no chain"): Fallback, copy the nearer. -> (the line, or None
+        when neither A nor B was found, for the caller to answer; the detail so far; the checks by eye so far).
+        `extra` goes into the detail after the tries (the day rule's own points).
+
+        By day A and B come from `find_near` (burst first), and a flag photo stands as A or B only when the other side
+        is a real day photo (DAY_MIN points to the flag photo): the wrong-camera guard (review, 2026-10-12). On a wrong
+        camera no day photo passes, and a flag photo alone would hand its identity line-up to every photo near it. The
+        flag photos found but not used are in the detail's `flag_only`."""
+        night = source == NIGHT
+        find = self.find_day if night else self.find_near
+        a, to_a, tries_a = find(cam, p, -1)
+        b, to_b, tries_b = find(cam, p, +1)
+        unused = []
+        if not night and not any(x is not None and x not in cam.flags for x in (a, b)):
+            unused = [x.name for x in (a, b) if x is not None]  # flag photos only, or nothing: no A and no B
+            a = to_a = b = to_b = None
+        # placed by file number or file time (Q13): the photo, or a day photo it used (flag photos are dated)
         undated = cam.at[p] is None or any(x is not None and cam.at[x] is None for x in (a, b))
         detail = {"flag": self.ref.name, "order": cam.placed[p], "before": a and a.name, "after": b and b.name,
-                  "before_tries": tries_a, "after_tries": tries_b}
+                  "before_tries": tries_a, "after_tries": tries_b, **(extra or {})}
+        if unused:
+            detail["flag_only"] = unused
         checks = [UNDATED] if undated else []
         if a is None and b is None:
-            return Line(NIGHT, NONE, night=True, folder=cam.signature,
-                        detail={**detail, "why": NO_DAY, "needs": DAY_MIN, "tries": TRIES, "checks": checks})
+            return None, detail, checks
         if a is None or b is None:
             x, to_x = (a, to_a) if a is not None else (b, to_b)
-            return Line(NIGHT, OK, to_x.H, to_x.inliers, True, x.name,
+            return Line(source, OK, to_x.H, to_x.inliers, night, x.name,
                         {**detail, "path": ONE_SIDE, "side": "A" if x is a else "B", "checks": [UNCHECKED, *checks]},
-                        folder=cam.signature)
+                        folder=cam.signature), detail, checks
         day = {"A": (a, to_a), "B": (b, to_b)}
         gap_a, gap_b, unit = cam.gaps(p, a, b)
         near = "A" if gap_a <= gap_b else "B"
@@ -446,34 +551,37 @@ class Planner:
                       move_points=move.inliers, move_px=_px(move))
         if move.H is not None and move.inliers >= LINK_OK and move.shift <= SAME_PX:
             x, to_x = day[near]
-            return Line(NIGHT, OK, to_x.H, to_x.inliers, True, x.name, {**detail, "path": COPY, "side": near,
-                                                                        "checks": checks})
-        # moved (or B -> A too weak to tell, read as moved): the vote, among the sides that are not flag photos
-        votes = {s: self.link(p, x) for s, (x, _) in day.items() if x not in cam.flags}
-        detail["vote"] = {s: [L.inliers, _px(L)] for s, L in votes.items()}
-        if votes:
-            top = max(L.inliers for L in votes.values())
-            best = [s for s, L in votes.items() if L.inliers == top]
-            win = near if near in best else best[0]
-            L = votes[win]
-            if L.H is not None and L.inliers >= CHAIN_MIN and L.shift is not None and L.shift < CHAIN_PX:
-                x, to_x = day[win]
-                return Line(NIGHT, OK, to_x.H @ L.H, _weakest(L, to_x), True, x.name,
-                            {**detail, "path": CHAIN, "side": win, "checks": checks})
-            detail["voted"] = win
+            return Line(source, OK, to_x.H, to_x.inliers, night, x.name, {**detail, "path": COPY, "side": near,
+                                                                          "checks": checks}), detail, checks
+        # moved (or B -> A too weak to tell, read as moved). At night: the vote, among the sides that are not flag
+        # photos. By day: no vote and no Chain, straight to the Fallback.
+        if night:
+            votes = {s: self.link(p, x) for s, (x, _) in day.items() if x not in cam.flags}
+            detail["vote"] = {s: [L.inliers, _px(L)] for s, L in votes.items()}
+            if votes:
+                top = max(L.inliers for L in votes.values())
+                best = [s for s, L in votes.items() if L.inliers == top]
+                win = near if near in best else best[0]
+                L = votes[win]
+                if L.H is not None and L.inliers >= CHAIN_MIN and L.shift is not None and L.shift < CHAIN_PX:
+                    x, to_x = day[win]
+                    return Line(NIGHT, OK, to_x.H @ L.H, _weakest(L, to_x), True, x.name,
+                                {**detail, "path": CHAIN, "side": win, "checks": checks}), detail, checks
+                detail["voted"] = win
         x, to_x = day[near]
-        return Line(NIGHT, OK, to_x.H, to_x.inliers, True, x.name,
-                    {**detail, "path": FALLBACK, "side": near, "checks": [MOVED, *checks]})
+        return Line(source, OK, to_x.H, to_x.inliers, night, x.name,
+                    {**detail, "path": FALLBACK, "side": near, "checks": [MOVED, *checks]}), detail, checks
 
     def plan(self, p: Path) -> Line:
-        """p's line-up by the rules: direct by day, the Night rule at night. Kept, so photos of one night ask the store
-        once. When day or night cannot be read just now (the file locked or half copied), neither rule runs: the
-        direct line-up might be a night photo's link to the flag photo (Q10), and a guess would be kept as a day photo
-        for good. The line is UNREAD: measure._job keeps no answer, so the next run reads the photo again."""
+        """p's line-up by the rules: the day rule by day (direct when its own line-up is strong), the Night rule at
+        night. Kept, so photos of one night ask the store once. When day or night cannot be read just now (the file
+        locked or half copied), neither rule runs: the direct line-up might be a night photo's link to the flag photo
+        (Q10), and a guess would be kept as a day photo for good. The line is UNREAD: measure._job keeps no answer, so
+        the next run reads the photo again."""
         if p not in self.lines:
             night = self.night(p)
             self.lines[p] = (Line(UNKNOWN, UNREAD) if night is None else
-                             self.night_rule(p) if night else self.direct(p))
+                             self.night_rule(p) if night else self.day_rule(p))
         return self.lines[p]
 
 
@@ -486,10 +594,11 @@ def log_dir() -> Path:
     return Path(launcher).parent if launcher else store.DATA_DIR / "logs"
 
 
-def night_detail(alignment: dict) -> dict:
-    """What the researcher log keeps about how a night photo was measured: its status, the day photo it used (anchor),
-    the score, and the Night rule's detail (Copy / Chain / Fallback / one side, the day photos with their tries and
-    points, the gaps, the move check, the vote, and the checks by eye)."""
+def rule_detail(alignment: dict) -> dict:
+    """What the researcher log keeps about how a night photo (the Night rule) or a weak day photo (the day rule) was
+    measured: its status, the day photo it used (anchor), the score, and the rule's detail (Copy / Chain / Fallback /
+    one side / own, the day photos with their tries and points, the gaps, the move check, the vote, the day photo's
+    own points, why there is no answer, and the checks by eye)."""
     return {"status": alignment.get("status"), "anchor": alignment.get("anchor"), "score": alignment.get("score"),
             **(alignment.get("detail") or {})}
 
@@ -528,19 +637,34 @@ class Check:
         return self.sigs[(folder, site)]
 
 
+def weak_direct(known: dict) -> bool:
+    """Was this stored answer lined up directly with fewer than DAY_WEAK points? The day rule (ticket 35) answers such
+    a day photo another way, so it is measured again, once: the new answer is a day-rule one, or direct with DAY_WEAK
+    points or more, and never weak direct again. Rows from before line-up versions were all lined up directly. A
+    night answer (source NIGHT), a day-rule answer, an answer with no line-up (no animal, no score) and a stand-in
+    backend's row (no source) are never weak direct."""
+    direct = known.get("align_source") == DIRECT or known.get("alignment_version") is None
+    score = known.get("match_score")
+    return direct and score is not None and score < DAY_WEAK
+
+
 def current(known: dict, check: Check | None = None) -> bool:
     """Is this stored answer's line-up the one these rules give? measure.current_answer asks this last.
 
+    - Under any version: a day answer lined up directly with fewer than DAY_WEAK points (`weak_direct`) is measured
+      again, once, by the day rule (2026-10-12). Night answers are not touched by this, so VERSION stays 2.
     - Under this VERSION: yes, unless a side had no day photo and the folder or the camera's flag photos have changed
       since; then a day photo may have arrived (a card copied in two goes, a service visit synced), so it is planned
-      again.
-    - Under an earlier line-up version: the row says day or night. A day photo's answer stands (day photos line up as
-      before), and so does a row that needed no line-up (no animal); a night photo is measured again, once.
+      again. A day-rule answer with no A or B keeps the folder too.
+    - Under an earlier line-up version: the row says day or night. A day photo's answer stands (when not weak direct),
+      and so does a row that needed no line-up (no animal); a night photo is measured again, once.
     - From before line-up versions: an answer with no line-up (no animal, so no match score) stands, and so does a
-      day photo's. A night photo is measured again, once. A listing that has not read the photo yet calls it out of
-      date; the next run reads it and keeps a day photo's answer. A photo the run cannot read is out of date for that
-      run and nothing is kept, so the next run reads it again."""
+      day photo's with DAY_WEAK points or more. A night photo is measured again, once. A listing that has not read the
+      photo yet calls it out of date; the next run reads it and keeps a strong day photo's answer. A photo the run
+      cannot read is out of date for that run and nothing is kept, so the next run reads it again."""
     check = check or Check()
+    if weak_direct(known):  # day or night alike: measured again either way, so the photo need not be read
+        return False
     version = known.get("alignment_version")
     if version == VERSION:
         folder = known.get("align_folder")

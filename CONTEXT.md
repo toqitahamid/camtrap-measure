@@ -2025,3 +2025,84 @@ run gives a plausible wrong distance and the CSV names the wrong camera.
 - Side effects: with no camera the Results screen opens on every camera (it opened on `usable[0]` before a folder
   was chosen); the "Measure this photo" button of an unmeasured photo is now disabled while busy, like its
   neighbours. Site folders are unchanged except where a name fitted two cameras (above).
+
+## Day borrow: a weak day photo borrows a day photo's line-up (2026-10-12, ticket 35)
+
+**Rule.** A day photo keeps its own direct line-up only when that line-up has a homography and at least 4,000 points
+(`lineup.DAY_WEAK` = `DAY_MIN`). A weaker day photo follows the **day rule**, which reuses the Night rule's search:
+day photos A (before) and B (after) in the same folder, each with at least 4,000 points to the job's flag photo, 3
+tries a side, burst mates within 120 s of a rejected try skipped, the flag photos taking part as in the Night rule,
+and the photo itself never its own neighbour. Two changes by day (review and user approval, 2026-10-12):
+
+- **Burst first** (`Planner.find_near`). On each side, the photos of the weak photo's own burst (the dated photos
+  within 120 s of it, nearest first) are tried first, with no burst-mate skip. Then the normal search goes on beyond
+  the burst. The burst has its own budget of 3 tries; its rejected tries do not count against the normal search's 3
+  and do not make the photos beyond the burst burst mates. Why: before, one rejected weak frame hid every strong frame
+  within 120 s of it. In the reviewer's probe (IMG_0 9,000 points, IMG_1 weak, IMG_2 2,000, IMG_3 weak, IMG_4 9,000,
+  2 s apart) IMG_2 found neither side and got no distance; now it copies IMG_0. A side costs at most 6 line-ups to
+  the flag photo instead of 3. An undated photo has no burst and gets the normal search only.
+- **Wrong-camera guard** (`Planner._borrow`). A flag photo stands as A or B only when the other side is a real day
+  photo with at least 4,000 points. Otherwise the photo goes to rule 3 below, and the flag photos found are in the
+  detail's `flag_only`. Why: the job's flag photo always passes as its own identity line-up. On a wrong camera no day
+  photo passes, so a dated flag photo of that camera would hand its identity to every photo within 3 rejected tries
+  of it (the reviewer's probe: a flag photo at 09:00, photos at 10:00, 11:00 and 12:00 with 100 points each all
+  copied it). At a deployment start on the right camera, the flag photo is A and the next strong day photo is B, and
+  Copy or Fallback works as before. Two flag photos around a weak photo (a service visit) with no real day photo
+  between them do not stand.
+
+Then:
+
+1. Both found: B is lined up onto A. Within 20 px with at least 1,000 points: **Copy** the nearer day photo.
+   Otherwise **Fallback**: copy the nearer day photo anyway, with the check `moved`. No vote and no Chain by day (user:
+   "no chain").
+2. One found: Copy it (check `unchecked`).
+3. None found: keep the photo's own line-up when it has a homography and at least 2,500 points (`DAY_KEEP`; path
+   `own`); otherwise no distance, with the reason "day photo that lines up poorly and has no clear day photo near it,
+   so no distance. Wrong camera, or was it moved?".
+
+`lineup.Planner.day_rule`; the shared part is `Planner._borrow`, which the Night rule now calls too, unchanged in
+behaviour (every Night-rule test passes untouched). Decision record: `docs/adr/0002-weak-day-photos-borrow-a-day-line-up.md`;
+ticket `.scratch/app/issues/35-day-borrow.md`.
+
+- **Why.** A frame-filling animal hides the background, and the photo's own line-up breaks with no warning. All 8
+  verified weak frame-filling day photos (86-2,339 points) had broken homographies: a shift of 400-5,300 px, against
+  20-120 px for strong neighbours. TON_CAM04 IMG_0982 / IMG_0981 read 9.30 / 10.48 m where their burst mates read
+  11.18-11.40 m.
+- **How many.** Of 1,087 day animal photos (median 8,211 points), 3.5% are under 4,000 points; at a box share of 50%
+  or more (n = 43), 14%. 99.3% of frame-filling day photos have a clearer photo within 120 s.
+- **Why keep 2,500-4,000 with no neighbour.** Small animals at dawn or dusk with 1,122-4,000 points were usually right
+  (within about 30 px of strong neighbours). A neighbour, when there is one, is still preferred.
+- **Wrong camera.** Day photos line up to a wrong camera's flag photo with 54-276 points. Their neighbours fail too,
+  and the wrong-camera guard keeps the flag photo from standing alone, so they get no distance instead of today's
+  silent wrong distance. Ticket 34 (camera from the folder name) makes a wrong camera rare.
+- **Stored and logged.** `align_source` `day_borrow`, `night` 0, `align_status` ok / none, `anchor` the day photo
+  copied (none when the own line-up is kept), `align_detail` as for a night photo plus `own_points` and `own_px`
+  (the photo's own line-up) and `flag_only` when the guard set flag photos aside. `align_folder` is the folder's
+  signature on a one-side answer and on a no-neighbour (`no_day`) answer, kept or not, so a day photo arriving later
+  re-plans it; it is "unreadable" when the folder could not be listed, so the photo is planned again on the next
+  run; it is empty on a two-side answer and on an unplaced photo. `match_score` is the copied day photo's
+  points, or the photo's own when kept or when there is no distance. `report.reasons` reads `day_borrow` like
+  `night` (ok = lined up), with day messages for no neighbour, an unplaced photo and an unlistable folder. The
+  researcher log carries the detail under `day_borrow` (path, side, anchor, own points, A and B with their tries,
+  the move check, the checks, why). No window change and no CSV change: a no-distance row has an empty distance.
+- **Out of date once.** `lineup.current` calls a stored day answer out of date exactly when it was lined up directly
+  with a match score under 4,000 (`lineup.weak_direct`), under any version, including answers from before line-up
+  versions (all of them were direct). The next run measures such a photo again, once; its new answer is a day-rule
+  one or direct at 4,000 or more, so it is never caught again. `lineup.VERSION` stays 2: a bump would send every
+  night answer through the earlier-version branch and measure every night photo again.
+- **Edges.** A folder that cannot be listed, or a day photo with no place in time (the date scan could not open it,
+  or it has a flag photo's capture time), has no A or B to look for: rule 3 applies at once. When the photo's own
+  line-up failed only for the moment (the photo or the flag photo gone or locked: a link that is not kept), no rule
+  runs: the line is unread, as when day or night cannot be read, so the run keeps no answer and the next run tries
+  again. A permanent failure (a file that will not decode, kept as 0 points) goes through the day rule.
+- **Links.** No change to `store.link` or `LINK_VERSION`. A weak photo's own link is still measured (the trigger
+  needs it). Its neighbours' links to the flag photo are not always ones their own answers already use: a neighbour
+  with no animal (an empty frame) is never lined up for its own answer, so each try on one is a new RoMa line-up,
+  and so is B onto A. Each is kept in the store, so a later run or another photo of the same burst reuses it.
+
+Tests (`tests/test_lineup.py`): the 3,999 / 4,000-point trigger, Copy of the nearer, the 20 px / 1,000-point move
+boundary with Fallback and no vote, one side, the flag photo as A, a Fallback to the flag photo as the nearer side,
+the wrong-camera guard (the reviewer's probe, a deployment start, a service visit), burst first (the reviewer's probe
+at 2 s and 2 min spacing; the burst's own tries), an undated and an unplaced weak photo, a locked own line-up, no
+neighbour at 2,500 / 2,499 and 300 points, a wrong-camera folder, an unlistable folder, the stale rule, and a
+FakeModels run with its log line. Three earlier tests changed (ticket 35 lists them).

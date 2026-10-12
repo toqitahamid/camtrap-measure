@@ -1,4 +1,6 @@
-"""How a photo is lined up with its flag photo (ticket 33): day photos directly; a night photo by the Night rule. Copy
+"""How a photo is lined up with its flag photo (tickets 33 and 35): a day photo directly when its own line-up has
+4,000 points or more, else by the day rule (Copy or Fallback from a day photo near it, no vote and no Chain; with none,
+its own line-up from 2,500 points, else no distance); a night photo by the Night rule. Copy
 the nearer day photo's line-up when the day photos before (A) and after (B) agree the camera did not move; when it
 moved, vote and Chain through the winning day photo, or Fall back to the nearer one; Copy the one day photo when only
 one is found; the flag photos stand as day photos at the ends of a deployment; never a link from a night photo to a
@@ -149,6 +151,13 @@ def logged(line: lineup.Line) -> dict | None:
     return log_lines()[-1].get("night")
 
 
+def logged_day(line: lineup.Line) -> dict | None:
+    """The `day_borrow` object of the researcher-log line for a day photo with this line-up (ticket 35): None for a
+    day photo lined up directly, and for a night photo."""
+    measure._log_measured(Path("IMG_D.JPG"), "CAM", {}, [], line.public())
+    return log_lines()[-1].get("day_borrow")
+
+
 def no_night_to_flag(calls, nights, flags=(FLAG, "FLAG2.JPG")) -> None:
     """Q10: no night photo is ever lined up with a flag photo, in either direction."""
     assert not [c for c in calls if (c[0] in nights and c[1] in flags) or (c[1] in nights and c[0] in flags)], calls
@@ -185,6 +194,14 @@ def test_the_camera_counter_is_the_last_number_in_the_file_name():
 
 # --- day photos -----------------------------------------------------------------------------------------------
 
+A, P, B = "IMG_1.JPG", "IMG_2.JPG", "IMG_3.JPG"  # day photo A, the night (or weak day) photo, day photo B
+NIGHT_CAM = {A: ("2026:01:10 12:00:00", DAY),     # the day photo before
+             P: ("2026:01:10 22:00:00", NIGHT),   # 10 h after A, 14 h before B
+             B: ("2026:01:11 12:00:00", DAY)}     # the day photo after
+TO_FLAG = {(A, FLAG): (8000, 0.2, 0.0), (B, FLAG): (9000, 0.1, 0.0)}
+MOVED = {**TO_FLAG, (B, A): (9000, 30.0, 0.0)}  # B onto A: 30 px, the camera moved
+
+
 def test_a_day_photo_lines_up_directly_as_before(tmp_path):
     d = camera(tmp_path, {"IMG_1.JPG": ("2026:01:10 12:00:00", DAY)})
     stub = Stub({("IMG_1.JPG", FLAG): (7000, 1.0, 0.0)})
@@ -193,28 +210,279 @@ def test_a_day_photo_lines_up_directly_as_before(tmp_path):
     assert line.H[0, 2] == 1.0 and stub.calls == [("IMG_1.JPG", FLAG)]
 
 
-@pytest.mark.parametrize("got, reason", [
-    ((None, 3), "lines up poorly with its flag photo (3 points, needs 15). Wrong camera, or was it moved?"),
-    ((None, 40), "did not line up with its flag photo, so no distance"),  # points, but no homography from them
+# --- day photos whose own line-up is weak: the day rule (ticket 35) ------------------------------------------------
+
+W = "IMG_2.JPG"  # the weak day photo: a frame-filling animal hides the background (TON_CAM04 IMG_0982: 9.30 m, burst
+                 # mates 11.18-11.40 m)
+DAY_CAM = {A: ("2026:01:10 12:00:00", DAY),    # the day photo before: 60 s before W
+           W: ("2026:01:10 12:01:00", DAY),
+           B: ("2026:01:10 12:05:00", DAY)}    # the day photo after: 240 s after W
+BROKEN = (1500, 900.0, 0.0)  # W's own line-up: 1,500 points and a 900 px shift (verified weak photos: 400-5,300 px)
+DAY_NONE = ("day photo that lines up poorly and has no clear day photo near it, so no distance. Wrong camera, or was "
+            "it moved?")
+
+
+@pytest.mark.parametrize("points, source", [(3999, "day_borrow"), (4000, "direct")])
+def test_a_day_photo_with_4000_points_is_untouched_and_one_with_fewer_borrows(tmp_path, points, source):
+    d = camera(tmp_path, DAY_CAM)
+    stub = Stub({**TO_FLAG, (W, FLAG): (points, 3.0, 0.0)})
+    line = planner(stub, flag_cal(tmp_path)).plan(d / W)
+    assert (line.source, line.status, line.night) == (source, "ok", False)
+    if source == "direct":  # untouched: its own line-up, no neighbour asked, no log object
+        assert (line.score, line.H[0, 2], line.detail, line.folder) == (4000, 3.0, {}, None)
+        assert stub.calls == [(W, FLAG)] and logged_day(line) is None
+    else:
+        assert line.anchor == A and line.detail["own_points"] == 3999
+
+
+@pytest.mark.parametrize("at, side, anchor, dx, score", [
+    ("2026:01:10 12:01:00", "A", A, 0.2, 8000),   # 60 s after A, 240 s before B
+    ("2026:01:10 12:04:00", "B", B, 0.1, 9000),   # 240 s after A, 60 s before B
 ])
-def test_a_day_photo_with_no_line_up_of_its_own_is_not_lined_up(tmp_path, got, reason):
+def test_a_weak_day_photo_copies_the_line_up_of_the_nearer_day_photo(tmp_path, at, side, anchor, dx, score):
+    d = camera(tmp_path, {**DAY_CAM, W: (at, DAY)})
+    stub = Stub({**TO_FLAG, (W, FLAG): BROKEN})
+    line = planner(stub, flag_cal(tmp_path)).plan(d / W)
+    assert (line.source, line.status, line.anchor, line.score, line.night) == ("day_borrow", "ok", anchor, score, False)
+    assert line.H[0, 2] == pytest.approx(dx)  # the day photo's own line-up to the flag photo, not W's 900 px one
+    assert (line.detail["path"], line.detail["side"], line.detail["before"], line.detail["after"]) == ("copy", side, A, B)
+    assert (line.detail["own_points"], line.detail["own_px"], line.detail["move_px"]) == (1500, 900.0, 0.0)
+    assert line.folder is None and "vote" not in line.detail
+    assert sorted(stub.calls) == sorted([(W, FLAG), (A, FLAG), (B, FLAG), (B, A)])  # W is lined up with no day photo
+    assert why(line) == ["could not find the ground under the animal, so no distance"]  # no line-up reason at all
+    assert logged(line) is None and logged_day(line)["checks"] == []
+
+
+@pytest.mark.parametrize("move, path", [
+    ((9000, 20.0, 0.0), "copy"),
+    ((9000, 20.01, 0.0), "fallback"),   # moved: no vote, no Chain by day ("no chain")
+    (999, "fallback"),                  # B -> A too weak to tell: read as moved
+])
+def test_a_weak_day_photo_falls_back_to_the_nearer_day_photo_when_b_onto_a_moved(tmp_path, move, path):
+    d = camera(tmp_path, DAY_CAM)
+    stub = Stub({**TO_FLAG, (W, FLAG): BROKEN, (B, A): move})
+    line = planner(stub, flag_cal(tmp_path)).plan(d / W)
+    assert (line.source, line.status, line.detail["path"], line.detail["side"], line.anchor) == \
+        ("day_borrow", "ok", path, "A", A)
+    assert line.H[0, 2] == pytest.approx(0.2) and line.score == 8000
+    assert "vote" not in line.detail and "voted" not in line.detail
+    assert not [c for c in stub.calls if c[0] == W and c[1] != FLAG]  # never lined up with a day photo
+    assert logged_day(line)["checks"] == (["moved"] if path == "fallback" else [])
+
+
+def test_a_weak_day_photo_with_a_day_photo_on_one_side_copies_it(tmp_path):
+    d = camera(tmp_path, {W: DAY_CAM[W], B: DAY_CAM[B]})
+    stub = Stub({**TO_FLAG, (W, FLAG): BROKEN})
+    line = planner(stub, flag_cal(tmp_path, at=None)).plan(d / W)  # an undated flag photo takes no part
+    assert (line.source, line.status, line.detail["path"], line.detail["side"], line.anchor, line.score) == \
+        ("day_borrow", "ok", "one_side", "B", B, 9000)
+    assert line.H[0, 2] == pytest.approx(0.1) and stub.calls == [(W, FLAG), (B, FLAG)]
+    assert line.folder == lineup.folder_signature(d, "CAM")  # kept, so a day photo arriving later re-plans it
+    assert logged_day(line)["checks"] == ["unchecked"]
+    # the flag photo stands as A, as for a night photo (here 30 s before W, so nearer than B): its own line-up, the
+    # identity, with no points
+    line = planner(Stub({(W, FLAG): BROKEN}), flag_cal(tmp_path, at="2026:01:10 12:00:30")).plan(d / W)
+    assert (line.detail["path"], line.detail["before"], line.anchor, line.score) == ("copy", FLAG, FLAG, None)
+    assert np.allclose(line.H, np.eye(3))
+
+
+@pytest.mark.parametrize("own, status, reasons", [
+    ((3000, 15.0, 0.0), "ok", ["could not find the ground under the animal, so no distance"]),  # own line-up kept
+    ((2500, 15.0, 0.0), "ok", ["could not find the ground under the animal, so no distance"]),
+    ((2499, 15.0, 0.0), "none", [DAY_NONE]),
+    (300, "none", [DAY_NONE]),
+])
+def test_a_weak_day_photo_with_no_day_photo_near_it_keeps_its_own_line_up_from_2500_points(tmp_path, own, status,
+                                                                                          reasons):
+    d = camera(tmp_path, {W: DAY_CAM[W]})
+    line = planner(Stub({(W, FLAG): own}), flag_cal(tmp_path, at=None)).plan(d / W)
+    points = own[0] if isinstance(own, tuple) else own
+    assert (line.source, line.status, line.score, line.anchor, line.detail["why"]) == \
+        ("day_borrow", status, points, None, "no_day")
+    assert line.folder == lineup.folder_signature(d, "CAM")  # a day photo arriving later re-plans it
+    if status == "ok":
+        assert line.H[0, 2] == 15.0 and line.detail["path"] == "own"
+    else:
+        assert line.H is None and "path" not in line.detail
+    assert why(line) == reasons
+    log = logged_day(line)
+    assert (log["status"], log["why"], log["own_points"], log.get("path")) == \
+        (status, "no_day", points, "own" if status == "ok" else None)
+
+
+def test_a_wrong_camera_folder_gets_no_distances_instead_of_wrong_ones(tmp_path):
+    """Every day photo lines up with the (wrong) flag photo with 54-276 points: no photo is a day photo A or B, so no
+    photo borrows and none is kept (under 2,500 points). Before the day rule each was a direct answer with a
+    distance and no reason (above MIN_INLIERS = 15)."""
+    names = [f"IMG_{i}.JPG" for i in range(5)]
+    d = camera(tmp_path, {n: (f"2026:01:10 1{i}:00:00", DAY) for i, n in enumerate(names)})
+    points = dict(zip(names, (54, 150, 276, 120, 90)))
+    stub = Stub({(n, FLAG): (p, 600.0, 0.0) for n, p in points.items()})
+    plan = planner(stub, flag_cal(tmp_path, at=None))
+    lines = {n: plan.plan(d / n) for n in names}
+    assert {n: (x.source, x.status, x.H, x.score) for n, x in lines.items()} == \
+        {n: ("day_borrow", "none", None, points[n]) for n in names}
+    assert all(why(x) == [DAY_NONE] for x in lines.values())
+    assert lines["IMG_4.JPG"].detail["before_tries"] == [["IMG_3.JPG", 120], ["IMG_2.JPG", 276], ["IMG_1.JPG", 150]]
+    # A dated flag photo of the wrong camera, before the folder: IMG_0-2 reach it within 3 rejected tries, but with no
+    # real day photo on the other side it does not stand (the wrong-camera guard), so it lends no identity line-up.
+    wrong = "F2.JPG"
+    dated = planner(Stub({(n, wrong): (p, 600.0, 0.0) for n, p in points.items()}),
+                    flag_cal(tmp_path, wrong, at="2026:01:10 09:00:00"))
+    got = {n: dated.plan(d / n) for n in names}
+    assert {n: (x.status, x.H) for n, x in got.items()} == {n: ("none", None) for n in names}
+    assert [n for n, x in got.items() if x.detail.get("flag_only") == [wrong]] == names[:3]
+
+
+def test_a_flag_photo_stands_by_day_only_when_the_other_side_is_a_real_day_photo(tmp_path, monkeypatch):
+    """The wrong-camera guard (review 2026-10-12). A weak day photo may copy a flag photo only when a real day photo
+    (4,000 points to the flag photo) stands on its other side."""
+    # the reviewer's probe: a flag photo at 09:00 and wrong-camera photos at 10:00, 11:00, 12:00 with 100 points each
+    probe = camera(tmp_path, {f"IMG_{h}.JPG": (f"2026:01:10 {h}:00:00", DAY) for h in (10, 11, 12)}, "probe")
+    plan = planner(Stub({(f"IMG_{h}.JPG", FLAG): 100 for h in (10, 11, 12)}),
+                   flag_cal(tmp_path, at="2026:01:10 09:00:00"))
+    for h in (10, 11, 12):
+        line = plan.plan(probe / f"IMG_{h}.JPG")
+        assert (line.source, line.status, line.H, line.anchor, line.detail["flag_only"]) == \
+            ("day_borrow", "none", None, None, [FLAG])  # 100 < 2,500: no distance (before the guard: the identity)
+        assert why(line) == [DAY_NONE]
+    # the right camera at a deployment start: the flag photo is A, the next strong day photo is B
+    start = camera(tmp_path, {W: DAY_CAM[W], B: DAY_CAM[B]}, "start")
+    stub = Stub({**TO_FLAG, (W, FLAG): BROKEN})
+    line = planner(stub, flag_cal(tmp_path, at="2026:01:10 12:00:30")).plan(start / W)
+    assert (line.status, line.detail["path"], line.detail["before"], line.detail["after"], line.anchor) == \
+        ("ok", "copy", FLAG, B, FLAG)
+    assert line.detail["move_points"] == 9000 and "flag_only" not in line.detail  # B -> A: B's own line-up to it
+    # a service visit: the job's flag photo before and a later flag photo after, no real day photo between
+    later_flag(tmp_path, monkeypatch, at="2026:01:10 12:03:00")
+    visit = camera(tmp_path, {W: DAY_CAM[W]}, "visit")
+    line = planner(Stub({(W, FLAG): (3000, 5.0, 0.0), ("FLAG2.JPG", FLAG): 9000}),
+                   flag_cal(tmp_path, at="2026:01:10 12:00:30")).plan(visit / W)
+    assert (line.detail["before"], line.detail["after"], line.detail["flag_only"]) == (None, None, [FLAG, "FLAG2.JPG"])
+    assert (line.status, line.detail["path"], line.score, line.H[0, 2]) == ("ok", "own", 3000, 5.0)  # own kept
+
+
+def test_a_weak_day_photo_falls_back_to_the_flag_photo_when_it_is_the_nearer_side(tmp_path):
+    d = camera(tmp_path, {W: DAY_CAM[W], B: DAY_CAM[B]})
+    stub = Stub({(W, FLAG): BROKEN, (B, FLAG): (9000, 30.0, 0.0)})  # B is 30 px off the flag photo: moved
+    line = planner(stub, flag_cal(tmp_path, at="2026:01:10 12:00:30")).plan(d / W)  # A: the flag photo, 30 s before
+    assert (line.detail["path"], line.detail["side"], line.anchor, line.score) == ("fallback", "A", FLAG, None)
+    assert np.allclose(line.H, np.eye(3)) and logged_day(line)["checks"] == ["moved"]
+    assert stub.calls == [(W, FLAG), (B, FLAG)]  # no vote: W is lined up with nothing else
+
+
+@pytest.mark.parametrize("unit", ["s", "min"])
+def test_a_weak_day_photo_tries_its_own_burst_first(tmp_path, unit):
+    """Review M1: IMG_0 (9,000 points) at :00, IMG_1 weak at :02, IMG_2 (2,000 points) at :04, IMG_3 weak at :06,
+    IMG_4 (9,000 points) at :08. Before, IMG_1 was rejected and IMG_0, 2 s (or 2 min) from it, skipped as its burst
+    mate, so IMG_2 had no A or B and, under 2,500 points, no distance."""
+    at = (lambda i: f"2026:01:10 12:00:0{2 * i}") if unit == "s" else (lambda i: f"2026:01:10 12:0{2 * i}:00")
+    names = [f"IMG_{i}.JPG" for i in range(5)]
+    d = camera(tmp_path, {n: (at(i), DAY) for i, n in enumerate(names)})
+    stub = Stub({("IMG_0.JPG", FLAG): 9000, ("IMG_1.JPG", FLAG): 300, ("IMG_2.JPG", FLAG): 2000,
+                 ("IMG_3.JPG", FLAG): 300, ("IMG_4.JPG", FLAG): 9000})
+    line = planner(stub, flag_cal(tmp_path, at=None)).plan(d / "IMG_2.JPG")
+    assert (line.source, line.status, line.detail["path"], line.detail["before"], line.detail["after"]) == \
+        ("day_borrow", "ok", "copy", "IMG_0.JPG", "IMG_4.JPG")
+    assert (line.detail["before_tries"], line.detail["after_tries"]) == \
+        ([["IMG_1.JPG", 300], ["IMG_0.JPG", 9000]], [["IMG_3.JPG", 300], ["IMG_4.JPG", 9000]])
+    assert line.anchor == "IMG_0.JPG" and line.score == 9000  # equal gaps: a tie goes to A
+
+
+def test_the_burst_has_its_own_tries_and_the_search_goes_on_beyond_it(tmp_path):
+    """The weak photo's burst (photos within 120 s) gets 3 tries of its own, nearest first, with no burst-mate skip.
+    Then the normal search goes on beyond the burst with its own 3 tries; the burst's rejected frames do not make a
+    photo beyond it a burst mate."""
+    times = {"IMG_10.JPG": "11:57:30",  # 150 s before the weak photo: beyond its burst, 40 s from IMG_11
+             "IMG_11.JPG": "11:58:10", "IMG_13.JPG": "11:59:00", "IMG_14.JPG": "11:59:30",  # its burst, all weak
+             "IMG_15.JPG": "12:00:00"}  # the weak photo
+    d = camera(tmp_path, {n: (f"2026:01:10 {t}", DAY) for n, t in times.items()})
+    stub = Stub({("IMG_10.JPG", FLAG): 9000, ("IMG_11.JPG", FLAG): 100, ("IMG_13.JPG", FLAG): 100,
+                 ("IMG_14.JPG", FLAG): 100, ("IMG_15.JPG", FLAG): 300})
+    line = planner(stub, flag_cal(tmp_path, at=None)).plan(d / "IMG_15.JPG")
+    assert line.detail["before_tries"] == [["IMG_14.JPG", 100], ["IMG_13.JPG", 100], ["IMG_11.JPG", 100],
+                                           ["IMG_10.JPG", 9000]]
+    assert (line.status, line.detail["path"], line.anchor) == ("ok", "one_side", "IMG_10.JPG")
+
+
+def test_an_undated_weak_day_photo_is_placed_by_its_file_number_and_checked(tmp_path):
+    d = camera(tmp_path, {"IMG_0004.JPG": ("2026:01:10 12:00:00", DAY), "IMG_0005.JPG": (None, DAY),
+                          "IMG_0007.JPG": ("2026:01:10 12:05:00", DAY)})
+    line = planner(Stub({("IMG_0005.JPG", FLAG): 300}), flag_cal(tmp_path)).plan(d / "IMG_0005.JPG")
+    assert (line.source, line.status, line.detail["order"], line.detail["path"], line.detail["gap_unit"]) == \
+        ("day_borrow", "ok", "number", "copy", "photos")
+    assert line.anchor == "IMG_0004.JPG" and logged_day(line)["checks"] == ["undated"]
+
+
+@pytest.mark.parametrize("own, status", [((3000, 5.0, 0.0), "ok"), (300, "none")])
+def test_an_unplaced_weak_day_photo_keeps_its_own_line_up_or_gets_no_distance(tmp_path, monkeypatch, own, status):
+    """A folder photo with a flag photo's capture time is that flag photo (Q10), so it has no place among the day
+    photos: no A or B is looked for."""
+    later_flag(tmp_path, monkeypatch, at="2026:01:10 12:01:00")
+    d = camera(tmp_path, DAY_CAM)  # W has FLAG2's capture time
+    stub = Stub({**TO_FLAG, (W, FLAG): own})
+    line = planner(stub, flag_cal(tmp_path)).plan(d / W)
+    assert (line.source, line.status, line.detail["why"], line.folder) == ("day_borrow", status, "unplaced", None)
+    assert stub.calls == [(W, FLAG)]
+    if status == "none":
+        assert why(line) == ["day photo that lines up poorly and could not be placed in time among the photos of its "
+                             "folder, so no distance"]
+
+
+def test_a_day_photo_whose_own_line_up_failed_for_the_moment_keeps_no_answer(tmp_path):
+    """Review L1: a locked or vanished file gives a failed link that is not kept. The day rule must not keep a
+    no-distance answer on it: the line is unread, so the run keeps no answer and the next run tries again."""
+    d = camera(tmp_path, DAY_CAM)
+    cal = flag_cal(tmp_path)
+    line = planner(Locked(W, TO_FLAG), cal).plan(d / W)
+    assert (line.source, line.status, line.H, line.score) == ("unknown", "unread", None, None)
+    stub = Stub({**TO_FLAG, (W, FLAG): BROKEN})
+    again = planner(stub, cal).plan(d / W)  # unlocked: measured, and lined up by the day rule
+    assert (again.source, again.status, again.anchor) == ("day_borrow", "ok", A) and (W, FLAG) in stub.calls
+    locked_flag = planner(Locked(FLAG, TO_FLAG), cal, "another setting").plan(d / W)  # the flag photo locked
+    assert locked_flag.status == "unread"
+
+
+def test_a_weak_day_photo_whose_folder_cannot_be_listed_keeps_its_own_line_up_or_gets_no_distance(tmp_path,
+                                                                                                   monkeypatch):
+    d = camera(tmp_path, DAY_CAM)
+    listing_ = measure.jpegs
+
+    def jpegs(folder):
+        if folder == d:
+            raise ValueError(f"Could not read {folder}: the share dropped")
+        return listing_(folder)
+
+    monkeypatch.setattr(measure, "jpegs", jpegs)
+    cal = flag_cal(tmp_path)
+    kept = planner(Stub({(W, FLAG): (3000, 5.0, 0.0)}), cal).plan(d / W)
+    assert (kept.source, kept.status, kept.detail["path"], kept.detail["why"], kept.folder) == \
+        ("day_borrow", "ok", "own", "no_folder", lineup.NO_LISTING)  # planned again on the next run
+    none = planner(Stub({(W, FLAG): 300}), cal, "another setting").plan(d / W)
+    assert (none.status, none.H, none.folder) == ("none", None, lineup.NO_LISTING)
+    assert why(none) == ["day photo that lines up poorly and whose folder could not be read to find a day photo near "
+                         "it, so no distance (tried again on the next run)"]
+
+
+@pytest.mark.parametrize("got", [(None, 3), (None, 40)])  # 40: points, but no homography from them
+def test_a_day_photo_with_no_line_up_of_its_own_is_not_lined_up(tmp_path, got):
+    """Changed by the day rule (ticket 35). Before, such a day photo was a direct answer with status none and the
+    reason "lines up poorly" (3 points) or "did not line up" (40 points). Now its own line-up is weak, so it looks for
+    a day photo near it; there is none (alone in its folder; the flag photo is undated, so it cannot stand as A), and
+    with no homography its own line-up cannot be kept: no distance, with the day rule's reason, and a researcher-log
+    object `day_borrow` (before: no object for a day photo)."""
     d = camera(tmp_path, {"IMG_1.JPG": ("2026:01:10 12:00:00", DAY)})
     stub = Stub()
     stub.link = lambda target, reference: got
-    line = planner(stub, flag_cal(tmp_path)).plan(d / "IMG_1.JPG")
-    assert (line.source, line.status, line.H, line.score) == ("direct", "none", None, got[1])
-    assert why(line) == [reason] and logged(line) is None  # a day answer writes no researcher log line
+    line = planner(stub, flag_cal(tmp_path, at=None)).plan(d / "IMG_1.JPG")
+    assert (line.source, line.status, line.H, line.score, line.night) == ("day_borrow", "none", None, got[1], False)
+    assert why(line) == [DAY_NONE] and logged(line) is None  # no Night-rule object: it is a day photo
+    log = logged_day(line)
+    assert (log["status"], log["why"], log["own_points"], log["own_px"], log["score"]) == ("none", "no_day", got[1],
+                                                                                           None, got[1])
 
 
 # --- night photos: Copy ------------------------------------------------------------------------------------------
-
-A, P, B = "IMG_1.JPG", "IMG_2.JPG", "IMG_3.JPG"
-NIGHT_CAM = {A: ("2026:01:10 12:00:00", DAY),     # the day photo before
-             P: ("2026:01:10 22:00:00", NIGHT),   # 10 h after A, 14 h before B
-             B: ("2026:01:11 12:00:00", DAY)}     # the day photo after
-TO_FLAG = {(A, FLAG): (8000, 0.2, 0.0), (B, FLAG): (9000, 0.1, 0.0)}
-MOVED = {**TO_FLAG, (B, A): (9000, 30.0, 0.0)}  # B onto A: 30 px, the camera moved
-
 
 @pytest.mark.parametrize("at, side, anchor, dx, score", [
     ("2026:01:10 22:00:00", "A", A, 0.2, 8000),   # 10 h after A, 14 h before B
@@ -622,6 +890,35 @@ def test_an_answer_from_an_earlier_line_up_version_is_measured_again_only_for_a_
     assert measure.current_answer({**first, "night": None, "match_score": None}, CAL, "md", "research")  # empty frame
 
 
+def test_an_old_weak_direct_day_answer_is_measured_again_once_and_strong_and_night_answers_are_not(monkeypatch):
+    """Ticket 35: a day answer lined up directly with fewer than 4,000 points is what the day rule now answers another
+    way, so it is out of date under any version. VERSION stays 2, so no current night answer is measured again."""
+    monkeypatch.setattr(lineup, "read_night", lambda p: pytest.fail("read a photo the rule did not need"))
+    v2 = {**KNOWN, "path": "/x/IMG_1.JPG", "alignment_version": lineup.VERSION}
+    direct = {**v2, "align_source": "direct", "align_status": "ok", "night": 0}
+    check = lineup.Check(read=True)
+    assert not measure.current_answer({**direct, "match_score": 3999}, CAL, "md", "research", check)
+    assert measure.current_answer({**direct, "match_score": 4000}, CAL, "md", "research", check)
+    assert not measure.current_answer({**direct, "align_status": "none", "match_score": 40}, CAL, "md", "research")
+    # night answers current today stay current, even with a weakest link under 4,000 (a Chain needs 2,000)
+    night = {**v2, "align_source": "night", "align_status": "ok", "night": 1}
+    for score in (2000, None, 9000):
+        assert measure.current_answer({**night, "match_score": score}, CAL, "md", "research", check)
+    # the day rule's own answers are current: a kept own line-up, no distance, a Copy
+    for status, score in (("ok", 3000), ("none", 300), ("ok", 8000)):
+        assert measure.current_answer({**v2, "align_source": "day_borrow", "align_status": status, "night": 0,
+                                       "match_score": score}, CAL, "md", "research", check)
+    first = {**KNOWN, "alignment_version": 1, "align_source": "direct", "align_status": "ok", "night": 0}
+    assert not measure.current_answer({**first, "match_score": 3999}, CAL, "md", "research", check)
+    assert measure.current_answer({**first, "match_score": 9000}, CAL, "md", "research", check)
+    # before line-up versions every answer was direct: under 4,000 points it is out of date without reading the photo
+    assert not measure.current_answer({**KNOWN, "path": "/x/IMG_1.JPG", "match_score": 37}, CAL, "md", "research", check)
+    assert measure.current_answer({**KNOWN, "match_score": 9000, "night": 0}, CAL, "md", "research", check)
+    assert measure.current_answer({**KNOWN, "match_score": None}, CAL, "md", "research", check)  # no animal
+    # a stand-in backend's row says no source: it stands, as before
+    assert measure.current_answer({**v2, "align_source": None, "night": None, "match_score": 60}, CAL, "md", "research")
+
+
 def test_a_run_reads_once_whether_an_old_answer_was_a_night_photo_and_keeps_it(tmp_path):
     d = camera(tmp_path, NIGHT_CAM)
     for n in (A, P):
@@ -806,13 +1103,50 @@ def test_a_researcher_log_that_cannot_be_written_never_stops_a_run(monkeypatch, 
 
 
 def test_a_day_photo_with_a_reason_gets_a_log_line_with_that_reason(synced, tmp_path, monkeypatch):
-    """The reasons are written only to the researcher log (user decision 2026-10-11), as report.reasons words them."""
+    """The reasons are written only to the researcher log (user decision 2026-10-11), as report.reasons words them.
+    Changed by the day rule (ticket 35): before, this day photo (9 points, alone in its folder) was a direct answer
+    with a distance and the reason "lines up poorly (9 points, needs 15)". Now it has no day photo near it (the synced
+    flag photo is 2 x 2 px, so it cannot stand as A) and too few points to keep its own line-up: no distance, with the
+    day rule's reason, and the day-rule detail under `day_borrow`."""
     monkeypatch.setattr(inference, "backend", fake_models(links={("IMG_0001.JPG", SITE_FLAG): 9}))  # under 15 points
     d = camera(tmp_path, {"IMG_0001.JPG": RUN_CAM["IMG_0001.JPG"]}, SITE)
     run(synced, d)
     [line] = log_lines()
-    assert (line["status"], line["day_night"], line["distance"], line["animals"]) == ("measured", "day", True, 1)
-    assert line["reasons"] == ["lines up poorly with its flag photo (9 points, needs 15). Wrong camera, or was it moved?"]
+    assert (line["status"], line["day_night"], line["distance"], line["animals"]) == ("measured", "day", False, 1)
+    assert line["reasons"] == [DAY_NONE] and "night" not in line
+    assert (line["day_borrow"]["why"], line["day_borrow"]["own_points"], line["day_borrow"]["status"]) == \
+        ("no_day", 9, "none")
+    assert export_rows(synced)[0]["distance_m"] == ""  # the CSV has the row with no distance and no warning
+    assert listing(synced, d)["IMG_0001.JPG"]["stale"] is False
+
+
+def test_the_run_lines_a_weak_day_photo_up_through_the_nearer_day_photo_and_logs_it(synced, tmp_path, monkeypatch):
+    cam = {"IMG_0001.JPG": ("2026:05:01 12:00:00", DAY), "IMG_0002.JPG": ("2026:05:01 12:00:30", DAY),
+           "IMG_0003.JPG": ("2026:05:01 12:02:00", DAY)}
+    models = fake_models(links={("IMG_0002.JPG", SITE_FLAG): (1200, 900.0, 0.0)})  # a frame-filling animal
+    monkeypatch.setattr(inference, "backend", models)
+    d = camera(tmp_path, cam, SITE)
+    run(synced, d)
+    assert not [x for x in links_of(models) if x[0] == "IMG_0002.JPG" and x[1] != SITE_FLAG]  # no vote, no Chain
+    weak, near = answers(d / "IMG_0002.JPG"), answers(d / "IMG_0001.JPG")
+    assert (weak["photo"]["align_source"], weak["photo"]["align_status"], weak["photo"]["anchor"],
+            weak["photo"]["night"], weak["photo"]["align_folder"]) == ("day_borrow", "ok", "IMG_0001.JPG", 0, None)
+    assert weak["photo"]["match_score"] == near["photo"]["match_score"] == 8000  # the day photo's points
+    assert weak["detections"][0]["distance_m"] == near["detections"][0]["distance_m"]  # one line-up, one box place
+    assert near["photo"]["align_source"] == "direct"
+    log = {Path(r["photo"]).name: r for r in log_lines()}
+    got = log["IMG_0002.JPG"]["day_borrow"]
+    assert (got["path"], got["side"], got["anchor"], got["score"], got["own_points"], got["own_px"]) == \
+        ("copy", "A", "IMG_0001.JPG", 8000, 1200, 900.0)
+    assert (got["before_tries"], got["after_tries"], got["move_points"], got["checks"]) == \
+        ([["IMG_0001.JPG", 8000]], [["IMG_0003.JPG", 8000]], 8000, [])
+    assert log["IMG_0002.JPG"]["reasons"] == [] and log["IMG_0002.JPG"]["distance"] is True
+    assert "day_borrow" not in log["IMG_0001.JPG"] and "night" not in log["IMG_0001.JPG"]  # direct: no rule detail
+    rows = listing(synced, d)
+    assert rows["IMG_0002.JPG"]["reasons"] == [] and not any(r["stale"] for r in rows.values())
+    assert all(r["distance_m"] != "" for r in export_rows(synced))
+    monkeypatch.setattr(inference, "backend", fake_models())
+    assert run(synced, d)["skipped"] == len(cam)  # current: measured once
 
 
 def test_a_clean_day_photo_gets_a_log_line_with_no_reasons_and_a_skipped_one_gets_none(synced, tmp_path, monkeypatch):
@@ -926,7 +1260,10 @@ def test_a_day_photo_arriving_later_gives_the_one_sided_night_photos_a_checked_a
     assert all(detail(d / n)["path"] == "copy" for n in ("IMG_0002.JPG", "IMG_0003.JPG"))
 
 
-def test_old_answers_measure_again_once_for_night_photos_and_never_for_day_photos(synced, tmp_path, monkeypatch):
+def test_old_answers_measure_again_once_for_night_photos_and_weak_direct_day_photos(synced, tmp_path, monkeypatch):
+    """Changed by the day rule (ticket 35; was "... and never for day photos"). IMG_0001's answer from before ticket 33
+    has 37 points: lined up directly with fewer than 4,000, so it is out of date now and measured again, once (the
+    fake's 8,000 points: direct). A strong day answer (IMG_0005, 9,000 points, version 1) is still kept."""
     d = camera(tmp_path, RUN_CAM, SITE)
     cal = next(c for c in store.calibrations() if c["site"] == SITE)
     base = {"site": SITE, "captured_at": None, "make": None, "model": None, "calibration_image": SITE_FLAG,
@@ -942,9 +1279,11 @@ def test_old_answers_measure_again_once_for_night_photos_and_never_for_day_photo
     models = fake_models()
     monkeypatch.setattr(inference, "backend", models)
     run(synced, d)
-    assert {c[1] for c in models.calls if c[0] == "detect"} == {"IMG_0002.JPG", "IMG_0003.JPG", "IMG_0004.JPG"}
+    assert {c[1] for c in models.calls if c[0] == "detect"} == {"IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG",
+                                                                 "IMG_0004.JPG"}
     day, night, v1 = answers(d / "IMG_0001.JPG"), answers(d / "IMG_0002.JPG"), answers(d / "IMG_0003.JPG")
-    assert (day["photo"]["match_score"], day["photo"]["alignment_version"], day["photo"]["night"]) == (37, None, 0)
+    assert (day["photo"]["match_score"], day["photo"]["alignment_version"], day["photo"]["night"],
+            day["photo"]["align_source"]) == (8000, lineup.VERSION, 0, "direct")
     assert (night["photo"]["align_source"], night["photo"]["alignment_version"]) == ("night", lineup.VERSION)
     assert (v1["photo"]["align_source"], v1["photo"]["align_status"], v1["photo"]["alignment_version"]) == \
         ("night", "ok", lineup.VERSION)  # the first design's "no distance" now has an answer

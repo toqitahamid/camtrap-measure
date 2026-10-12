@@ -50,6 +50,19 @@ def _detail(row: dict) -> dict:
     return (json.loads(got) if isinstance(got, str) else got) or {}
 
 
+def _day_not_lined_up(why: dict) -> str:
+    """Why a day photo under the day rule (ticket 35) has no line-up the distance can be read through: its own line-up
+    was weak (no homography, or under lineup.DAY_KEEP points) and no clear day photo near it could be borrowed from."""
+    if why.get("why") == lineup.UNPLACED:
+        return ("day photo that lines up poorly and could not be placed in time among the photos of its folder, so no "
+                "distance")
+    if why.get("why") == lineup.NO_FOLDER:
+        return ("day photo that lines up poorly and whose folder could not be read to find a day photo near it, so no "
+                "distance (tried again on the next run)")
+    return ("day photo that lines up poorly and has no clear day photo near it, so no distance. Wrong camera, or was "
+            "it moved?")
+
+
 def _not_lined_up(why: dict) -> str:
     """Why a night photo has no line-up the distance can be read through (ticket 33). Under the Night rule this is
     rare: no day photo and no flag photo on either side, a photo that could not be placed in time, or a folder that
@@ -70,16 +83,18 @@ def reasons(row: dict) -> list[str]:
     The line-up fields (align_source, align_status, align_detail) are absent on rows measured before ticket 33 and on
     stand-in backends; those rows read as before. A day photo whose own line-up found no homography (direct, status
     none) reads as a poor or failed line-up, by its points. A night answer (the Night rule) is lined up when its status
-    is ok, whatever its score: a night photo that copies the flag photo itself has no points of its own. What a night
-    answer asks a researcher to check by eye (camera moved, move not checked, no photo date) is not a reason: it goes
-    to the researcher log's `night` object. The reasons themselves are written only to the researcher log,
-    research-log.jsonl, one line per measured photo (measure._log_measured; user decisions 2026-10-11)."""
+    is ok, whatever its score: a night photo that copies the flag photo itself has no points of its own. So is a
+    day-rule answer (ticket 35, source day_borrow): ok when it borrowed a day photo's line-up or kept its own; none,
+    with its own reason, when it had neither. What a borrowed answer asks a researcher to check by eye (camera moved,
+    move not checked, no photo date) is not a reason: it goes to the researcher log's `night` or `day_borrow` object.
+    The reasons themselves are written only to the researcher log, research-log.jsonl, one line per measured photo
+    (measure._log_measured; user decisions 2026-10-11)."""
     out = []
-    status, score = row.get("align_status"), row["match_score"]
-    if row.get("align_source") in (lineup.NIGHT, "bracket"):  # "bracket": a first-design row, measured again next run
+    status, score, source = row.get("align_status"), row["match_score"], row.get("align_source")
+    if source in (lineup.NIGHT, "bracket", lineup.DAY_BORROW):  # "bracket": a first-design row, measured again
         aligned = status == lineup.OK
         if not aligned:
-            out.append(_not_lined_up(_detail(row)))
+            out.append(_day_not_lined_up(_detail(row)) if source == lineup.DAY_BORROW else _not_lined_up(_detail(row)))
     else:
         aligned = score is not None and score >= MIN_INLIERS and status != lineup.NONE
         if score is None or (status == lineup.NONE and score >= MIN_INLIERS):
