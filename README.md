@@ -86,8 +86,11 @@ order:
 | `camera` | the camera's name in FlagLabel, the camera the photo was measured under (a folder named `mas cam 2` exports as `MAS_CAM02`) |
 | `timestamp` | the EXIF capture time, in the camera's local time, with no time zone |
 | `species` | what the species model named. `white-tailed deer` is any deer-family prediction; `unsure` is a weak one (score below 0.2) |
-| `distance_m` | the horizontal ground distance to the animal in metres (the median estimate); empty when no distance could be read |
-| `q05_m`, `q95_m` | the bounds of the 90% interval around `distance_m`, in metres; empty when no distance could be read |
+| `distance_m` | the horizontal ground distance to the animal in metres, to 2 decimals (the median estimate); empty when no distance could be read |
+| `q05_m`, `q95_m` | the bounds of the 90% interval around `distance_m`, in metres, to 2 decimals; empty when no distance could be read |
+
+The three distance columns are rounded to 2 decimals in the file only (for example `11.49`, not
+`11.488765716552734`). The app keeps and computes with the full numbers.
 
 The default export holds the white-tailed deer and `unsure` rows; the Species filter set to all species adds
 every animal.

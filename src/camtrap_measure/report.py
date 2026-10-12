@@ -28,6 +28,14 @@ BIN_M = 2  # histogram bin width, metres
 # The seven the user chose (2026-10-11); site, confidence, fidelity, match_score and method were removed. Every row is
 # a MegaDetector-box answer (_one_method).
 COLUMNS = ["photo", "camera", "timestamp", "species", "distance_m", "q05_m", "q95_m"]
+# The distance columns are written in metres to 2 decimals (11.49, not 11.488765716552734; user decision 2026-10-12).
+# Only the CSV text is rounded: the stored values, the window and the summary keep the full number.
+METRES = ("distance_m", "q05_m", "q95_m")
+
+
+def _metres(v) -> str:
+    """One distance cell: the number to 2 decimals, or empty when no distance could be read."""
+    return "" if v is None or v == "" else f"{float(v):.2f}"
 
 
 def site_of(camera: str) -> str:
@@ -285,7 +293,8 @@ def export_csv(site=None, date_from=None, date_to=None, all_species=False, folde
     w = csv.DictWriter(buf, COLUMNS, extrasaction="ignore", lineterminator="\n")
     w.writeheader()
     for r in _wanted(site, date_from, date_to, all_species, folder, survey_site):
-        w.writerow({**r, "photo": basename(r["path"]), "camera": r["site"], "timestamp": r["captured_at"]})
+        w.writerow({**r, "photo": basename(r["path"]), "camera": r["site"], "timestamp": r["captured_at"],
+                    **{k: _metres(r[k]) for k in METRES}})
     return buf.getvalue()
 
 

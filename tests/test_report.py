@@ -256,9 +256,24 @@ def test_export_holds_every_deer_row_and_data_only(measured):
     assert [r["photo"] for r in rows] == ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0003.JPG", "IMG_0005.JPG"]
     assert list(rows[0]) == ["photo", "camera", "timestamp", "species", "distance_m", "q05_m", "q95_m"]
     assert rows[0]["camera"] == "TON_CAM02" and rows[0]["timestamp"] == "2026-05-01T08:00:00"
-    assert rows[0]["distance_m"] == "5.0" and rows[0]["q05_m"] == "4.25" and rows[0]["q95_m"] == "6.0"
+    assert rows[0]["distance_m"] == "5.00" and rows[0]["q05_m"] == "4.25" and rows[0]["q95_m"] == "6.00"
     misfiled = next(r for r in rows if r["photo"] == "IMG_0005.JPG")
-    assert misfiled["distance_m"] == "7.0"  # 9 points to its flag photo: the number is still written
+    assert misfiled["distance_m"] == "7.00"  # 9 points to its flag photo: the number is still written
+
+
+def test_export_writes_distances_to_2_decimals_and_leaves_no_distance_empty(monkeypatch):
+    """User decision 2026-10-12: distance_m, q05_m and q95_m are written to 2 decimals (11.49, not
+    11.488765716552734). A row with no distance keeps its cells empty. Only the CSV text is rounded."""
+    full = {"path": "C:\\cams\\IMG_0001.JPG", "site": "TON_CAM02", "captured_at": "2026-05-01T08:00:00",
+            "species": "white-tailed deer", "distance_m": 11.488765716552734, "q05_m": 9.004999, "q95_m": 14.0}
+    empty = {**full, "path": "IMG_0002.JPG", "distance_m": None, "q05_m": None, "q95_m": None}
+    monkeypatch.setattr(report, "_wanted", lambda *a: [full, empty])
+    rows = list(csv.DictReader(report.export_csv().splitlines()))
+    assert (rows[0]["distance_m"], rows[0]["q05_m"], rows[0]["q95_m"]) == ("11.49", "9.00", "14.00")
+    for k in report.METRES:
+        assert len(rows[0][k].split(".")[1]) <= 2
+    assert (rows[1]["distance_m"], rows[1]["q05_m"], rows[1]["q95_m"]) == ("", "", "")
+    assert full["distance_m"] == 11.488765716552734  # the row itself is not rounded
 
 
 def test_export_all_species_toggle_adds_the_raccoons(measured):
