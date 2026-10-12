@@ -9,7 +9,6 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import Batch, { type TablePreset } from './Batch'
 import Measure from './Measure'
 import RangeScene from './RangeScene'
-import Density from './Density'
 import Results from './Results'
 import TableView from './TableView'
 import UpdateNotice from './UpdateNotice'
@@ -48,12 +47,13 @@ const card = (inf: Inference): string => inf.gpu ?? inf.device ?? ''
 /** What a camera with no labelled flag photo says when hovered. */
 const NOT_LABELLED = 'Label its flag photo in FlagLabel, then press Sync.'
 
-type Section = 'measure' | 'table' | 'results' | 'density'
-const SECTIONS: { id: Section; label: string; icon: 'measure' | 'table' | 'results' | 'density' }[] = [
+// No DENSITY tab: the app gives distances only; density estimation is the wildlife staff's own task, done outside
+// the app (user decision 2026-10-11).
+type Section = 'measure' | 'table' | 'results'
+const SECTIONS: { id: Section; label: string; icon: 'measure' | 'table' | 'results' }[] = [
   { id: 'measure', label: 'MEASURE', icon: 'measure' },
   { id: 'table', label: 'TABLE', icon: 'table' },
   { id: 'results', label: 'RESULTS', icon: 'results' },
-  { id: 'density', label: 'DENSITY', icon: 'density' },
 ]
 
 const initials = (email: string | null) =>
@@ -78,8 +78,8 @@ export default function App() {
   const copyRef = useRef<HTMLDivElement>(null) // the sign-in text; the scene's horizon sits under it
 
   const [section, setSection] = useState<Section>('measure')
-  // RESULTS and DENSITY add up what was measured: they bring their own filters, not the measuring bar
-  const summing = section === 'results' || section === 'density'
+  // RESULTS adds up what was measured: it brings its own filters, not the measuring bar
+  const summing = section === 'results'
   const [picked, setPicked] = useState<Scope>({ site: '', flag: '', folder: '', method: '' })
   const [typedPath, setTypedPath] = useState('') // only reachable where there is no native folder dialog
   const [pickable, setPickable] = useState(true) // until a pick says this window has no native dialog
@@ -106,7 +106,8 @@ export default function App() {
       ? picked.flag
       : (flags.find((f) => f.ok)?.image_name ?? ''),
     folder: picked.folder,
-    method: methods.methods[picked.method] ? picked.method : methods.default,
+    // always the engine's default (the MegaDetector box): the method picker was removed (user decision 2026-10-11)
+    method: methods.default,
   }
   const site = siteScan && siteScan.of === scope.folder ? siteScan.data : null
   const siteMode = site !== null && site.status !== 'single'
@@ -420,7 +421,6 @@ export default function App() {
   const shownError = path && method && (siteMode || (camera && flag)) ? folderError : null
   const inf = status.inference
   const measured = folder ? folder.rows.filter((r) => r.measured).length : 0
-  const flagged = folder ? folder.rows.filter((r) => r.reasons.length > 0).length : 0
   const ready = inf.status === 'ready'
   // Just when: that is what decides whether to press Sync. The counts are in About.
   const syncNote = status.last_sync
@@ -545,19 +545,6 @@ export default function App() {
                 </button>
               </span>
             </div>
-            <div className="sep" />
-
-            <label className="field" style={{ width: 200, minWidth: 176 }}>
-              <span className="cap">Distance read at <Help topic="method" /></span>
-              <span className="field-val">
-                <select className="bare" value={scope.method} title={methods.methods[scope.method]?.hint}
-                        onChange={(e) => setPicked((s) => ({ ...s, method: e.target.value }))}>
-                  {Object.entries(methods.methods).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
-                </select>
-                <span className="chev"><Icon name="down" size={12} width={2.4} /></span>
-              </span>
-            </label>
-
             <div className="spacer" />
             {!siteMode && (
             <label className="check tiny" style={{ alignItems: 'center' }}>
@@ -627,19 +614,14 @@ export default function App() {
             </div>
           )}
           {section === 'table' && folder !== null && (
-            <TableView key={preset.n} initial={preset.to} scope={scope} folder={folder} methods={methods}
+            <TableView key={preset.n} initial={preset.to} folder={folder} methods={methods}
                        busy={running || !ready} error={shownError}
                        onMeasure={siteMode ? (paths) => void measureSite(paths.length ? paths : undefined) : measure}
-                       exportFolder={siteMode ? scope.folder : undefined}
                        onOpen={siteMode ? undefined : (p) => { setFocus(p); setSection('measure') }} />
           )}
           {section === 'results' && (
             <Results site={siteMode ? '' : scope.site} cameras={cameras} folder={scope.folder}
               onClear={clearResults} onChooseFolder={chooseFolder} onGoMeasure={() => setSection('measure')} />
-          )}
-          {section === 'density' && (
-            <Density site={siteMode ? '' : scope.site} sites={cameras.map((c) => c.site)} folder={scope.folder}
-              onChooseFolder={chooseFolder} onGoMeasure={() => setSection('measure')} />
           )}
         </div>
 
@@ -650,7 +632,10 @@ export default function App() {
           </div>
         )}
 
-        {running && run ? (
+        {/* the Batch "Running" card has its own progress bar: no second one under it (user decision 2026-10-11).
+            While it shows, the normal status bar stays, so its warnings (test mode, quick settings) stay visible. */}
+        {running && run && !(section === 'measure' && site !== null && site.status === 'ready' && run.kind === 'site' &&
+          run.folder === site.folder && run.cameras) ? (
           <div className="runbar">
             <div className="track">
               <div style={{ width: `${(100 * (run.phase_total ? run.phase_done / run.phase_total : run.done / Math.max(1, run.total)))}%` }} />
@@ -707,16 +692,12 @@ export default function App() {
               </>
             )}
             <div className="spacer" />
+            {/* during a site run this bar stands in for the run bar, so it carries the run bar's test-mode warning */}
+            {running && inf.backend !== 'real' && <span className="warn tiny">Test mode: made-up numbers</span>}
             {run?.status === 'error' && <span className="warn">Measuring failed: {run.error}</span>}
             {folder && (
               <>
                 <span>{measured} of {folder.total} measured</span>
-                {flagged > 0 && (
-                  <>
-                    <span style={{ color: 'var(--line)' }}>·</span>
-                    <span style={{ color: 'var(--bad)' }}>{plural(flagged, 'photo')} need a look</span>
-                  </>
-                )}
                 {folder.unreadable > 0 && (
                   <>
                     <span style={{ color: 'var(--line)' }}>·</span>

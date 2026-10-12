@@ -69,9 +69,9 @@ OK, NONE, UNREAD = "ok", "none", "unread"  # Line.status; UNREAD: not measurable
 COPY, CHAIN, FALLBACK, ONE_SIDE = "copy", "chain", "fallback", "one_side"  # Line.detail["path"] of a night answer
 NO_DAY, UNPLACED, NO_FOLDER = "no_day", "unplaced", "no_folder"  # Line.detail["why"] of a night photo with no distance
 NO_LISTING = "unreadable"  # Line.folder of a NO_FOLDER answer: folder_signature never gives it, so it is planned again
-# what the export's `check` column asks the reader to look at (Line.detail["checks"]); report.check_text words them
+# what a night answer asks a researcher to check by eye (Line.detail["checks"]); only the researcher log carries them
 MOVED, UNCHECKED, UNDATED = "moved", "unchecked", "undated"
-LOG_NAME = "night-rule.jsonl"  # the researcher log (Q12), in the app's own logs folder
+LOG_NAME = "research-log.jsonl"  # the one researcher log (Q12; a line per photo since 2026-10-11), in logs/
 
 
 # --- facts about one photo ----------------------------------------------------------------------------------
@@ -267,7 +267,7 @@ IDENTITY = Link(np.eye(3), None, 0.0)  # the flag photo lined up with itself
 class Line:
     """How one photo lands in its flag photo. `score` = the points of the line-up used: the photo's own by day; at
     night the weakest link of what it uses (the day photo's points, or the Chain's lower one), None when it copies the
-    flag photo itself or has no line-up. `detail` holds what the researcher log and the export's `check` read.
+    flag photo itself or has no line-up. `detail` holds what the researcher log keeps (`night_detail`).
     `folder` is set only when a side had no day photo: the folder's signature then, so a photo arriving later re-plans
     it."""
     source: str
@@ -477,7 +477,7 @@ class Planner:
         return self.lines[p]
 
 
-# --- the researcher log (Q12) ----------------------------------------------------------------------------------
+# --- the researcher log (Q12; one log for every photo since 2026-10-11) --------------------------------------------
 
 def log_dir() -> Path:
     """The app's own logs folder: where the launcher keeps launcher.log (logs\\ in the app folder), else (a developer's
@@ -486,25 +486,30 @@ def log_dir() -> Path:
     return Path(launcher).parent if launcher else store.DATA_DIR / "logs"
 
 
-def log_night(photo: Path, alignment: dict) -> None:
-    """One line of JSON per night answer: the photo, the flag photo, Copy / Chain / Fallback / one side, the day photos
-    with their points, the move check and the vote. A log that cannot be written, for whatever reason, never stops a
-    run.
+def night_detail(alignment: dict) -> dict:
+    """What the researcher log keeps about how a night photo was measured: its status, the day photo it used (anchor),
+    the score, and the Night rule's detail (Copy / Chain / Fallback / one side, the day photos with their tries and
+    points, the gaps, the move check, the vote, and the checks by eye)."""
+    return {"status": alignment.get("status"), "anchor": alignment.get("anchor"), "score": alignment.get("score"),
+            **(alignment.get("detail") or {})}
 
-    Written only when an answer is measured (measure._job, for each result it stores), so a run that skips current
-    answers adds no lines. "Measure again", or a one-sided answer planned again, adds a new line for the photo; each
-    line carries its time, and the last one per photo is the answer in the store. The file is never trimmed
-    (ticket 33 follow-up)."""
+
+def log_research(line: dict) -> None:
+    """Append one line of JSON, stamped with its time, to the researcher log (LOG_NAME). measure._job writes one line
+    per photo it measures, day or night, and one per unreadable file it meets. A log that cannot be written, for
+    whatever reason, never stops a run.
+
+    A run that skips current answers adds no lines. "Measure again" adds a new line for the photo; each line carries
+    its time, and the last one per photo is the answer in the store. The file is never trimmed (ticket 33 follow-up
+    G); it grows by about one line per photo measured."""
     try:
-        row = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), "photo": str(photo),
-               "status": alignment.get("status"), "anchor": alignment.get("anchor"), "score": alignment.get("score"),
-               **(alignment.get("detail") or {})}
+        row = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), **line}
         d = log_dir()
         d.mkdir(parents=True, exist_ok=True)
         with open(d / LOG_NAME, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
     except Exception as e:
-        print(f"night-rule log not written: {e}", file=sys.stderr, flush=True)
+        print(f"research log not written: {e}", file=sys.stderr, flush=True)
 
 
 # --- is a stored answer still current under these rules? ------------------------------------------------------

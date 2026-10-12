@@ -407,12 +407,10 @@ def flag_photo(site: str, image: str, size: str = "full"):
 
 @app.get("/api/export.csv")
 def export(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
-           all_species: bool = False, include_suspicious: bool = False, folder: str | None = None,
-           survey_site: str | None = None):
-    """The documented CSV. Suspicious rows stay out unless include_suspicious is set — never silently."""
+           all_species: bool = False, folder: str | None = None, survey_site: str | None = None):
+    """The CSV: every result row in the selection, data only (user decisions 2026-10-11)."""
     name = report.file_name(site or survey_site, _iso(date_from), _iso(date_to))
-    return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, include_suspicious, folder,
-                                      survey_site),
+    return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, folder, survey_site),
                     media_type="text/csv; charset=utf-8", headers={"content-disposition": f'attachment; filename="{name}"'})
 
 
@@ -422,13 +420,11 @@ EXPORTED_FOLDERS: set[str] = set()
 
 @app.post("/api/export/split")
 def export_split(to: str, by: str, site: str | None = None, date_from: date | None = None, date_to: date | None = None,
-                 all_species: bool = False, include_suspicious: bool = False, folder: str | None = None,
-                 survey_site: str | None = None):
+                 all_species: bool = False, folder: str | None = None, survey_site: str | None = None):
     """The export as one file per site (by=site) or per camera (by=camera), written into the folder `to`, with
     the same filters as GET /api/export.csv. An existing file is never overwritten: the new one gets " (2)"."""
     try:
-        paths = report.export_split(to, by, site, _iso(date_from), _iso(date_to), all_species, include_suspicious,
-                                    folder, survey_site)
+        paths = report.export_split(to, by, site, _iso(date_from), _iso(date_to), all_species, folder, survey_site)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except OSError as e:

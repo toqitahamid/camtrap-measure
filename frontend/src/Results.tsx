@@ -24,10 +24,6 @@ function medianBin(bins: Bin[]): Bin | null {
   return null
 }
 
-/** Both dates are parsed the same way, so the difference is exact whatever the browser's zone. */
-const spanDays = (from: string, to: string) =>
-  Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1)
-
 /** Nothing to draw: one card, one short line, and a way out where there is one. The card only; the caller
     owns the sheet, because a sheet with nothing measured in it may still carry the clear panel beside it. */
 function Message({ icon, title, line, action }: { icon: 'warn' | 'results'; title: string; line: string; action?: ReactNode }) {
@@ -71,7 +67,6 @@ export default function Results({ site, cameras, folder, onClear, onChooseFolder
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [allSpecies, setAllSpecies] = useState(false)
-  const [includeSuspicious, setIncludeSuspicious] = useState(false)
   const [summary, setSummary] = useState<Summary | null>(null)
   // Measured photos on this computer, filters ignored. The clear buttons hang off this and not off the
   // summary: someone who has measured something and then narrowed the screen down to nothing still has
@@ -359,14 +354,10 @@ export default function Results({ site, cameras, folder, onClear, onChooseFolder
   const peak = Math.max(1, ...bins.map((b) => b.n))
   const mid = medianBin(bins)
   const binWidth = bins.length > 0 ? bins[0].hi - bins[0].lo : 0
-  const bad = summary.suspicious > 0
-  // Rows that need a look are counted inside `deer`, so what the file will hold is one subtraction, not a guess.
-  const exported = includeSuspicious ? summary.deer : summary.deer - summary.suspicious
-  // Bars compare cameras against each other, so the camera whose animals stand furthest off fills the width.
-  const widest = Math.max(1, ...summary.cameras.map((c) => c.median_m ?? 0))
+  // The file holds every result row in the selection (user decision 2026-10-11): the deer count, or every animal.
+  const exported = summary.deer
 
   const exportParams = new URLSearchParams(query)
-  if (includeSuspicious) exportParams.set('include_suspicious', 'true')
   const fileName = `camtrap-measure_${oneCamera || surveySite || 'all'}_${from || 'start'}_${to || 'end'}.csv`
   // The first file's name, as an example of the rest: named like the combined file, by site or by camera.
   const firstCamera = summary.cameras[0]?.site ?? ''
@@ -433,10 +424,6 @@ export default function Results({ site, cameras, folder, onClear, onChooseFolder
                 <span className="dim" style={{ fontSize: 14 }}> m</span>
               </b>
             </div>
-            <div className="card tile" style={bad ? { borderColor: 'var(--bad-line)' } : undefined}>
-              <div className={bad ? 'cap warn' : 'cap'}>Needs a look</div>
-              <b className={bad ? 'warn' : 'faint'}>{thousands(summary.suspicious)}</b>
-            </div>
           </div>
 
           <div className="card" style={{ flex: 'none' }}>
@@ -482,8 +469,6 @@ export default function Results({ site, cameras, folder, onClear, onChooseFolder
                     <th className="num">Animals</th>
                     <th className="num">{allSpecies ? 'Kept' : 'Deer'}</th>
                     <th className="num">Median m</th>
-                    <th className="num">Needs a look</th>
-                    <th style={{ width: 190 }}>Distances</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -502,20 +487,6 @@ export default function Results({ site, cameras, folder, onClear, onChooseFolder
                       <td className="num">{thousands(c.detections)}</td>
                       <td className="num">{thousands(c.deer)}</td>
                       <td className="num">{c.median_m ?? NONE}</td>
-                      <td className={c.suspicious > 0 ? 'num warn' : 'num faint'}>{c.suspicious}</td>
-                      <td>
-                        {c.median_m === null ? (
-                          <span className="tiny faint">no distance read</span>
-                        ) : (
-                          <div
-                            style={{
-                              height: 6,
-                              borderRadius: 2,
-                              background: `linear-gradient(90deg, var(--amber) 0 ${Math.round((100 * c.median_m) / widest)}%, var(--raised) ${Math.round((100 * c.median_m) / widest)}% 100%)`,
-                            }}
-                          />
-                        )}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -532,22 +503,6 @@ export default function Results({ site, cameras, folder, onClear, onChooseFolder
               off the bottom used to be the clear buttons. */}
           <div className="scroll" style={{ padding: 16, display: 'grid', gap: 14, alignContent: 'start' }}>
             <p className="small dim" style={{ lineHeight: 1.6 }}>One row per animal, with its distance and 90% range.</p>
-
-            <label className="check">
-              <input type="checkbox" checked={allSpecies} onChange={(e) => setAllSpecies(e.target.checked)} />
-              <span>Include other animals</span>
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={includeSuspicious} onChange={(e) => setIncludeSuspicious(e.target.checked)} />
-              <span>Include rows that need a look ({summary.suspicious})</span>
-            </label>
-
-            {!includeSuspicious && bad && (
-              <div className="notice notice-warn row" style={{ gap: 7 }}>
-                <Icon name="warn" />
-                {summary.suspicious === 1 ? '1 row that needs a look is left out' : `${summary.suspicious} rows that need a look are left out`}
-              </div>
-            )}
 
             <div className="field">
               <span className="cap">
@@ -639,10 +594,6 @@ export default function Results({ site, cameras, folder, onClear, onChooseFolder
             <div className="kv">
               <span className="small dim">Rows in the file</span>
               <span>{thousands(exported)}</span>
-              <span className="small dim">Cameras</span>
-              <span>{summary.cameras.length}</span>
-              <span className="small dim">Date span</span>
-              <span>{from && to ? plural(spanDays(from, to), 'day') : 'all dates'}</span>
             </div>
           </div>
         </div>

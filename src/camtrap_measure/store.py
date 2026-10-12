@@ -41,7 +41,7 @@ create table if not exists links (
 
 # How a photo was lined up with its flag photo (ticket 33): the line-up version, day or night, source direct /
 # night, status ok / none, the day photo whose line-up a night photo uses, the detail (JSON: Copy / Chain / Fallback,
-# the day photos, the move check, the vote, what the export's `check` column says), and (only when a side had no day
+# the day photos, the move check, the vote, the checks by eye), and (only when a side had no day
 # photo) the folder's signature then.
 ALIGN_KEYS = ("alignment_version", "night", "align_source", "align_status", "anchor", "align_detail", "align_folder")
 

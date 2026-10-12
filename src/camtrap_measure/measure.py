@@ -19,6 +19,7 @@ import itertools
 import json
 import os
 import stat
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -148,7 +149,7 @@ def cancel() -> dict | None:
 def status() -> dict | None:
     if current is None:
         return None
-    r = {k: v for k, v in current.items() if k not in ("started", "cancel")}
+    r = {k: v for k, v in current.items() if k not in ("started", "cancel", "logged")}  # logged: log bookkeeping
     if current["status"] == "running":
         r["elapsed_s"] = round(time.monotonic() - current["started"], 1)
     measured = current["done"] - current["skipped"] - current["unreadable"]  # only inferred photos set the pace
@@ -185,7 +186,7 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, ch
 
 def lined_up(alignment: dict | None) -> dict:
     """The photo-row fields of a backend's line-up (lineup.Line.public): how the photo got to the job's flag photo.
-    The stored detail is what report.reasons and the export's `check` column read. None from a backend that does not
+    The stored detail is what report.reasons reads. None from a backend that does not
     say (an empty frame, the fake)."""
     al = alignment or {}
     night = al.get("night")
@@ -246,9 +247,47 @@ def _release() -> None:
         pass
 
 
+UNREAD_NOW = ("day or night could not be read just now (the file was locked or half copied), so no answer was kept; "
+              "it is read again on the next run")
+
+
+def _log_unreadable(run: dict, p: Path, camera: str, reason: str) -> None:
+    """One researcher-log line for a file this run could not measure; at most one per file per run."""
+    seen = run.setdefault("logged", set())  # never sent to the window (status() leaves it out)
+    if str(p) in seen:
+        return
+    seen.add(str(p))
+    lineup.log_research({"photo": str(p), "camera": camera, "status": "unreadable", "reasons": [reason]})
+
+
+def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment: dict | None) -> None:
+    """One researcher-log line for a photo just measured and stored, day or night (user decision 2026-10-11: one log,
+    and the reasons go there only). `reasons` are report.reasons of each stored box row, as the store holds it
+    (photo fields under box fields), in order and without repeats; [] when there are none. A night photo also carries
+    its Night-rule detail under `night`."""
+    from .report import reasons  # report imports this module
+
+    try:
+        why: list[str] = []
+        for d in dets:
+            why += [w for w in reasons({**photo, **d}) if w not in why]
+        night = (alignment or {}).get("night")
+        if night is None:  # the backend did not say: an empty frame is never lined up, so read its Flash tag here
+            night = lineup.read_night(p)  # None only when the file cannot be read just now
+        line = {"photo": str(p), "camera": camera, "status": "measured",
+                "day_night": None if night is None else "night" if night else "day",
+                "distance": any(d["distance_m"] is not None for d in dets), "animals": len(dets), "reasons": why}
+        if alignment and alignment.get("night"):  # lined up by the Night rule
+            line["night"] = lineup.night_detail(alignment)
+    except Exception as e:  # the log must never stop a run (log_research guards the write itself)
+        print(f"research log not written: {e}", file=sys.stderr, flush=True)
+        return
+    lineup.log_research(line)
+
+
 def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> int:
     """Measure one job's photos against its flag photo. -> how many went through the models."""
-    from .report import DEER, reasons  # report imports this module
+    from .report import DEER, UNREADABLE  # report imports this module
 
     cal, method, fidelity = job["cal"], run["method"], run["fidelity"]
 
@@ -267,6 +306,7 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
             continue
         if not readable(p):
             count(unreadable=1)
+            _log_unreadable(run, p, cal["site"], UNREADABLE)
             continue
         batch.append((p, {"path": str(p), "site": cal["site"], **calibration.read_exif(p), "held_reason": None,
                           "calibration_image": cal["image_name"], "calibration_version": cal.get("updated_at"),
@@ -287,18 +327,17 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
             # day or night could not be read just now (locked, half copied): no answer is kept, so the next run
             # reads the photo again; neither a direct line-up nor night=0 is guessed for it (ticket 33)
             count(unreadable=1)
+            _log_unreadable(run, res.path, cal["site"], UNREAD_NOW)
             if run["cancel"]:
                 break
             continue
         photo = {**rows[str(res.path)], **lined_up(res.alignment), "match_score": res.match_score}
         dets = [asdict(d) for d in res.detections]
         store.record(photo, method, dets)
-        if res.alignment and res.alignment.get("night"):
-            lineup.log_night(res.path, res.alignment)  # the researcher log (Q12): how the night photo was measured
+        _log_measured(res.path, cal["site"], photo, dets, res.alignment)  # the researcher log (Q12): every photo
         count(detections=len(dets))
         if cam:
             cam["deer"] += sum(1 for d in dets if d["species"] in DEER)
-            cam["needs_look"] += any(reasons({**photo, **d}) for d in dets)
         if run["cancel"]:
             break
     return len(batch)

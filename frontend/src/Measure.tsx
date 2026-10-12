@@ -12,7 +12,6 @@ import {
   clock,
   flagSrc,
   lead,
-  linesUp,
   metres,
   photoSrc,
   plural,
@@ -27,18 +26,16 @@ import {
   type State,
 } from './ui'
 
-type View = 'all' | 'new' | 'flagged'
+type View = 'all' | 'new'
 
 const VIEWS: { key: View; label: string; keep: (r: Row) => boolean }[] = [
   { key: 'all', label: 'All', keep: () => true },
   { key: 'new', label: 'Not measured', keep: (r) => !r.measured },
-  { key: 'flagged', label: 'Needs a look', keep: (r) => state(r) === 'flagged' },
 ]
 
 /** The mark at the right of a list row: the one glance that says what happened to this photo. */
 const DOT: Record<State, string> = {
   clean: 'var(--ok)',
-  flagged: 'var(--bad)',
   empty: 'var(--edge)',
   new: 'var(--info)',
   stale: 'var(--dim)',
@@ -48,8 +45,6 @@ const DOT: Record<State, string> = {
 function note(r: Row): string {
   const time = clock(r.captured_at)
   switch (state(r)) {
-    case 'flagged':
-      return r.reasons.join('; ')
     case 'empty':
       return `${time} · no animal`
     case 'new':
@@ -189,7 +184,7 @@ export default function Measure({
           </div>
         ) : list.length === 0 ? (
           <div className="empty">
-            <p className="dim small">No photo {view === 'new' ? 'is still unmeasured' : 'needs a look'}.</p>
+            <p className="dim small">No photo is still unmeasured.</p>
             <button className="btn btn-sm" onClick={() => setView('all')}>Show all {rows.length}</button>
           </div>
         ) : (
@@ -219,7 +214,7 @@ export default function Measure({
                   <img className="thumb" src={photoSrc(r.path, 'thumb')} alt="" loading="lazy" />
                   <span className="item-text">
                     <span className="small">{r.name}</span>
-                    <span className={`tiny ${rst === 'flagged' ? 'warn' : 'faint'}`}>{note(r)}</span>
+                    <span className="tiny faint">{note(r)}</span>
                   </span>
                   {r.measured && d && <span className="grot" style={{ fontWeight: 600 }}>{metres(d)}</span>}
                   {/* measuring one photo has to be one click, so the button lives in the row itself and
@@ -293,7 +288,7 @@ export default function Measure({
                 {boxes.map((d, i) => (
                   <div
                     key={`${d.method}-${d.idx}`}
-                    className={`bbox${d.reasons.length ? ' bbox-flagged' : ''}${hot === i ? ' bbox-hot' : ''}${d.y1 < 0.08 ? ' bbox-low' : ''}`}
+                    className={`bbox${hot === i ? ' bbox-hot' : ''}${d.y1 < 0.08 ? ' bbox-low' : ''}`}
                     style={{
                       left: `${d.x1 * 100}%`,
                       top: `${d.y1 * 100}%`,
@@ -419,9 +414,8 @@ export default function Measure({
                     {cur.detections.map((d, i) => (
                       <button
                         key={`${d.method}-${d.idx}`}
-                        className={`animal${d.reasons.length ? ' animal-flagged' : ''}`}
+                        className="animal"
                         aria-current={hot === i}
-                        title={d.reasons.join('; ') || undefined}
                         onMouseEnter={() => setHot(i)}
                         onMouseLeave={() => setHot(null)}
                         onFocus={() => setHot(i)}
@@ -446,11 +440,6 @@ export default function Measure({
                 <span>{againstSite || NONE}</span>
                 <span className="cap">Flag photo <Help topic="flag" /></span>
                 <span>{cur.flag_image ?? NONE}</span>
-                <span className="cap">Lines up with flag photo <Help topic="alignment" /></span>
-                <span className={linesUp(cur) === 'Check' || linesUp(cur) === 'No' ? 'warn' : undefined}
-                      title={cur.match_score === null ? undefined : plural(cur.match_score, 'matching point')}>
-                  {linesUp(cur)}
-                </span>
                 <span className="cap">Distance read at</span>
                 <span>{methodLabel(cur.method)}</span>
               </div>

@@ -153,14 +153,16 @@ and **Chain**, plus a **Fallback**:
 - Both found: line B up onto A. <= 20 px (was 5 px; Q3a): Copy the nearer. > 20 px: line the night photo up to A and
   to B; more points wins (Q3b). If that night -> day line-up has >= 2,000 points and shift p95 < 300 px: Chain through
   the winner (Q8). Otherwise Fallback: copy the nearer day photo (Q9).
-- Only one found: Copy it (no UI mark; the export says "Check by eye: camera move not checked").
+- Only one found: Copy it (no UI mark; the researcher log's `night.checks` says `unchecked`; the export column that said
+  "Check by eye: camera move not checked" was removed 2026-10-11, see follow-up F).
 - Never line a night photo up to the flag photo directly (Q10). This replaces the earlier "fewer than 15 points ->
   direct night -> flag -> nearer" steps (Q7, superseded; they never triggered in folder 60).
 - The move check stays the direct B -> A line-up (flag-frame check rejected, folder 58).
 - No capture time: place the photo by file-name number within the folder, else by file modified time (Q13).
-- Export: one column `check`. Empty when fine; "Check by eye: camera moved" (Fallback after a move); "Check by eye:
-  camera move not checked" (one day photo only); "Check by eye: no photo date" (Q11). No mark in the app UI.
-  Technical detail goes to a researcher log in the app's own logs folder, not next to the export (Q12).
+- Export: one column `check` (Q11), removed 2026-10-11 (user decision, follow-up F): the checks `moved`,
+  `unchecked` and `undated` go only to the researcher log in the app's own logs folder, not next to the export (Q12).
+  No mark in the app UI. Since 2026-10-11 that log is `research-log.jsonl`, one line per measured photo ("A ok but
+  can you make one research log"); a night photo's line carries the Night-rule detail under `night`.
 - Evidence (folder 60, CPU): 0 of 896 reference-ok points over 1 m with Chain + Fallback, against 29 of 1,120 for
   Copy of the nearer day photo.
 
@@ -222,6 +224,23 @@ Applied after a review of the final rule; CONTEXT.md "Night photos: the Night ru
   with no answer ("No"; it keeps its boxes, so `detections` is not empty). Test
   `test_a_measured_photo_with_no_animal_is_listed_apart_from_a_night_photo_with_no_answer` pins those listing fields
   (passed alone on the login node, 1.3 s). No backend change.
-- G. The researcher log `night-rule.jsonl` is never trimmed.
+  **Now (user decisions 2026-10-11, branch `fix/lines-up`, not committed): the line is removed.** "I want to simplify
+  the ui": the "Lines up" table column, the detail-pane line, the Measure panel line, its help topic, `linesUp` and the
+  `Row` fields `align_source` / `align_status` are gone, so the fix above is moot. The export's `check` column and
+  `report.check_text` are removed too: "Only save in the log don't include it in the csv which the wildlife
+  collaborators will use. Don't need the same information to be saved in three places." The checks stay in the
+  researcher log's `night.checks` field (`moved`, `unchecked`, `undated`, with `path`, `side`, `anchor`) and in the stored
+  `align_detail`. The two tests were rewritten for what they still pin: the night photo that copies the flag photo is
+  exported with its distance and its check is in the log only; a night photo with no answer is a CSV row with an
+  empty distance, and an empty frame is no row. The same day the user also removed "Needs a look", the CSV's warning
+  text, `#` lines, `flag` column and SAM3, cut the CSV to seven columns, removed the Table's export button and five
+  repeated read-outs, and removed the DENSITY tab: the app gives distances only, and density estimation is the
+  wildlife staff's own task (CONTEXT.md, "Window and CSV simplified"). Last, the night-only `night-rule.jsonl`
+  became one researcher log, `research-log.jsonl`: one line per measured photo, day or night, with its reasons (the
+  only place they are written), the Night-rule detail under `night` for a night photo, and one line per unreadable
+  file per run ("A ok but can you make one research log").
+- G. The researcher log is never trimmed. Since 2026-10-11 it is `research-log.jsonl` with one line per photo
+  measured (night photos only before), so it grows by about one line per photo, every run that measures; a
+  "Measure again" adds a line per photo again. Still not built: rotation or trimming.
 - H. A flag-photo copy in the folder that lost its capture time (re-saved without EXIF) is not recognised as a flag
   photo and could vote; a file hash would catch it. Not built.

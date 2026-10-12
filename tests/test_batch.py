@@ -434,7 +434,7 @@ def test_a_site_run_measures_each_camera_against_its_own_flag_photos_and_carries
     assert cams["MAS_CAM01"]["status"] == "done" and cams["MAS_CAM01"]["photos"] == 2 and cams["MAS_CAM01"]["done"] == 2
     assert [f["image_name"] for f in cams["MAS_CAM01"]["flags"]] == ["IMG_0004.JPG", "IMG_2868.JPG"]
     assert cams["MAS_CAM01"]["flags"][0]["captured_at"] == "2025-12-19T10:00:00" and cams["mas cam 2"]["site"] == "MAS_CAM02"
-    assert {"deer", "median_m", "needs_look"} <= cams["MAS_CAM01"].keys()
+    assert {"deer", "median_m"} <= cams["MAS_CAM01"].keys() and "needs_look" not in cams["MAS_CAM01"]  # 2026-10-11
     assert sorted(st["left_out"], key=lambda x: x["name"]) == [{"name": "MAS_CAM04", "why": "check which camera it is"},
                                                                {"name": "card 3", "why": "no camera with this name"}]
     by_photo = {(Path(x["path"]).parent.name, Path(x["path"]).name): (x["site"], x["calibration_image"])

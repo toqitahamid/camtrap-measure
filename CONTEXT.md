@@ -40,7 +40,8 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
 ## Pipeline decisions
 
 - **Detection**: MegaDetector always; SAM3 as a second selectable method
-  ("precise, slower"). Which is *default* is decided by a planned comparison on
+  ("precise, slower"). (2026-10-11: the window no longer offers SAM3, and the CSV holds
+  MegaDetector-box answers only. The engine still accepts `method=sam3`.) Which is *default* is decided by a planned comparison on
   existing labeled data in `../distance_estimation` (bbox-bottom vs mask ground
   contact), not by assumption.
 - **Species**: SpeciesNet per detection. Export filter = white-tailed deer +
@@ -214,13 +215,14 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   gallery with their hold reason. Every reason names its threshold.
 - Summary histogram and per-camera median are over deer rows (white-tailed deer +
   unsure, the export default); counts of animals are over everything. Bins are 2 m.
-- Export: `GET /api/export.csv?site&date_from&date_to&all_species&include_suspicious`.
-  Capture dates are compared as YYYY-MM-DD in the camera's local time. The file opens
-  with `#` lines — filters used, how many suspicious rows were left out (or that they
-  are in, with `flag` naming why), and every column's meaning and unit — so it is
-  unambiguous without the app (R `comment.char="#"`, pandas `comment="#"`). Columns are
-  the spec's ten plus `match_score`. `photo` is the file name; camera + timestamp make
-  it unique enough for a statistician; the absolute path stays in the store.
+- Export: `GET /api/export.csv?site&date_from&date_to&all_species&folder&survey_site`.
+  Capture dates are compared as YYYY-MM-DD in the camera's local time. Since 2026-10-11
+  (user decisions, see "Window and CSV simplified" below) the file is data only: the
+  column header row, then every MegaDetector-box result row in the selection, with no
+  `#` lines, no `flag` or `check` column and no `include_suspicious` option. The seven
+  columns are `photo, camera, timestamp, species, distance_m, q05_m, q95_m`; their
+  meanings are in README.md ("The CSV export"). `photo` is the file name; camera +
+  timestamp make it unique enough for a statistician; the absolute path stays in the store.
 - Gallery thumbnails come from `GET /api/photo?path=` which serves only paths a run has
   recorded (640 px JPEG); boxes are drawn by the page from the stored fractions.
   pywebview `ALLOW_DOWNLOADS` is on so the CSV link saves through the native dialog.
@@ -1246,7 +1248,9 @@ window's big icon (Alt-Tab). 290 passed.
 
 Ticket 25: Seth asked for distance sampling. `density.py` turns the measured deer distances into deer per km²
 (camera-trap distance sampling, Howe et al. 2017) and writes the flat file R's `Distance` package reads; a
-DENSITY section after RESULTS shows both.
+DENSITY section after RESULTS shows both. (2026-10-11: the DENSITY section was removed from the window. The app gives
+distances only; density estimation is the wildlife staff's own task. The backend below stays until the user decides;
+see "Window and CSV simplified".)
 
 - **What enters.** White-tailed deer rows only, with a distance, and no row `report.reasons` flags (so every
   "unsure" animal and every row without a distance stays out). A photo measured with both methods has rows under
@@ -1391,11 +1395,11 @@ Nothing on screen is informational only.
 
 | Old | New | Why |
 |---|---|---|
-| suspicious, flagged for a look | Needs a look (screen and CSV header) | one word for one thing on every screen and in the file |
-| Clean / Empty frame / Answer out of date | Looks fine / No animal / Out of date | "clean" promised more than it means |
-| Alignment: 8812 points; match score; inliers | Lines up with flag photo: Good / Check / No (count in the tooltip) | the point count means nothing to a student; the decision does |
+| suspicious, flagged for a look | Needs a look (screen and CSV header) | one word for one thing on every screen and in the file. Removed from the window and the CSV 2026-10-11 |
+| Clean / Empty frame / Answer out of date | Looks fine / No animal / Out of date | "clean" promised more than it means. "Looks fine" became "Measured" 2026-10-11: nothing is checked any more |
+| Alignment: 8812 points; match score; inliers | Lines up with flag photo: Good / Check / No (count in the tooltip) | the point count means nothing to a student; the decision does. Removed 2026-10-11 |
 | box confidence 0.97; Conf | 97% sure it is an animal; Sure | a percentage reads without a lesson |
-| Fast — MegaDetector box / Precise — SAM3 outline (slower) | MegaDetector box (faster) / SAM3 outline (more exact) | the researcher kept the model names; only the dash and the order changed |
+| Fast — MegaDetector box / Precise — SAM3 outline (slower) | MegaDetector box (faster) / SAM3 outline (more exact) | the researcher kept the model names; only the dash and the order changed. The picker was removed 2026-10-11; "Distance read at" still shows "MegaDetector box (faster)" |
 | Re-measure photos that already have a number | Redo measured photos | shorter, same meaning |
 | 90% between / 90% interval (per photo) | 90% range | plain; the density keeps its own term below |
 | 90% range (density) | 90% confidence interval | the thesis term |
@@ -1414,7 +1418,8 @@ Nothing on screen is informational only.
   screen. With a folder chosen it still starts on that folder.
 - **Fast settings stay visible**, as "⚠ Quick settings are on. See About." (ticket 19 said fast fidelity is never
   silent). It shows only when someone turned it on in config.json.
-- **The CSV keeps every column name and number.** Header lines and the `flag` column's reason text are reworded
+- **The CSV keeps every column name and number.** (Superseded 2026-10-11: the CSV now has seven columns and no
+  header lines; see "Window and CSV simplified".) Header lines and the `flag` column's reason text are reworded
   (for example "lines up poorly with its flag photo (12 points, needs 20). Wrong camera, or was it moved?"). The
   thresholds are still named in the reasons, and the words the table matches on ("flag photo", "confidence",
   "unsure") are kept.
@@ -1870,7 +1875,7 @@ Day photos line up directly, as before. `lineup.py` (`Planner.night_rule`); deci
   is an answer. It never occurred in folder 58 (minimum 4,838 points).
 - **No answer.** Only when no day photo and no dated flag photo is found on either side. With a dated job flag photo
   this cannot happen: the flag photo is always on one side. An undated flag photo cannot be placed in time; then a
-  night photo with no day photo on either side gets no distance, with a reason in `flag`.
+  night photo with no day photo on either side gets no distance (its row in the CSV has an empty distance).
 - **No capture time (Q13).** The dated photos always stay in capture-time order; one undated photo never reorders
   the folder (review 2026-10-11; before, one undated photo sent the whole folder to number or file-time order). Each
   undated photo is placed alone: by the camera counter in its file name (the last number, IMG_0215 -> 215), between
@@ -1878,22 +1883,32 @@ Day photos line up directly, as before. `lineup.py` (`Planner.night_rule`); deci
   number cannot place it (no number, a shared number, a counter restart between them), after the dated photo with
   the latest file modification time not after its own. "Nearer" is then counted in photos along the order, not
   seconds; burst mates need two capture times. `detail.order` says how the night photo was placed (time / number /
-  mtime); "Check by eye: no photo date" marks a night photo, or an A or B it used, placed by number or file time.
+  mtime); the check `undated` in the researcher log marks a night photo, or an A or B it used, placed by number or
+  file time.
 - **Read just now.** When day or night of the photo itself cannot be read at the moment it is measured (locked, half
   copied), neither rule runs: a direct line-up could be a night photo's link to the flag photo. No answer is kept
   (not night = 0), the run counts it unreadable, and the next run reads it again. A camera folder that cannot be
   listed (a share that dropped) does not end the run: the night photo gets no distance, with the reason "night photo
   whose folder could not be read ..." and `align_folder` "unreadable", so it is planned again on the next run.
-- **Export (Q11).** The `lineup` column is gone; one `check` column replaces it: empty when the number is fine,
-  "Check by eye: camera moved" (Fallback), "Check by eye: camera move not checked" (one day photo), "Check by eye: no
-  photo date" (the night photo or a day photo it used has no date); several join with commas. No mark in the app UI:
-  an answered night photo has no "needs a look" reason.
-- **Researcher log (Q12).** One JSON line per night answer (photo, flag photo, path, A and B with their tries and
-  points, move check, vote, score) in `night-rule.jsonl` in the app's own logs folder: the folder of the launcher's
-  `CAMTRAP_LAUNCHER_LOG` (logs\ in the app folder), else `logs/` in the data folder. Never beside an export. A line is
-  written only when an answer is measured, so a run that skips current answers adds none; "Measure again" adds a new,
-  timestamped line per night photo (the last one is the stored answer). Any failure to write is printed and ignored.
-  The file is never trimmed (follow-up).
+- **Export (Q11, reversed 2026-10-11).** The `lineup` column is gone, and so is the `check` column that replaced it
+  (user decision 2026-10-11: "Only save in the log don't include it in the csv which the wildlife collaborators will
+  use. Don't need the same information to be saved in three places."). What a night answer asks a researcher to
+  check by eye is in the researcher log only, as the `night.checks` list: `moved` (Fallback: the camera moved and the night
+  photo copied the nearer day photo), `unchecked` (one day photo, so the move was not checked), `undated` (the night
+  photo or a day photo it used has no date). No mark in the window.
+- **Researcher log (Q12; one log for every photo since 2026-10-11).** One file, `research-log.jsonl`, in the app's
+  own logs folder: the folder of the launcher's `CAMTRAP_LAUNCHER_LOG` (logs\ in the app folder), else `logs/` in the
+  data folder. Never beside an export. It replaced `night-rule.jsonl` (user decision 2026-10-11: "A ok but can you
+  make one research log"). `measure._job` writes one JSON line per photo it measures, day or night: `at`, `photo`,
+  `camera`, `status` "measured", `day_night` ("day" / "night"; an empty frame is read from its Flash tag, null only
+  when the file cannot be read just now), `distance` (any box got a number), `animals`, and `reasons` (report.reasons
+  of each stored box row, in order, without repeats; [] when none). A night answer also carries `night`: status,
+  anchor, score, flag photo, order, A and B with their tries and points, gaps, near, move points and px, vote, path,
+  side and checks. A file the run cannot measure gets one line per run: `status` "unreadable" and its reason (the
+  file is not a readable JPEG, or day or night could not be read just now). A run that skips current answers adds
+  none; "Measure again" adds a new, timestamped line (the last one per photo is the stored answer). Any failure to
+  build or write a line is printed and ignored. The file is never trimmed (follow-up G): it grows by about one line
+  per photo measured. Nothing in the window, the CSV or the store holds the reasons.
 - **Links are kept.** Every link (a photo onto the flag photo, B onto A, night onto a day photo) is stored in `links`,
   keyed by both files' paths and modification times, the setting (`Real.link_setting`: fidelity, RoMa's refinement
   resolution, weights version) and `lineup.LINK_VERSION` (still 1: a link is measured as before). "Measure again"
@@ -1909,8 +1924,9 @@ Day photos line up directly, as before. `lineup.py` (`Planner.night_rule`); deci
   A and B with tries, gaps, move points and px, vote, checks, order) and `align_folder`. A night answer's
   `match_score` is the weakest link it uses (the day photo's points; the lower of the Chain's two), empty when it
   copies the flag photo itself. Kept empty on purpose (review 2026-10-11): the flag photo has no line-up points of
-  its own, and B's points would be a number for a line-up the photo did not use. The built frontend's `linesUp` reads
-  an empty match_score as "Lines up: No"; the rebuild must read a night row by `align_status` (follow-up).
+  its own, and B's points would be a number for a line-up the photo did not use. The window's "Lines up" line and
+  `linesUp` were removed 2026-10-11 (user decision: "I want to simplify the ui"), so nothing reads the empty
+  match_score as a failed line-up.
 - **Versions.** `lineup.VERSION` = 2. Under an earlier line-up version (1: the first bracket design, 5 px / 5,000
   points) a night answer is measured again, once; a day answer and an empty frame stand. Answers from before line-up
   versions behave as in version 1 (a night photo once; whether it was night is read once and kept). An answer that
@@ -1922,7 +1938,7 @@ Day photos line up directly, as before. `lineup.py` (`Planner.night_rule`); deci
 
 Tests: `tests/test_lineup.py` (the rules on a stub: the 20 px and 1,000-point boundaries, 4,000 points, tries and
 burst mates, the vote, the Chain gate at 1,999 / 2,000 points and 299 / 300 px, the composition order, Fallback, one
-side, flag photos at both ends, no answer, file-number and mtime order, the check column; `current` for versions 1 and
+side, flag photos at both ends, no answer, file-number and mtime order, the log's checks; `current` for versions 1 and
 2; FakeModels end to end through the API, asserting no night photo is ever linked to a flag photo, the researcher log,
 measure-again-once after the version bump; review 2026-10-11: one undated photo and a counter restart keep the dated
 order, a flag photo of another pixel size is passed over, a renamed flag-photo copy never votes, day or night unread
@@ -1932,5 +1948,46 @@ with Q1 for Copy photos, folder 60's moved nights on the app path, flag photos a
 (every photo copied before the first planner; "unplaced" counted, must be 0), MAS_CAM07 end to end, day photos
 bit-equal to main, then the suite on branch and main.
 Follow-ups: one SQLite connection per run instead of per call; re-plan a one-sided answer only when a day photo
-arrives on its missing side; the frontend "Lined up" line, and `linesUp` reading a night row by `align_status`;
-the researcher log is never trimmed; a flag-photo copy that lost its capture time is not recognised.
+arrives on its missing side; the researcher log is never trimmed; a flag-photo copy that lost its capture time is
+not recognised. (The frontend "Lines up" follow-up is closed: the line was removed 2026-10-11.)
+
+## Window and CSV simplified (2026-10-11, user decisions)
+
+The user simplified what staff see. Each decision is quoted. The reason texts and the research details now reach no
+staff-facing output.
+
+- **"Lines up" removed** ("I want to simplify the ui"): the Table column, the detail-pane line, the Measure line and
+  its help topic.
+- **"Needs a look" removed** ("Remove this as well"): the state, its filter chip and count, the flagged row and box
+  colours, the reason text in the detail pane and the Measure list, the red Sure colour, the status-bar count, the
+  Results tile and column, and the site run's "Needs a look" column and button. The pill "Looks fine" reads
+  "Measured". The engine still computes `report.reasons`; no screen or CSV shows them, and the researcher log is the
+  only place they are written (`measure._log_measured`). Other backend readers remain: `density.deer_rows` (no longer
+  reachable from the window), `report.folder()` (the `reasons` fields of `/api/folder`, which the window no longer
+  reads) and `report.summary()` (`suspicious`, which no screen shows).
+- **The CSV holds every result row** ("include all results, remove the warning text"): no `flag` column, no
+  `include_suspicious` option on the API or the Results screen.
+- **The CSV holds data only** ("in the csv it should only include data no notes"): no `#` line of any kind. The
+  column notes moved to README.md.
+- **One method** ("from the ui remove sam3. I don't need sam3", "Export one method"): no method picker; the window
+  always sends the MegaDetector box method; the CSV and the Results counts read MegaDetector-box rows only, so a photo
+  an older run also measured with SAM3 gives one row per animal. The SAM3 code, schema and `method=sam3` on the API
+  stay until the user decides.
+- **Seven columns** (the interval stays: "where is the interval column? It's needed"): `photo, camera, timestamp,
+  species, distance_m, q05_m, q95_m`. Removed: `site`, `confidence`, `fidelity`, `match_score`, `method`, `flag`,
+  `check`.
+- **One researcher log** ("A ok but can you make one research log"): `research-log.jsonl` replaces `night-rule.jsonl`
+  and holds one line per measured photo with its reasons, plus the Night-rule detail (with the checks by eye) for a
+  night photo, and one line per unreadable file per run. It is the only place the reasons and the checks are written
+  (see "Researcher log (Q12)" above).
+- **Kept as they are** (user): the Sure column, "% sure", "(N points)" in Compare, the About rows, "Distance read at",
+  and the 90% range everywhere.
+- **Distances only, no density** ("As I'm giving the distance here only ... It's the task of wildlife not me. My job
+  was to help them with the distance estimation."): the DENSITY tab, its screen, its help topics and its "Export for
+  R Distance" button are gone. Density estimation is the wildlife staff's own task, done outside the app from the
+  CSV. The backend (`density.py`, `/api/density`, `/api/density/settings`, `/api/density.csv`, `tests/test_density.py`,
+  the config.json `"density"` key) stays until the user decides; nothing in the window calls it.
+- **One export, fewer repeats**: the Table's own Export button is gone (the one export is in Results); Results lost
+  the "Include other animals" checkbox (the Species filter stays), "Cameras" and "Date span" under "In this selection"
+  (kept: "Rows in the file") and the "Distances" bar column (kept: "Median m"); the median / mean / range footer
+  under the table is gone; the bottom run bar hides while the site run's own "Running" card shows its progress.

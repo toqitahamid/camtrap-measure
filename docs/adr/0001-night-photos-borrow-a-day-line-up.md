@@ -32,9 +32,12 @@ Use the Night rule (Copy + Chain + Fallback). Details after the grilling of 2026
   the app currently uses. it will bring wrong answer.").
 - No capture time: place the photo by file-name number within the folder, else by file modified time, then apply the
   rule.
-- Export: one column `check`, empty when the number is fine; "Check by eye: camera moved" (Fallback after a move),
-  "Check by eye: camera move not checked" (one day photo only), "Check by eye: no photo date". No mark in the app UI.
-  Technical detail goes to a researcher log in the app's own logs folder.
+- What to check by eye goes to the researcher log only, in the app's own logs folder (`research-log.jsonl`, the
+  night photo's `night.checks`: `moved` for a Fallback after a move, `unchecked` for one day photo only, `undated`
+  for no photo date). No mark in the app UI, and no column in the export. (Amended 2026-10-11. The first version put
+  these words in an export column `check`. The user reversed that: "Only save in the log don't include it in the csv
+  which the wildlife collaborators will use. Don't need the same information to be saved in three places." The
+  night-only `night-rule.jsonl` then became one log for every photo: "A ok but can you make one research log".)
 
 ## Consequences
 

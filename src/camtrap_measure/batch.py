@@ -582,7 +582,7 @@ def start(path: str, method: str, rerun: bool = False, photos: list[str] | None 
         flags = [{"image_name": f, "captured_at": r["_got"][str(g[0])]["captured_at"]} for f, g in groups.items()]
         cameras.append({"folder": r["folder"], "name": r["name"], "site": r["camera"], "flags": flags,
                         "prefix": str(Path(r["name"])) + os.sep,  # how TABLE names this folder's photos
-                        "total": len(ps), "done": 0, "deer": 0, "needs_look": 0, "status": "waiting",
+                        "total": len(ps), "done": 0, "deer": 0, "status": "waiting",
                         "photos": None, "median_m": None})
     left = [] if photos is not None else \
         [{"name": r["name"], "why": _left_out(r)} for r in rows if not r["ticked"]]

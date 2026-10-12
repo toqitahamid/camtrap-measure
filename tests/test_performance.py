@@ -115,10 +115,3 @@ def test_changing_the_settings_re_measures_instead_of_mixing_two_kinds_of_metres
     assert measure.current_answer(done, cal, "md", distance.RESEARCH)
     assert not measure.current_answer(done, cal, "md", distance.FAST)
     assert not measure.current_answer({**done, "fidelity": None}, cal, "md", distance.RESEARCH)  # measured before 19
-
-
-def test_the_export_says_which_settings_made_each_number():
-    from camtrap_measure import report
-
-    assert "fidelity" in report.COLUMNS
-    assert "research = the published settings" in report.DOC

@@ -2,8 +2,8 @@
 the nearer day photo's line-up when the day photos before (A) and after (B) agree the camera did not move; when it
 moved, vote and Chain through the winning day photo, or Fall back to the nearer one; Copy the one day photo when only
 one is found; the flag photos stand as day photos at the ends of a deployment; never a link from a night photo to a
-flag photo. Also which stored answers are measured again, the researcher log, the export's `check` column, and the
-same answer on every path.
+flag photo. Also which stored answers are measured again, the researcher log (one line per photo, its reasons and
+the Night-rule detail), and the same answer on every path.
 
 The rules run on stand-in models: `Stub` hands the planner made-up links, and `inference.FakeModels` runs Real's own
 two-stage run without a GPU. Numbers in the links are inliers, or (inliers, dx, dy) for a homography that shifts by
@@ -136,10 +136,17 @@ def why(line: lineup.Line, **row) -> list[str]:
                            "align_detail": json.dumps(line.detail), **row})
 
 
-def check(line: lineup.Line) -> str:
-    """The export's `check` column for a row read through this line-up."""
-    return report.check_text({"align_source": line.source, "align_status": line.status,
-                              "align_detail": json.dumps(line.detail)})
+def log_lines() -> list[dict]:
+    """Every line of the researcher log (research-log.jsonl) in the test's data folder."""
+    return [json.loads(x) for x in (lineup.log_dir() / lineup.LOG_NAME).read_text().splitlines()]
+
+
+def logged(line: lineup.Line) -> dict | None:
+    """The `night` object of the researcher-log line measure._job writes for a photo with this line-up (no boxes):
+    None for a day photo, which has no `night` object. What a night answer asks to check by eye is its `checks` field:
+    the only place it is kept (user decision 2026-10-11; the export's `check` column is gone)."""
+    measure._log_measured(Path("IMG_N.JPG"), "CAM", {}, [], line.public())
+    return log_lines()[-1].get("night")
 
 
 def no_night_to_flag(calls, nights, flags=(FLAG, "FLAG2.JPG")) -> None:
@@ -196,7 +203,7 @@ def test_a_day_photo_with_no_line_up_of_its_own_is_not_lined_up(tmp_path, got, r
     stub.link = lambda target, reference: got
     line = planner(stub, flag_cal(tmp_path)).plan(d / "IMG_1.JPG")
     assert (line.source, line.status, line.H, line.score) == ("direct", "none", None, got[1])
-    assert why(line) == [reason] and check(line) == ""
+    assert why(line) == [reason] and logged(line) is None  # a day answer writes no researcher log line
 
 
 # --- night photos: Copy ------------------------------------------------------------------------------------------
@@ -225,7 +232,7 @@ def test_a_night_photo_copies_the_line_up_of_the_nearer_day_photo(tmp_path, at, 
     assert not [c for c in stub.calls if P in c]  # Copy lines the night photo up with nothing
     assert sorted(stub.calls) == sorted([(A, FLAG), (B, FLAG), (B, A)])
     assert why(line) == ["could not find the ground under the animal, so no distance"]  # no line-up reason at all
-    assert check(line) == ""
+    assert logged(line)["checks"] == []
 
 
 @pytest.mark.parametrize("dx, path", [(20.0, "copy"), (20.01, "chain")])
@@ -299,7 +306,7 @@ def test_when_the_camera_moved_the_side_with_more_points_wins_the_vote(tmp_path,
     assert line.anchor == {"A": A, "B": B}[side] and line.detail["vote"] == {"A": [to_a, 0.0], "B": [to_b, 0.0]}
     assert line.score == min({"A": to_a, "B": to_b}[side], {"A": 8000, "B": 9000}[side])  # the weaker link
     no_night_to_flag(stub.calls, {P})
-    assert check(line) == ""  # a Chain is a measured line-up: nothing to check by eye
+    assert logged(line)["checks"] == []  # a Chain is a measured line-up: nothing to check by eye
 
 
 @pytest.mark.parametrize("vote, path", [
@@ -314,9 +321,10 @@ def test_the_chain_needs_2000_points_and_a_shift_under_300_px(tmp_path, vote, pa
     assert (line.status, line.detail["path"], line.anchor) == ("ok", path, A)
     if path == "chain":
         assert line.H[0, 2] == pytest.approx(0.2 + vote[1])  # H(A -> flag) . H(night -> A)
-    else:  # Fallback: the nearer day photo (A), its own line-up, and the export asks for a look
+    else:  # Fallback: the nearer day photo (A), its own line-up, and the researcher log asks for a look
         assert line.H[0, 2] == pytest.approx(0.2) and line.detail["voted"] == "A"
-        assert line.detail["checks"] == ["moved"] and check(line) == "Check by eye: camera moved"
+        log = logged(line)
+        assert (log["checks"], log["path"], log["side"], log["anchor"]) == (["moved"], "fallback", "A", A)
 
 
 def test_the_chain_is_the_day_photos_line_up_after_the_night_photos_line_up_to_it(tmp_path):
@@ -350,7 +358,8 @@ def test_a_night_photo_with_one_day_photo_copies_it_and_the_move_is_not_checked(
     assert (line.status, line.detail["path"], line.anchor, line.score) == ("ok", "one_side", A, 8000)
     assert line.H[0, 2] == pytest.approx(0.2) and stub.calls == [(A, FLAG)]
     assert line.folder == lineup.folder_signature(d, "CAM")  # kept, so a day photo arriving later re-plans it
-    assert check(line) == "Check by eye: camera move not checked"
+    log = logged(line)
+    assert (log["checks"], log["path"], log["side"], log["anchor"]) == (["unchecked"], "one_side", "A", A)
     d2 = camera(tmp_path, {P: NIGHT_CAM[P], B: NIGHT_CAM[B]}, "cam2")
     late = flag_cal(tmp_path, "LATE.JPG", at="2026:02:01 10:00:00")  # the flag photo after everything: B side
     line = planner(Stub({(B, "LATE.JPG"): 9000}), late).plan(d2 / P)
@@ -366,7 +375,7 @@ def test_at_the_start_of_a_deployment_the_flag_photo_is_day_photo_a(tmp_path):
     assert line.anchor == FLAG and np.allclose(line.H, np.eye(3)) and line.score is None  # its own line-up: identity
     assert line.detail["before_tries"] == [[FLAG, None]] and line.detail["move_points"] == 9000
     assert stub.calls == [(B, FLAG)]  # B -> A is B's own line-up to the flag photo: one call for both
-    assert why(line) == ["could not find the ground under the animal, so no distance"] and check(line) == ""
+    assert why(line) == ["could not find the ground under the animal, so no distance"] and logged(line)["checks"] == []
 
 
 def test_a_moved_camera_with_the_flag_photo_as_a_votes_on_b_only(tmp_path):
@@ -434,7 +443,7 @@ def test_a_night_photo_with_no_day_photo_and_no_dated_flag_photo_gets_no_distanc
     assert line.folder == lineup.folder_signature(d, "CAM")
     assert why(line) == ["night photo with no day photo before or after it to measure through (a day photo of this "
                          "camera must line up with the flag photo with 4,000 points; 3 tried a side), so no distance"]
-    assert check(line) == ""  # no number to check; the flag column says why
+    assert logged(line)["checks"] == []  # no number to check; the reason above says why
 
 
 # --- photos with no capture time (Q13) ------------------------------------------------------------------------------
@@ -448,7 +457,8 @@ def test_an_undated_night_photo_is_placed_by_its_file_number(tmp_path):
     assert (five.detail["order"], five.detail["before"], five.detail["after"]) == ("number", "IMG_0004.JPG", "IMG_0007.JPG")
     # no time to measure a gap in: the nearer side is the one fewer photos away (IMG_0005: A; IMG_0006: B)
     assert (five.detail["gap_unit"], five.anchor, six.anchor) == ("photos", "IMG_0004.JPG", "IMG_0007.JPG")
-    assert five.detail["checks"] == ["undated"] and check(five) == "Check by eye: no photo date"
+    log = logged(five)
+    assert (log["checks"], log["path"], log["side"], log["anchor"]) == (["undated"], "copy", "A", "IMG_0004.JPG")
 
 
 def test_a_counter_that_restarted_falls_back_to_file_modification_time(tmp_path):
@@ -459,7 +469,7 @@ def test_a_counter_that_restarted_falls_back_to_file_modification_time(tmp_path)
         os.utime(d / n, ns=(t0 + i * 10**9, t0 + i * 10**9))
     line = planner(Stub(), flag_cal(tmp_path, at=None)).plan(d / "IMG_0005.JPG")
     assert (line.detail["order"], line.detail["before"], line.detail["after"]) == ("mtime", "IMG_0009.JPG", "IMG_0002.JPG")
-    assert line.status == "ok" and "no photo date" in check(line)
+    assert line.status == "ok" and "undated" in logged(line)["checks"]
 
 
 def test_one_undated_photo_does_not_reorder_the_dated_photos_even_after_a_counter_restart(tmp_path):
@@ -478,16 +488,16 @@ def test_one_undated_photo_does_not_reorder_the_dated_photos_even_after_a_counte
     dated = plan.plan(d / "IMG_0010.JPG")
     assert (dated.detail["order"], dated.detail["before"], dated.detail["after"], dated.detail["gap_unit"]) == \
         ("time", "IMG_0009.JPG", "IMG_0002.JPG", "s")
-    assert check(dated) == ""  # it and both its day photos are dated: nothing to check
+    assert logged(dated)["checks"] == []  # it and both its day photos are dated: nothing to check
     undated = plan.plan(d / "IMG_0005.JPG")
     assert (undated.detail["order"], undated.detail["before"], undated.detail["after"]) == ("mtime", "IMG_0002.JPG", None)
-    assert check(undated) == "Check by eye: camera move not checked, no photo date"
+    assert logged(undated)["checks"] == ["unchecked", "undated"]
 
 
-def test_checks_combine_in_one_plain_column(tmp_path):
+def test_checks_combine_in_one_researcher_log_line(tmp_path):
     d = camera(tmp_path, {"IMG_0004.JPG": ("2026:01:10 12:00:00", DAY), "IMG_0005.JPG": (None, NIGHT)})
     line = planner(Stub(), flag_cal(tmp_path)).plan(d / "IMG_0005.JPG")
-    assert check(line) == "Check by eye: camera move not checked, no photo date"
+    assert logged(line)["checks"] == ["unchecked", "undated"]
 
 
 # --- kept in the store, and the same every time -------------------------------------------------------------
@@ -753,20 +763,32 @@ def test_the_run_copies_a_day_line_up_for_night_photos_and_never_lines_them_up_w
     assert rows["IMG_0002.JPG"]["align_source"] == "night" and rows["IMG_0002.JPG"]["reasons"] == []
     assert not any(r["stale"] for r in rows.values())
     got = {r["photo"]: r for r in export_rows(synced)}
-    assert "lineup" not in got["IMG_0002.JPG"] and got["IMG_0002.JPG"]["check"] == "" and got["IMG_0001.JPG"]["check"] == ""
+    assert "lineup" not in got["IMG_0002.JPG"] and "check" not in got["IMG_0002.JPG"]  # the check is in the log only
 
 
-def test_the_researcher_log_records_each_night_answer_in_the_apps_logs_folder(synced, tmp_path, monkeypatch):
+def test_the_researcher_log_records_each_measured_photo_in_the_apps_logs_folder(synced, tmp_path, monkeypatch):
+    """One log (user decision 2026-10-11): one line per photo measured, day or night; a night answer carries the
+    Night-rule detail under `night`. A run that skips current answers writes nothing more."""
     monkeypatch.setattr(inference, "backend", fake_models())
     d = camera(tmp_path, RUN_CAM, SITE)
     run(synced, d)
     log = store.DATA_DIR / "logs" / lineup.LOG_NAME
-    rows = [json.loads(x) for x in log.read_text().splitlines()]
-    assert sorted(Path(r["photo"]).name for r in rows) == ["IMG_0002.JPG", "IMG_0003.JPG"]  # night photos with animals
-    r = next(r for r in rows if r["photo"].endswith("IMG_0002.JPG"))
-    assert (r["path"], r["flag"], r["before"], r["after"], r["anchor"], r["score"]) == \
+    rows = {Path(r["photo"]).name: r for r in map(json.loads, log.read_text().splitlines())}
+    assert len(log.read_text().splitlines()) == len(rows) == len(RUN_CAM)  # every photo, once
+    r = rows["IMG_0002.JPG"]
+    assert (r["camera"], r["status"], r["day_night"], r["distance"], r["animals"], r["reasons"]) == \
+        (SITE, "measured", "night", True, 1, [])
+    n = r["night"]
+    assert (n["path"], n["flag"], n["before"], n["after"], n["anchor"], n["score"]) == \
         ("copy", SITE_FLAG, "IMG_0001.JPG", "IMG_0005.JPG", "IMG_0001.JPG", 8000)
-    assert r["move_points"] == 8000 and r["move_px"] is not None and r["before_tries"] == [["IMG_0001.JPG", 8000]]
+    assert n["move_points"] == 8000 and n["move_px"] is not None and n["before_tries"] == [["IMG_0001.JPG", 8000]]
+    day = rows["IMG_0001.JPG"]
+    assert (day["day_night"], day["distance"], day["reasons"]) == ("day", True, []) and "night" not in day
+    empty = rows["IMG_0004.JPG"]  # an empty night frame: never lined up, its day or night read from the Flash tag
+    assert (empty["animals"], empty["distance"], empty["day_night"], empty["reasons"]) == (0, False, "night", [])
+    assert "night" not in empty  # no Night-rule detail: it was not lined up
+    run(synced, d)  # nothing is out of date: every photo is skipped
+    assert len(log.read_text().splitlines()) == len(RUN_CAM)
     assert not list(d.glob("*.jsonl")) and not list(d.parent.glob("*.jsonl"))  # never beside the photos or an export
     launcher = tmp_path / "app" / "logs" / "launcher.log"
     monkeypatch.setenv("CAMTRAP_LAUNCHER_LOG", str(launcher))  # the installed app: its own logs\ folder
@@ -778,8 +800,40 @@ def test_a_researcher_log_that_cannot_be_written_never_stops_a_run(monkeypatch, 
         raise RuntimeError("no logs folder today")
 
     monkeypatch.setattr(lineup, "log_dir", broken)
-    lineup.log_night(Path("IMG_0002.JPG"), {"status": "ok", "detail": {"path": "copy"}})  # does not raise
-    assert "night-rule log not written: no logs folder today" in capsys.readouterr().err
+    measure._log_measured(Path("IMG_0002.JPG"), "CAM", {}, [], {"night": True, "status": "ok",
+                                                                 "detail": {"path": "copy"}})  # does not raise
+    assert "research log not written: no logs folder today" in capsys.readouterr().err
+
+
+def test_a_day_photo_with_a_reason_gets_a_log_line_with_that_reason(synced, tmp_path, monkeypatch):
+    """The reasons are written only to the researcher log (user decision 2026-10-11), as report.reasons words them."""
+    monkeypatch.setattr(inference, "backend", fake_models(links={("IMG_0001.JPG", SITE_FLAG): 9}))  # under 15 points
+    d = camera(tmp_path, {"IMG_0001.JPG": RUN_CAM["IMG_0001.JPG"]}, SITE)
+    run(synced, d)
+    [line] = log_lines()
+    assert (line["status"], line["day_night"], line["distance"], line["animals"]) == ("measured", "day", True, 1)
+    assert line["reasons"] == ["lines up poorly with its flag photo (9 points, needs 15). Wrong camera, or was it moved?"]
+
+
+def test_a_clean_day_photo_gets_a_log_line_with_no_reasons_and_a_skipped_one_gets_none(synced, tmp_path, monkeypatch):
+    monkeypatch.setattr(inference, "backend", fake_models())
+    d = camera(tmp_path, {"IMG_0001.JPG": RUN_CAM["IMG_0001.JPG"]}, SITE)
+    run(synced, d)
+    [line] = log_lines()
+    assert (line["photo"], line["camera"], line["day_night"], line["reasons"]) == (str(d / "IMG_0001.JPG"), SITE, "day", [])
+    run(synced, d)  # current: skipped, no new line
+    assert len(log_lines()) == 1
+
+
+def test_an_unreadable_file_gets_one_log_line(synced, tmp_path, monkeypatch):
+    monkeypatch.setattr(inference, "backend", fake_models())
+    d = camera(tmp_path, {"IMG_0001.JPG": RUN_CAM["IMG_0001.JPG"]}, SITE)
+    (d / "IMG_0009.JPG").write_bytes(b"not a jpeg")
+    assert run(synced, d)["unreadable"] == 1
+    bad = [r for r in log_lines() if r["status"] == "unreadable"]
+    assert [(Path(r["photo"]).name, r["camera"], r["reasons"]) for r in bad] == \
+        [("IMG_0009.JPG", SITE, [report.UNREADABLE])]
+    assert [Path(r["photo"]).name for r in log_lines() if r["status"] == "measured"] == ["IMG_0001.JPG"]
 
 
 def test_a_night_photo_between_day_photos_that_moved_is_chained_through_the_winning_day_photo(synced, tmp_path, monkeypatch):
@@ -800,9 +854,12 @@ def test_a_night_photo_between_day_photos_that_moved_is_chained_through_the_winn
     assert chained["detections"][0]["distance_m"] is not None and fell["detections"][0]["distance_m"] is not None
     rows = listing(synced, d)
     assert rows["IMG_0003.JPG"]["reasons"] == [] and not any(r["stale"] for r in rows.values())  # no UI mark
-    got = {r["photo"]: r["check"] for r in export_rows(synced)}
-    assert got == {"IMG_0001.JPG": "", "IMG_0002.JPG": "", "IMG_0003.JPG": "Check by eye: camera moved",
-                   "IMG_0005.JPG": ""}
+    log = {Path(r["photo"]).name: r["night"] for r in log_lines() if "night" in r}
+    assert {n: (r["checks"], r["path"], r["side"], r["anchor"]) for n, r in log.items()} == \
+        {"IMG_0002.JPG": ([], "chain", "A", "IMG_0001.JPG"), "IMG_0003.JPG": (["moved"], "fallback", "B", "IMG_0005.JPG")}
+    got = export_rows(synced)
+    assert {r["photo"] for r in got} == {"IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0005.JPG"}
+    assert "check" not in got[0]  # the camera move is in the researcher log only (user decision 2026-10-11)
 
 
 def test_with_the_flag_photo_as_day_photo_a_the_run_still_never_links_a_night_photo_to_it(full_flag, tmp_path, monkeypatch):
@@ -816,39 +873,36 @@ def test_with_the_flag_photo_as_day_photo_a_the_run_still_never_links_a_night_ph
         (SITE_FLAG, "IMG_0005.JPG", "chain", {"B": [8000, got["vote"]["B"][1]]})
 
 
-def test_a_night_photo_that_copies_the_flag_photo_itself_is_listed_as_lined_up_with_no_points(full_flag, tmp_path,
-                                                                                               monkeypatch):
-    """Follow-up F. The flag photo's own line-up is the identity, so the night photo has no points (match_score
-    empty, review fix 10). The window's `linesUp` therefore reads a night row by align_source and align_status
-    (night + ok -> "Good"), never by the empty match_score; the listing must carry both."""
+def test_a_night_photo_that_copies_the_flag_photo_itself_is_exported_and_its_check_is_only_in_the_log(
+        full_flag, tmp_path, monkeypatch):
+    """Follow-up F, after the user decisions of 2026-10-11 (the window's "Lines up" line and the export's `check`
+    column are gone). The flag photo's own line-up is the identity, so the night photo has a distance but no points of
+    its own (match_score empty, review fix 10). The export writes the number; what to check by eye (only one day
+    photo, so the camera move was not checked) is in the researcher log and nowhere else."""
     monkeypatch.setattr(inference, "backend", fake_models())
     d = camera(tmp_path, {n: RUN_CAM[n] for n in ("IMG_0002.JPG", "IMG_0003.JPG")}, SITE)  # no day photo: flag is A
     run(full_flag, d)
-    row = listing(full_flag, d)["IMG_0002.JPG"]
-    assert (row["align_source"], row["align_status"], row["anchor"], row["match_score"], row["reasons"]) == \
-        ("night", "ok", SITE_FLAG, None, [])
-    assert row["measured"] and row["detections"][0]["distance_m"] is not None
-    assert {r["photo"]: r["check"] for r in export_rows(full_flag)}["IMG_0002.JPG"] == \
-        "Check by eye: camera move not checked"
+    row = {r["photo"]: r for r in export_rows(full_flag)}["IMG_0002.JPG"]
+    assert row["distance_m"] != "" and "check" not in row
+    assert listing(full_flag, d)["IMG_0002.JPG"]["match_score"] is None  # no points of its own, not a failed line-up
+    r = next(r["night"] for r in log_lines() if r["photo"].endswith("IMG_0002.JPG"))
+    assert (r["checks"], r["path"], r["side"], r["anchor"], r["score"]) == (["unchecked"], "one_side", "A", SITE_FLAG, None)
 
 
-def test_a_measured_photo_with_no_animal_is_listed_apart_from_a_night_photo_with_no_answer(synced, tmp_path, monkeypatch):
-    """Follow-up F, option (a). The window's `linesUp` shows the empty mark for a measured photo with no animal (day or
-    night: an empty frame is never lined up) and "No" for a night photo with no answer. It tells them apart by
-    `measured` and `detections`, not by the empty match_score both share; the listing must carry those fields."""
+def test_a_night_photo_with_no_answer_is_exported_without_a_distance_and_empty_frames_are_not_rows(synced, tmp_path,
+                                                                                                 monkeypatch):
+    """Follow-up F, option (a), after the user decisions of 2026-10-11: the export holds every result row. A night
+    photo with no day photo on either side is a row with an empty distance. A photo with no animal (day or night)
+    is no row at all; the window lists it as measured with no animal (`detections` empty)."""
     monkeypatch.setattr(inference, "backend", fake_models(boxes={"IMG_0001.JPG": []},
                                                           links={("IMG_0001.JPG", SITE_FLAG): 100}))  # too few for A
     d = camera(tmp_path, {n: RUN_CAM[n] for n in ("IMG_0001.JPG", "IMG_0002.JPG", "IMG_0004.JPG")}, SITE)
     run(synced, d)
     rows = listing(synced, d)
     for empty in ("IMG_0001.JPG", "IMG_0004.JPG"):  # a day and a night photo with no animal
-        r = rows[empty]
-        assert (r["measured"], r["detections"], r["match_score"], r["align_source"], r["align_status"]) == \
-            (True, [], None, None, None)
-    unanswered = rows["IMG_0002.JPG"]  # no day photo before (100 points) or after it: no distance
-    assert (unanswered["measured"], unanswered["align_source"], unanswered["align_status"], unanswered["match_score"]) \
-        == (True, "night", "none", None)
-    assert unanswered["detections"] and unanswered["detections"][0]["distance_m"] is None
+        assert (rows[empty]["measured"], rows[empty]["detections"]) == (True, [])
+    got = export_rows(synced)  # no day photo before IMG_0002 (100 points) or after it: no distance
+    assert [(r["photo"], r["distance_m"], r["q05_m"], r["q95_m"]) for r in got] == [("IMG_0002.JPG", "", "", "")]
 
 
 def test_a_day_photo_arriving_later_gives_the_one_sided_night_photos_a_checked_answer(synced, tmp_path, monkeypatch):
@@ -858,7 +912,8 @@ def test_a_day_photo_arriving_later_gives_the_one_sided_night_photos_a_checked_a
     run(synced, d)
     assert answers(d / "IMG_0002.JPG")["photo"]["align_status"] == "ok"
     assert detail(d / "IMG_0002.JPG")["path"] == "one_side"
-    assert {r["photo"]: r["check"] for r in export_rows(synced)}["IMG_0003.JPG"] == "Check by eye: camera move not checked"
+    assert [(r["night"]["checks"], r["night"]["path"]) for r in log_lines() if r["photo"].endswith("IMG_0003.JPG")] == \
+        [(["unchecked"], "one_side")]
     assert listing(synced, d)["IMG_0002.JPG"]["stale"] is False
     (d / "IMG_0005.JPG").write_bytes(shot(*RUN_CAM["IMG_0005.JPG"]))  # the rest of the card
     assert listing(synced, d)["IMG_0002.JPG"]["stale"] is True

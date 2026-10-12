@@ -41,7 +41,6 @@ export type Det = {
   q95_m: number | null
   method: string
   match_score: number | null
-  reasons: string[]
 }
 /** One JPEG in the chosen folder, with the answer held for this flag photo and method (if any). */
 export type Row = {
@@ -54,9 +53,6 @@ export type Row = {
   method: string | null
   flag_image: string | null
   flag_site: string | null   // the camera it was measured under - travels with flag_image or the pair is a 404
-  align_source: string | null  // 'direct' (a day photo's own line-up), 'night' (the Night rule), null (none recorded)
-  align_status: string | null  // 'ok' or 'none'
-  reasons: string[]
   detections: Det[]
 }
 export type Folder = { folder: string; total: number; unreadable: number; rows: Row[] }
@@ -71,7 +67,6 @@ export type RunCamera = {
   total: number
   done: number
   deer: number
-  needs_look: number
   status: 'waiting' | 'running' | 'done' | 'stopped'
   photos: number | null
   median_m: number | null
@@ -109,42 +104,6 @@ export type Summary = {
   cameras: { site: string; photos: number; detections: number; deer: number; median_m: number | null; suspicious: number }[]
 }
 
-/** One camera in the density's survey setup: saved value over default, and whether the lens angle is known. */
-export type SurveyCamera = {
-  site: string
-  model: string | null
-  active_days: number | null
-  active_days_default: number | null
-  // how the days were found: from the flag photo of the setup visit (or the first photo) to the last photo
-  days_source: { days: number | null; from: string; from_kind: 'flag' | 'photo' | 'filter'; flag: string | null; to: string; to_kind: 'photo' | 'filter' } | null
-  fov_deg: number
-  fov_default: number
-  fov_source: string | null  // "flag calibration IMG_0004.JPG", "camera model", or null for the 42 degree guess
-  fov_checked: boolean
-}
-export type Density = {
-  deer: number
-  suspicious: number
-  between_moments: number
-  beyond: number
-  no_days: number
-  no_days_deer: number
-  used: number
-  interval_s: number
-  interval_default_s: number
-  interval_gaps: number  // the gaps between photos the suggested interval came from; 0 when none
-  photos: { photos: number; at_moments: number; undated: number }
-  truncation_m: number | null
-  truncation_default_m: number | null
-  cameras: SurveyCamera[]
-  effort: number
-  min_deer: number
-  too_few: boolean
-  fit: { model: string; sigma: number; b: number | null; aic: number; other: { model: string; aic: number } | null } | null
-  bins: { lo: number; hi: number; n: number }[]
-  curve: { r: number; n: number }[]  // the fitted curve as expected deer per bin, so it sits on the bars
-  density: { per_km2: number; lo: number; hi: number; p: number; edr_m: number } | null
-}
 
 /* A site folder (a folder of camera folders), as the engine reads it: one row per camera folder. */
 export type SiteFlag = { image_name: string; captured_at: string | null; photos: number; visit: 'setup' | 'service' | null }
@@ -235,34 +194,21 @@ export const metres = (d: Det | null) => (d && d.distance_m !== null ? `${d.dist
 export const band = (d: Det | null) =>
   d && d.q05_m !== null && d.q95_m !== null ? `${d.q05_m.toFixed(1)}–${d.q95_m.toFixed(1)}` : NONE
 
-/** measured and clean · measured and worth a look · never measured · measured against another flag photo */
-export type State = 'clean' | 'flagged' | 'empty' | 'new' | 'stale'
+/** measured · measured, no animal · never measured · measured against another flag photo. The "Needs a look"
+    state was removed 2026-10-11 to simplify the window; no screen shows the engine's reasons now. */
+export type State = 'clean' | 'empty' | 'new' | 'stale'
 export function state(r: Row): State {
-  if (r.reasons.length > 0 && !r.measured) return 'flagged' // an unreadable file: never measured, still needs a look
   if (!r.measured) return 'new'
   if (r.stale) return 'stale'
-  if (r.reasons.length > 0) return 'flagged'
   return r.detections.length === 0 ? 'empty' : 'clean'
 }
 export const STATE_LABEL: Record<State, string> = {
-  clean: 'Looks fine',
-  flagged: 'Needs a look',
+  clean: 'Measured', // was "Looks fine": nothing is checked any more, so it promised too much (2026-10-11)
   empty: 'No animal',
   new: 'Not measured',
   stale: 'Out of date',
 }
 
-/** Whether the photo lined up with its flag photo, in the words the screen uses. The engine's two alignment
-    reasons are the only ones that name the flag photo, so matching that is how the window knows which one it is.
-    A night photo borrows a day photo's line-up (ticket 33), so its status decides: one that copies the flag photo
-    itself lines up with no points of its own, and an empty match_score there is not a failed line-up.
-    A measured photo with no animal was never lined up (empty frames skip the line-up), so it shows the empty mark. */
-export function linesUp(r: Row): 'Good' | 'Check' | 'No' | typeof NONE {
-  if (r.measured && r.detections.length === 0) return NONE
-  if (r.align_source === 'night') return r.align_status === 'ok' ? 'Good' : 'No'
-  if (r.match_score === null) return 'No'
-  return r.reasons.some((why) => why.includes('flag photo')) ? 'Check' : 'Good'
-}
 /** How sure the detector is that a box holds an animal, as a percentage. */
 export const sure = (d: Det) => `${Math.round(d.confidence * 100)}%`
 

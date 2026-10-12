@@ -47,12 +47,14 @@ def measured(synced, tmp_path, monkeypatch):
     return synced
 
 
-def export(c, **params):
+def export(c, **params) -> list[dict]:
+    """The export's rows. The file is data only: the column header row first, then the rows, and no `#` note line
+    anywhere (user decision 2026-10-11: "in the csv it should only include data no notes")."""
     r = c.get("/api/export.csv", params=params)
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv"), r.text
-    doc = [l for l in r.text.splitlines() if l.startswith("#")]
-    rows = list(csv.DictReader(l for l in r.text.splitlines() if not l.startswith("#")))
-    return doc, rows
+    lines = r.text.splitlines()
+    assert lines[0] == ",".join(report.COLUMNS) and not [l for l in lines if l.startswith("#")]
+    return list(csv.DictReader(lines))
 
 
 # --- summary -------------------------------------------------------------------------
@@ -88,17 +90,16 @@ def test_summary_and_export_narrow_to_the_chosen_folder(measured, tmp_path):
     assert measured.get("/api/summary", params={"folder": str(tmp_path / "photos")}).json()["photos"] == 8
     assert measured.get("/api/summary", params={"folder": str(tmp_path / "photo")}).json()["photos"] == 0  # not a prefix
 
-    doc, rows = export(measured, folder=str(d))
-    assert f"folder={d}" in doc[0] and len(rows) == 2  # the five deer less the three suspicious
-    _, none = export(measured, folder=str(tmp_path / "photos" / "TON_CAM03"))
-    assert none == []
+    assert len(export(measured, folder=str(d))) == 5  # every deer row in the folder
+    assert export(measured, folder=str(tmp_path / "photos" / "TON_CAM03")) == []
 
 
-def test_summary_suspicious_count_matches_what_the_export_leaves_out(measured):
+def test_the_export_holds_as_many_rows_as_the_summary_counts(measured):
+    """RESULTS says "Rows in the file" from the summary's deer count. The file holds every result row (user decision
+    2026-10-11, "include all results, remove the warning text"), so the two agree for either species setting."""
     for all_species in (False, True):
-        n = measured.get("/api/summary", params={"all_species": all_species}).json()["suspicious"]
-        doc, _ = export(measured, all_species=all_species)
-        assert (f"{n} rows that need a look left out" if n != 1 else "1 row that needs a look left out") in doc[0]
+        n = measured.get("/api/summary", params={"all_species": all_species}).json()["deer"]
+        assert len(export(measured, all_species=all_species)) == n
     assert measured.get("/api/summary", params={"all_species": True}).json()["suspicious"] == 4  # + the weak raccoon
 
 
@@ -245,49 +246,54 @@ def test_flag_endpoint_serves_synced_flag_photos_only(measured):
 
 # --- export -----------------------------------------------------------------------------
 
-def test_export_defaults_to_deer_rows_without_suspicious_ones_and_documents_itself(measured):
-    doc, rows = export(measured)
-    assert [r["photo"] for r in rows] == ["IMG_0001.JPG", "IMG_0003.JPG"]  # clean deer; the sure deer beside the unsure one
+def test_export_holds_every_deer_row_and_data_only(measured):
+    """User decisions 2026-10-11: the CSV holds every result row ("include all results, remove the warning text"), only
+    data ("in the csv it should only include data no notes": no flag or check column, no `#` line; see export()),
+    and one method ("Export one method": no method column). The seven columns are the ones the user chose; the 90%
+    interval stays ("where is the interval column? It's needed")."""
+    rows = export(measured)
+    # the weak box, the unsure animal and the misfiled photo's deer are rows like any other
+    assert [r["photo"] for r in rows] == ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0003.JPG", "IMG_0005.JPG"]
+    assert list(rows[0]) == ["photo", "camera", "timestamp", "species", "distance_m", "q05_m", "q95_m"]
     assert rows[0]["camera"] == "TON_CAM02" and rows[0]["timestamp"] == "2026-05-01T08:00:00"
     assert rows[0]["distance_m"] == "5.0" and rows[0]["q05_m"] == "4.25" and rows[0]["q95_m"] == "6.0"
-    assert rows[0]["method"] == "md" and rows[0]["flag"] == ""
-    assert set(rows[0]) == {"photo", "camera", "site", "timestamp", "species", "distance_m", "q05_m", "q95_m", "confidence",
-                            "method", "fidelity", "match_score", "check", "flag"}  # fidelity: which settings made the number
-    assert rows[0]["check"] == ""  # check: a night number to look at by eye (ticket 33); empty for these rows
-    text = "\n".join(doc)
-    assert "3 rows that need a look left out" in text and "metres" in text and "90%" in text
-    for col in ("distance_m", "q05_m", "q95_m", "confidence", "method", "fidelity", "flag", "timestamp"):
-        assert col in text
+    misfiled = next(r for r in rows if r["photo"] == "IMG_0005.JPG")
+    assert misfiled["distance_m"] == "7.0"  # 9 points to its flag photo: the number is still written
 
 
-def test_export_checkbox_includes_suspicious_rows_with_their_reason_in_the_flag_column(measured):
-    doc, rows = export(measured, include_suspicious=True)
-    assert [r["photo"] for r in rows] == ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0003.JPG", "IMG_0005.JPG"]
-    flags = {(r["photo"], r["species"]): r["flag"] for r in rows}
-    assert "confidence" in flags[("IMG_0002.JPG", "white-tailed deer")]
-    assert "unsure" in flags[("IMG_0003.JPG", "unsure")]
-    assert "flag photo" in flags[("IMG_0005.JPG", "white-tailed deer")]
-    assert "rows that need a look included" in "\n".join(doc)
+def test_export_all_species_toggle_adds_the_raccoons(measured):
+    rows = export(measured, all_species=True)
+    assert len(rows) == 8 and [r["species"] for r in rows].count("raccoon") == 3  # the weak raccoon too
+    assert rows[0]["photo"] == "IMG_0007.JPG"  # the undated photo first
 
 
-def test_export_all_species_toggle_adds_the_raccoon(measured):
-    _, rows = export(measured, all_species=True)
-    assert [r["species"] for r in rows] == ["raccoon", "white-tailed deer", "white-tailed deer", "raccoon"]  # undated photo first; the weak raccoon is still gated
-
-
-def test_export_names_every_method_present_so_doubled_animals_are_not_a_surprise(measured, tmp_path):
+def test_export_holds_one_row_per_animal_when_an_older_run_also_used_sam3(measured, tmp_path):
+    """A photo measured with both methods has detection rows under each. The export holds the MegaDetector-box rows
+    only, so each animal is one row (user decision 2026-10-11, "Export one method")."""
     run(measured, tmp_path / "photos" / "TON_CAM02", method="sam3")
-    doc, rows = export(measured)
-    assert len(rows) == 4 and {r["method"] for r in rows} == {"md", "sam3"}
-    assert any("methods present: md, sam3" in l and "one row per animal per method" in l for l in doc)
+    rows = export(measured)
+    assert [r["photo"] for r in rows] == ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0003.JPG", "IMG_0005.JPG"]
+    assert measured.get("/api/summary").json()["deer"] == 5  # RESULTS counts the same rows
+
+
+def test_a_photo_measured_only_with_sam3_is_not_in_the_export_or_counted_as_measured(measured, tmp_path):
+    """An older version could measure with SAM3 alone. Such a photo lists as "Not measured" in the Table (no
+    MegaDetector-box answer), so RESULTS does not count it as a photo and the CSV has no row for it until it is
+    measured again (review 2026-10-11)."""
+    d = folder(tmp_path / "older", photos={"IMG_0001.JPG": jpeg("2026:05:09 08:00:00")})  # a deer at 5 m in SCRIPT
+    assert run(measured, d, method="sam3")["status"] == "done"
+    rows = export(measured)
+    assert [r["photo"] for r in rows] == ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0003.JPG", "IMG_0005.JPG"]
+    assert all(r["timestamp"] != "2026-05-09T08:00:00" for r in rows)  # the SAM3-only photo gives no row
+    s = measured.get("/api/summary").json()
+    assert (s["photos"], s["detections"], s["deer"]) == (8, 8, 5)  # the same as before it was measured with SAM3
+    assert listing(measured, d)["rows"][0]["measured"] is False  # the Table lists it as not measured
 
 
 def test_export_filters_site_and_date_range(measured):
-    _, rows = export(measured, site="TON_CAM02", date_from="2026-05-03", date_to="2026-05-03", include_suspicious=True)
-    assert {r["photo"] for r in rows} == {"IMG_0003.JPG"}
-    assert export(measured, site="TON_CAM99")[1] == []
-    doc, _ = export(measured, site="TON_CAM02", date_from="2026-05-03")
-    assert "camera=TON_CAM02" in doc[0] and "from=2026-05-03" in doc[0]
+    rows = export(measured, site="TON_CAM02", date_from="2026-05-03", date_to="2026-05-03")
+    assert [r["photo"] for r in rows] == ["IMG_0003.JPG", "IMG_0003.JPG"]  # the unsure animal and the sure deer
+    assert export(measured, site="TON_CAM99") == []
 
 
 def test_suspicious_thresholds_are_named_in_the_reasons():

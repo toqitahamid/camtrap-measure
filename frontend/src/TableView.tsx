@@ -6,7 +6,6 @@ import {
   band,
   clock,
   lead,
-  linesUp,
   metres,
   photoSrc,
   plural,
@@ -16,7 +15,6 @@ import {
   type Folder,
   type Methods,
   type Row,
-  type Scope,
   type State,
 } from './ui'
 
@@ -24,18 +22,8 @@ import {
     no distance at all, and the table must still name the animal it found. */
 const animal = (r: Row): Det | null => lead(r) ?? r.detections[0] ?? null
 
-/** The engine words every reason it holds; matching its words is how the table knows which number went wrong.
-    ponytail: string matching, because the thresholds (MIN_INLIERS, LOW_CONF) live in the engine and the
-    window is never told them. Move to a machine-readable reason code if a third caller needs this. */
-const because = (reasons: string[], word: string) => reasons.some((why) => why.includes(word))
-const weakBox = (d: Det | null) => !!d && because(d.reasons, 'confidence')
-const unsure = (d: Det | null) => !!d && because(d.reasons, 'unsure')
-// alignment is the photo's, not a box's, so this one reads the photo's reasons
-const weakFit = (r: Row) => r.measured && (linesUp(r) === 'Check' || linesUp(r) === 'No')
-
 const TONE: Record<State, string> = {
   clean: 'var(--ok)',
-  flagged: 'var(--bad)',
   empty: 'var(--faint)',
   new: 'var(--info)',
   stale: 'var(--dim)',
@@ -44,13 +32,13 @@ const TONE: Record<State, string> = {
 const FILTERS = {
   all: { label: 'All', keep: () => true, empty: 'No photo here.' },
   new: { label: 'Not measured', keep: (r: Row) => !r.measured, empty: 'Every photo in this folder has been measured.' },
-  flagged: { label: 'Needs a look', keep: (r: Row) => r.reasons.length > 0, empty: 'No photo here needs a look.' },
 } satisfies Record<string, { label: string; keep: (r: Row) => boolean; empty: string }>
 type Filter = keyof typeof FILTERS
 
-type SortKey = 'name' | 'time' | 'species' | 'dist' | 'band' | 'conf' | 'align' | 'status'
-/* ponytail: the header follows the approved mockup and the .tr grid template in index.css (dist, 90%, conf,
-   align), not the ticket's prose order; the column widths (74 / 100 / 58 / 74) are cut for exactly this. */
+type SortKey = 'name' | 'time' | 'species' | 'dist' | 'band' | 'conf' | 'status'
+/* ponytail: the header follows the approved mockup and the .tr grid template in index.css (dist, 90%, conf),
+   not the ticket's prose order; the column widths (74 / 100 / 58) are cut for exactly this. The "Lines up"
+   column and the "Needs a look" state were removed 2026-10-11 to simplify the window. */
 const COLUMNS: { key: SortKey; label: string; num?: true }[] = [
   { key: 'name', label: 'File' },
   { key: 'time', label: 'Time' },
@@ -58,12 +46,11 @@ const COLUMNS: { key: SortKey; label: string; num?: true }[] = [
   { key: 'dist', label: 'Metres', num: true },
   { key: 'band', label: '90% range', num: true },
   { key: 'conf', label: 'Sure', num: true },
-  { key: 'align', label: 'Lines up', num: true },
   { key: 'status', label: 'Status' },
 ]
 
 /** What a reviewer wants at the top when sorting by status: the rows that still ask something of them. */
-const STATUS_ORDER: Record<State, number> = { flagged: 0, new: 1, stale: 2, empty: 3, clean: 4 }
+const STATUS_ORDER: Record<State, number> = { new: 0, stale: 1, empty: 2, clean: 3 }
 const SORT: Record<SortKey, (r: Row) => string | number | null> = {
   name: (r) => r.name,
   time: (r) => r.captured_at,
@@ -71,7 +58,6 @@ const SORT: Record<SortKey, (r: Row) => string | number | null> = {
   dist: (r) => lead(r)?.distance_m ?? null,
   band: (r) => lead(r)?.q05_m ?? null,
   conf: (r) => animal(r)?.confidence ?? null,
-  align: (r) => r.match_score,
   status: (r) => STATUS_ORDER[state(r)],
 }
 
@@ -79,12 +65,10 @@ const dist = (d: Det | null) => (d && d.distance_m !== null ? d.distance_m.toFix
 const interval = (d: Det | null) => (band(d) === NONE ? 'no range' : `${band(d)} m`)
 const RULER_M = 25
 const pct = (m: number) => `${Math.max(0, Math.min(100, (m / RULER_M) * 100))}%`
-const fix = (n: number | null) => (n === null ? NONE : n.toFixed(1))
 
 /** Every JPEG in the chosen folder as one sortable row, beside the photo the selected row was measured on.
     Sorting and filtering are done here over the listing the shell already holds; nothing is refetched. */
 export default function TableView({
-  scope,
   folder,
   methods,
   busy,
@@ -92,17 +76,14 @@ export default function TableView({
   onOpen,
   error,
   initial,
-  exportFolder,
 }: {
-  scope: Scope
   folder: Folder | null
   methods: Methods
   busy: boolean
   onMeasure: (paths: string[]) => void
   onOpen?: (path: string) => void // none for a site folder: MEASURE shows its cameras, not one photo
-  // where another screen sends the user: the needs-a-look rows, or one camera folder's photos (ticket 27)
+  // where another screen sends the user: one camera folder's photos (ticket 27)
   initial?: { filter?: Filter; find?: string }
-  exportFolder?: string // a site folder exports its own photos, not one camera's
   // ponytail: optional because the ticket's signature stops above; the shell hands the folder-listing
   // failure over so the table says why there are no rows instead of blaming the user for not picking one.
   error?: string | null
@@ -154,13 +135,6 @@ export default function TableView({
     setSort((s) => ({ key, dir: s.key === key ? ((s.dir * -1) as 1 | -1) : 1 }))
 
   const animals = rows.reduce((n, r) => n + r.detections.length, 0)
-  const ms = rows
-    .map((r) => lead(r)?.distance_m ?? null)
-    .filter((m): m is number => m !== null)
-    .sort((a, b) => a - b)
-  const half = ms.length >> 1
-  const median = ms.length === 0 ? null : ms.length % 2 ? ms[half] : (ms[half - 1] + ms[half]) / 2
-  const mean = ms.length === 0 ? null : ms.reduce((s, m) => s + m, 0) / ms.length
 
   return (
     <>
@@ -180,24 +154,7 @@ export default function TableView({
           <span className="tiny faint">
             {plural(rows.length, 'row')} · {plural(animals, 'animal')}
           </span>
-          {exportFolder ? (
-            <a className="btn btn-sm" href={`/api/export.csv?folder=${encodeURIComponent(exportFolder)}`} download
-               title="Every measured photo in this site folder, every camera">
-              <Icon name="download" size={12} />
-              Export this site folder
-            </a>
-          ) : (
-          <a
-            className="btn btn-sm"
-            href={`/api/export.csv?site=${encodeURIComponent(scope.site)}`}
-            download
-            title={`Every measured photo of ${scope.site || 'every camera'}, not only this folder`}
-          >
-            <Icon name="download" size={12} />
-            {/* the CSV is the camera's, not this folder's or this filter's: say so rather than imply a count */}
-            Export {scope.site || 'all cameras'}
-          </a>
-          )}
+          {/* no export button here: the one export is in Results (user decision 2026-10-11) */}
         </div>
 
         {picked.length > 0 && (
@@ -291,7 +248,7 @@ export default function TableView({
                     return (
                       <div
                         key={r.path}
-                        className={`tr${r.reasons.length > 0 ? ' tr-flagged' : ''}`}
+                        className="tr"
                         aria-current={r.path === at ? 'true' : undefined}
                         tabIndex={0}
                         onClick={() => setAt(r.path)}
@@ -317,7 +274,7 @@ export default function TableView({
                         <span className="mono small dim">{clock(r.captured_at)}</span>
                         <span
                           className="small ellipsis"
-                          style={{ color: unsure(d) ? 'var(--bad)' : d ? undefined : 'var(--faint)' }}
+                          style={{ color: d ? undefined : 'var(--faint)' }}
                         >
                           {d ? d.species : r.measured ? 'no animal' : NONE}
                         </span>
@@ -325,12 +282,8 @@ export default function TableView({
                           {dist(d)}
                         </span>
                         <span className="num small dim">{band(lead(r))}</span>
-                        <span className="num small" style={{ color: weakBox(d) ? 'var(--bad)' : d ? 'var(--dim)' : 'var(--faint)' }}>
+                        <span className="num small" style={{ color: d ? 'var(--dim)' : 'var(--faint)' }}>
                           {d ? sure(d) : NONE}
-                        </span>
-                        <span className="num small" style={{ color: weakFit(r) ? 'var(--bad)' : r.measured && linesUp(r) !== NONE ? 'var(--dim)' : 'var(--faint)' }}
-                              title={r.match_score === null ? undefined : plural(r.match_score, 'matching point')}>
-                          {r.measured ? linesUp(r) : NONE}
                         </span>
                         {r.measured ? (
                           <span className="row small" style={{ color: TONE[s], gap: 6 }}>
@@ -355,20 +308,8 @@ export default function TableView({
                   })}
                 </div>
 
+                {/* the median / mean / range footer was removed 2026-10-11: Results shows the distances */}
                 <div className="row tiny faint" style={{ height: 34, flex: 'none', padding: '0 14px', borderTop: '1px solid var(--line)' }}>
-                  {ms.length === 0 ? (
-                    <span>No distance among these rows yet</span>
-                  ) : (
-                    <>
-                      <span>median {fix(median)} m</span>
-                      <span style={{ color: 'var(--line)' }}>·</span>
-                      <span>mean {fix(mean)} m</span>
-                      <span style={{ color: 'var(--line)' }}>·</span>
-                      <span>
-                        range {fix(ms[0])} to {fix(ms[ms.length - 1])} m
-                      </span>
-                    </>
-                  )}
                   <div className="spacer" />
                   <span>Click a heading to sort</span>
                 </div>
@@ -403,7 +344,7 @@ export default function TableView({
                 {cur.detections.map((d) => (
                   <div
                     key={`${d.method}-${d.idx}`}
-                    className={`bbox${d.reasons.length > 0 ? ' bbox-flagged' : ''}${d.y1 < 0.08 ? ' bbox-low' : ''}`}
+                    className={`bbox${d.y1 < 0.08 ? ' bbox-low' : ''}`}
                     style={{ left: `${d.x1 * 100}%`, top: `${d.y1 * 100}%`, width: `${(d.x2 - d.x1) * 100}%`, height: `${(d.y2 - d.y1) * 100}%` }}
                   >
                     <span className="tag">
@@ -446,19 +387,9 @@ export default function TableView({
                 <span>{animal(cur)?.species ?? (cur.measured ? 'no animal' : 'not measured')}</span>
                 <span className="cap">Flag photo</span>
                 <span>{cur.flag_image ?? NONE}</span>
-                <span className="cap">Lines up with flag photo</span>
-                <span style={{ color: weakFit(cur) ? 'var(--bad)' : undefined }}>
-                  {cur.measured ? linesUp(cur) : NONE}
-                </span>
                 <span className="cap">Distance read at</span>
                 <span>{cur.method ? methods.methods[cur.method]?.label ?? cur.method : NONE}</span>
               </div>
-
-              {cur.reasons.length > 0 && (
-                <p className="warn small" style={{ marginTop: 14 }}>
-                  {cur.reasons.join('; ')}
-                </p>
-              )}
             </div>
 
             <div style={{ flex: 'none', padding: 14, borderTop: '1px solid var(--line)' }}>

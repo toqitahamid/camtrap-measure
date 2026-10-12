@@ -54,8 +54,8 @@ an update, and then the app window opens. Double-clicking the icon again brings 
 instead of starting a second copy. (`run.bat` is the same launcher with its steps in a console — the way
 in when something needs looking at.) Sign in with your FlagLabel email and
 the code it emails you. The window is one screen: three tabs along the top — **Measure**, **Table**, **Results** — and under them
-a bar holding the four things every section works on: the camera, which of its flag photos to measure
-against, the photo folder, and where the distance is read.
+a bar holding the three things every section works on: the camera, which of its flag photos to measure
+against, and the photo folder. The distance is always read at the bottom of the MegaDetector box.
 
 1. **Sync** — pulls the flag-photo labels from FlagLabel (first time: a few minutes; later: seconds).
 2. **Pick the camera and its flag photo**, then **Browse…** to the folder holding that camera's photos.
@@ -67,13 +67,46 @@ against, the photo folder, and where the distance is read.
    you pick explicitly is measured whatever it already holds; *Measure all* skips the ones already
    answered unless you tick *Re-measure*.
 4. **Check the numbers** — Measure shows one photo at a time with its boxes labelled `species · distance`,
-   the 90% interval on a scale, the alignment score and the flag photo it was read against (one click).
+   the 90% interval on a scale and the flag photo it was read against (one click).
    Arrow keys walk the folder. Table shows the same photos as sortable rows, which is where a confidence
-   or an alignment score out of line with its neighbours shows up.
+   out of line with its neighbours shows up.
 5. **Results** — counts, the distance histogram, per-camera figures, and the CSV export.
 
-The bar at the bottom says what the models are doing; during a run it becomes the progress line, with the
-photo in flight, how many are left and a Stop button.
+### The CSV export
+
+The CSV holds data only: the column header row, then one row per animal. It has no `#` note lines and no
+warning text, and it holds every result row in the selection (user decisions 2026-10-11). Every row is a
+MegaDetector-box answer; a photo an older run also measured with SAM3 still gives one row per animal. A photo
+measured only with SAM3 by an older version is not in the CSV until it is measured again. The seven columns, in
+order:
+
+| column | meaning |
+|---|---|
+| `photo` | the file name |
+| `camera` | the camera's name in FlagLabel, the camera the photo was measured under (a folder named `mas cam 2` exports as `MAS_CAM02`) |
+| `timestamp` | the EXIF capture time, in the camera's local time, with no time zone |
+| `species` | what the species model named. `white-tailed deer` is any deer-family prediction; `unsure` is a weak one (score below 0.2) |
+| `distance_m` | the horizontal ground distance to the animal in metres (the median estimate); empty when no distance could be read |
+| `q05_m`, `q95_m` | the bounds of the 90% interval around `distance_m`, in metres; empty when no distance could be read |
+
+The default export holds the white-tailed deer and `unsure` rows; the Species filter set to all species adds
+every animal.
+
+### The researcher log
+
+What a researcher needs beyond the numbers is in one file, `logs\research-log.jsonl` in the app folder, not in
+the CSV or the window. It has one JSON line per photo each time it is measured: the photo, the camera, day or
+night, whether a distance was read, how many animals, and the reasons a number may need a check by eye (for
+example "lines up poorly with its flag photo (9 points, needs 15). Wrong camera, or was it moved?"). A night
+photo's line also says how it was lined up through a day photo (`night`, with `checks`: `moved`, `unchecked`,
+`undated`). A file that cannot be read gets one line per run. The file is never trimmed.
+
+The app gives distances only. Density estimation (for example with R's `Distance` package) is the wildlife
+staff's own task, done outside the app from this CSV (user decision 2026-10-11).
+
+The bar at the bottom says what the models are doing. During a run in one camera folder it becomes the
+progress line, with the photo in flight and how many are left. During a site run the run card shows the
+progress, and the bottom bar keeps its status and warnings.
 
 ### Updates and rollback
 

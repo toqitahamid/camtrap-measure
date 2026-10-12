@@ -23,8 +23,8 @@ import {
   type SiteState,
 } from './ui'
 
-/** What TABLE opens on: the needs-a-look filter, or one camera folder's photos. */
-export type TablePreset = { filter?: 'all' | 'new' | 'flagged'; find?: string }
+/** What TABLE opens on: one camera folder's photos. */
+export type TablePreset = { filter?: 'all' | 'new'; find?: string }
 
 type Props = {
   site: SiteState
@@ -379,7 +379,7 @@ function Verdict({ f, error }: { f: Comparison['flags'][number] | undefined; err
 
 /* ── 2. Measuring ─────────────────────────────────────────────────────────── */
 
-const sum = (cams: RunCamera[], k: 'deer' | 'needs_look') => cams.reduce((n, c) => n + c[k], 0)
+const sum = (cams: RunCamera[], k: 'deer') => cams.reduce((n, c) => n + c[k], 0)
 
 function Running({ run, cameras, onStop }: { run: Run; cameras: RunCamera[]; onStop: () => void }) {
   const [show, setShow] = useState(false)
@@ -406,7 +406,7 @@ function Running({ run, cameras, onStop }: { run: Run; cameras: RunCamera[]; onS
           <>
             <div className="group">
               <b>Done</b>
-              <span>{plural(done.length, 'camera')} · {sum(done, 'deer')} deer · {sum(done, 'needs_look')} need a look</span>
+              <span>{plural(done.length, 'camera')} · {sum(done, 'deer')} deer</span>
               <div className="spacer" />
               <button className="link" onClick={() => setShow((s) => !s)}>{show ? 'Hide' : 'Show'}</button>
             </div>
@@ -417,7 +417,7 @@ function Running({ run, cameras, onStop }: { run: Run; cameras: RunCamera[]; onS
           <table className="btable">
             <thead>
               <tr><th>Now measuring</th><th>Flag photo</th><th style={{ width: '36%' }}>Progress</th>
-                <th className="num">Photos</th><th className="num">Deer</th><th className="num">Needs a look</th></tr>
+                <th className="num">Photos</th><th className="num">Deer</th></tr>
             </thead>
             <tbody>
               <tr>
@@ -426,7 +426,6 @@ function Running({ run, cameras, onStop }: { run: Run; cameras: RunCamera[]; onS
                 <td><div className="prog"><i style={{ width: `${(100 * now.done) / Math.max(1, now.total)}%` }} /></div></td>
                 <td className="num">{thousands(now.done)} / {thousands(now.total)}</td>
                 <td className="num">{now.deer}</td>
-                <td className="num">{now.needs_look}</td>
               </tr>
             </tbody>
           </table>
@@ -446,7 +445,7 @@ function Summary({ cameras, onTable }: { cameras: RunCamera[]; onTable?: Props['
     <table className="btable">
       <thead>
         <tr><th>Camera</th><th className="num">Photos</th><th className="num">Deer</th><th className="num">Median distance</th>
-          <th className="num">Needs a look</th>{onTable && <th />}</tr>
+          {onTable && <th />}</tr>
       </thead>
       <tbody>
         {cameras.map((c) => (
@@ -455,7 +454,6 @@ function Summary({ cameras, onTable }: { cameras: RunCamera[]; onTable?: Props['
             <td className="num">{thousands(c.photos ?? c.done)}</td>
             <td className="num">{c.deer}</td>
             <td className="num">{c.median_m === null ? NONE : `${c.median_m.toFixed(1)} m`}</td>
-            <td className="num">{c.needs_look}</td>
             {onTable && (
               <td style={{ textAlign: 'right' }}>
                 <button className="btn btn-sm" onClick={() => onTable({ find: c.prefix })}>Open in Table</button>
@@ -476,7 +474,6 @@ function Done({ run, cameras, onBack, onResults, onTable }: {
   onTable: Props['onTable']
 }) {
   const measured = cameras.filter((c) => c.status === 'done')
-  const look = sum(measured, 'needs_look')
   const notYet = cameras.filter((c) => c.status !== 'done')
   const title = run.status === 'error'
     ? 'Measuring stopped with a problem'
@@ -504,11 +501,6 @@ function Done({ run, cameras, onBack, onResults, onTable }: {
           <div className="spacer" />
           <button className="btn" onClick={onBack}>Back to the cameras</button>
           <button className="btn" onClick={onResults}>Go to Results</button>
-          {look > 0 && (
-            <button className="btn btn-amber" onClick={() => onTable({ filter: 'flagged' })}>
-              Review {plural(look, 'photo')} that need a look
-            </button>
-          )}
         </div>
         {measured.length > 0 && <Summary cameras={measured} onTable={onTable} />}
         {notes.length > 0 && <div className="batch-foot stack" style={{ alignItems: 'stretch' }}>{notes}</div>}

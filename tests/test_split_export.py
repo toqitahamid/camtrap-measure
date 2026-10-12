@@ -1,5 +1,5 @@
-"""The export as one file per site or per camera (ticket 26): the site a camera belongs to, the site column,
-the files the split writes into a folder, and the screen's filters applied to each file."""
+"""The export as one file per site or per camera (ticket 26): the site a camera belongs to, the files the split
+writes into a folder, and the screen's filters applied to each file. (The site column was removed 2026-10-11.)"""
 
 import csv
 from pathlib import Path
@@ -13,7 +13,7 @@ from tests.test_measure import folder, run
 
 D = inference.Detection
 DEER = D(0.2, 0.3, 0.4, 0.7, "white-tailed deer", 0.9, 5.0, 4.0, 6.0)
-WEAK = D(0.2, 0.3, 0.4, 0.7, "white-tailed deer", 0.3, 8.0, 7.0, 9.0)  # low detector confidence: needs a look
+WEAK = D(0.2, 0.3, 0.4, 0.7, "white-tailed deer", 0.3, 8.0, 7.0, 9.0)  # low detector confidence: still exported
 COON = D(0.2, 0.3, 0.4, 0.7, "raccoon", 0.9, 3.0, 2.5, 3.5)
 SCRIPT = {"IMG_A.JPG": [DEER], "IMG_B.JPG": [WEAK], "IMG_C.JPG": [COON]}
 
@@ -55,9 +55,12 @@ def split(c, to: Path, by: str, **params) -> dict:
     return r.json()
 
 
-def read(path: str) -> tuple[list[str], list[dict]]:
+def read(path: str) -> list[dict]:
+    """One written file's rows. The file is data only: the column header row first, no `#` note line anywhere
+    (user decision 2026-10-11)."""
     lines = Path(path).read_text(encoding="utf-8").splitlines()
-    return [l for l in lines if l.startswith("#")], list(csv.DictReader(l for l in lines if not l.startswith("#")))
+    assert lines[0] == ",".join(report.COLUMNS) and not [l for l in lines if l.startswith("#")]
+    return list(csv.DictReader(lines))
 
 
 def names(body: dict) -> list[str]:
@@ -72,13 +75,14 @@ def test_site_is_the_name_before_the_last_cam():
     assert report.site_of("") == ""
 
 
-def test_export_has_a_site_column_documented_in_the_header(measured):
+def test_the_combined_export_names_each_camera_and_has_no_site_column(measured):
+    """The site column was removed (user decision 2026-10-11); the camera column names the camera, and a split by
+    site still groups the cameras by the part of their name before the last _CAM."""
     r = measured.get("/api/export.csv")
-    rows = list(csv.DictReader(l for l in r.text.splitlines() if not l.startswith("#")))
-    assert list(rows[0])[:3] == ["photo", "camera", "site"]
-    assert {(row["camera"], row["site"]) for row in rows} == {("MAS_CAM01", "MAS"), ("MAS_CAM02", "MAS"),
-                                                              ("TON_CAM02", "TON")}
-    assert "# site: the survey site" in r.text
+    rows = list(csv.DictReader(r.text.splitlines()))
+    assert list(rows[0])[:2] == ["photo", "camera"] and "site" not in rows[0]
+    assert {row["camera"] for row in rows} == {"MAS_CAM01", "MAS_CAM02", "TON_CAM02"}
+    assert "#" not in r.text  # the column notes are in README.md, not in the file
 
 
 def test_split_by_site_writes_one_file_per_site_with_rows(measured, tmp_path):
@@ -87,12 +91,10 @@ def test_split_by_site_writes_one_file_per_site_with_rows(measured, tmp_path):
     body = split(measured, out, "site")
     assert body["count"] == 2 and body["folder"] == str(out.resolve())
     assert names(body) == ["camtrap-measure_MAS_start_end.csv", "camtrap-measure_TON_start_end.csv"]  # SRF: raccoon only
-    doc, rows = read(body["paths"][0])
-    assert {(r["camera"], r["photo"]) for r in rows} == {("MAS_CAM01", "IMG_A.JPG"), ("MAS_CAM02", "IMG_A.JPG")}
-    assert {r["site"] for r in rows} == {"MAS"}
-    assert "site=MAS" in doc[0] and "1 row that needs a look left out" in doc[0]  # the weak box on MAS_CAM01
-    assert any(l.startswith("# distance_m:") for l in doc)  # the same column notes as the combined file
-    _, rows = read(body["paths"][1])
+    rows = read(body["paths"][0])
+    assert {(r["camera"], r["photo"]) for r in rows} == {("MAS_CAM01", "IMG_A.JPG"), ("MAS_CAM01", "IMG_B.JPG"),
+                                                         ("MAS_CAM02", "IMG_A.JPG")}  # the weak box too: every row
+    rows = read(body["paths"][1])
     assert [r["camera"] for r in rows] == ["TON_CAM02"]
 
 
@@ -101,22 +103,20 @@ def test_split_by_camera_writes_one_file_per_camera_with_rows(measured, tmp_path
     assert names(body) == ["camtrap-measure_MAS_CAM01_start_end.csv", "camtrap-measure_MAS_CAM02_start_end.csv",
                            "camtrap-measure_TON_CAM02_start_end.csv"]
     for path, cam in zip(body["paths"], ["MAS_CAM01", "MAS_CAM02", "TON_CAM02"]):
-        doc, rows = read(path)
-        assert [r["camera"] for r in rows] == [cam] and f"camera={cam}" in doc[0]
+        rows = read(path)
+        assert {r["camera"] for r in rows} == {cam}
 
 
 def test_split_applies_the_screen_filters_to_every_file(measured, tmp_path):
-    body = split(measured, tmp_path, "camera", date_from="2026-05-02", date_to="2026-05-03", include_suspicious=True)
+    body = split(measured, tmp_path, "camera", date_from="2026-05-02", date_to="2026-05-03")
     # MAS_CAM01 keeps only its weak box (05-02); MAS_CAM02 its deer (05-03); TON_CAM02 has only a raccoon then
     assert names(body) == ["camtrap-measure_MAS_CAM01_2026-05-02_2026-05-03.csv",
                            "camtrap-measure_MAS_CAM02_2026-05-02_2026-05-03.csv"]
-    doc, rows = read(body["paths"][0])
-    assert [(r["photo"], r["flag"] != "") for r in rows] == [("IMG_B.JPG", True)]
-    assert "from=2026-05-02" in doc[0] and "rows that need a look included" in doc[0]
+    assert [r["photo"] for r in read(body["paths"][0])] == ["IMG_B.JPG"]
 
     every = split(measured, tmp_path, "site", all_species=True, survey_site="TON")
     assert names(every) == ["camtrap-measure_TON_start_end.csv"]  # the site filter narrows the split too
-    _, rows = read(every["paths"][0])
+    rows = read(every["paths"][0])
     assert sorted(r["species"] for r in rows) == ["raccoon", "white-tailed deer"]
 
 
@@ -132,7 +132,7 @@ def test_split_never_overwrites_a_file(measured, tmp_path):
     second = split(measured, tmp_path, "site")
     assert names(second) == ["camtrap-measure_MAS_start_end (2).csv", "camtrap-measure_TON_start_end (2).csv"]
     assert Path(first["paths"][0]).read_text(encoding="utf-8") == "mine"
-    assert read(second["paths"][0])[1] == list(csv.DictReader(l for l in before.splitlines() if not l.startswith("#")))
+    assert read(second["paths"][0]) == list(csv.DictReader(before.splitlines()))
     assert names(split(measured, tmp_path, "site"))[0] == "camtrap-measure_MAS_start_end (3).csv"
 
 

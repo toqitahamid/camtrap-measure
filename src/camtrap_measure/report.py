@@ -1,50 +1,33 @@
-"""Views over the results store: the folder the window is working on, the post-run summary, and the gated CSV export.
+"""Views over the results store: the folder the window is working on, the post-run summary, and the CSV export.
 
 `folder` lists every JPEG in one folder — measured or not — with its boxes and their numbers, because the
 window works on a folder the technician picked, and a photo with no answer yet still has to appear in the
 list, the table and the frame. A detection row is *suspicious* when its number should not enter
 an analysis unread: the photo did not match its flag photo well (misfiled / moved camera), the detector was
-unsure of the box, SpeciesNet was unsure of the animal, or no ground could be read under it. Such rows are
-marked in the listing and left out of the export unless asked — and the file says how many it left out.
+unsure of the box, SpeciesNet was unsure of the animal, or no ground could be read under it. The density
+estimate leaves such rows out (density.py). The window and the CSV export do not mark them: the export holds
+every result row, data only (user decisions 2026-10-11).
 """
 
 import csv
 import io
 import json
 import statistics
-from datetime import datetime
 from ntpath import basename  # splits on / and \ alike: paths come from the dept's Windows machine or a Linux test box
 from pathlib import Path
 
 from . import calibration, inference, lineup, measure, store
 from .distance import MIN_INLIERS
-from .inference import DEFAULT_METHOD, MIN_SPECIES_SCORE
+from .inference import DEFAULT_METHOD
 
 LOW_CONF = 0.5  # ponytail: detector confidence below this is "weak box"; tune with the dept's first season
 DEER = {"white-tailed deer", "unsure"}  # default export: the survey target plus animals that may be it
 BIN_M = 2  # histogram bin width, metres
 
-COLUMNS = ["photo", "camera", "site", "timestamp", "species", "distance_m", "q05_m", "q95_m", "confidence", "method",
-           "fidelity", "match_score", "check", "flag"]
-DOC = """\
-# photo: file name; camera: the camera (the photo folder's name); timestamp: EXIF capture time in the camera's local time, no zone
-# site: the survey site, the part of the camera name before its last '_CAM' (MAS_CAM01 -> MAS); a name with no '_CAM' is its own site
-# species: what the species model named; 'white-tailed deer' is any deer-family prediction, 'unsure' a weak one (score < {min_species})
-# distance_m: horizontal ground distance to the animal in metres (median estimate)
-# q05_m, q95_m: bounds of the 90% interval around distance_m, metres; empty when no distance could be read
-# confidence: how sure the detector is that the box holds an animal, 0-1; method: md = distance read at the bottom of the MegaDetector box, sam3 = where the SAM3 outline meets the ground
-# fidelity: research = the published settings, fast = quicker settings for a small graphics card (see the app's docs);
-#           distances differ between the two by a few centimetres, well inside the q05-q95 band, but do not mix them silently
-# match_score: points that line up between this photo and its flag photo (fewer than {min_inliers} = needs a look); a night
-#              photo is measured through a day photo of the same camera, and this is that day photo's number
-# check: empty when the number is fine; otherwise look at the photo yourself before you use the number:
-#        "Check by eye: camera moved" = the camera moved during the night, and the night photo used the nearer day photo
-#        "Check by eye: camera move not checked" = only one day photo (before or after the night) was found
-#        "Check by eye: no photo date" = the photo, or a day photo it used, has no date; it was placed by its file number or file time
-# flag: empty for a row that looks fine, else why the row needs a look (such rows are in this file only if you asked for them)
-""".format(min_inliers=MIN_INLIERS, min_species=MIN_SPECIES_SCORE)
-CHECK_WORDS = {lineup.MOVED: "camera moved", lineup.UNCHECKED: "camera move not checked",
-               lineup.UNDATED: "no photo date"}
+# The export's columns, in order. What each one means is in README.md ("The CSV export"), not in the file.
+# The seven the user chose (2026-10-11); site, confidence, fidelity, match_score and method were removed. Every row is
+# a MegaDetector-box answer (_one_method).
+COLUMNS = ["photo", "camera", "timestamp", "species", "distance_m", "q05_m", "q95_m"]
 
 
 def site_of(camera: str) -> str:
@@ -80,7 +63,9 @@ def reasons(row: dict) -> list[str]:
     stand-in backends; those rows read as before. A day photo whose own line-up found no homography (direct, status
     none) reads as a poor or failed line-up, by its points. A night answer (the Night rule) is lined up when its status
     is ok, whatever its score: a night photo that copies the flag photo itself has no points of its own. What a night
-    answer asks the reader to check by eye goes to the export's `check` column, not here (Q11)."""
+    answer asks a researcher to check by eye (camera moved, move not checked, no photo date) is not a reason: it goes
+    to the researcher log's `night` object. The reasons themselves are written only to the researcher log,
+    research-log.jsonl, one line per measured photo (measure._log_measured; user decisions 2026-10-11)."""
     out = []
     status, score = row.get("align_status"), row["match_score"]
     if row.get("align_source") in (lineup.NIGHT, "bracket"):  # "bracket": a first-design row, measured again next run
@@ -100,15 +85,6 @@ def reasons(row: dict) -> list[str]:
     if row["distance_m"] is None and aligned:
         out.append("could not find the ground under the animal, so no distance")
     return out
-
-
-def check_text(row: dict) -> str:
-    """The export's `check` column (Q11): empty when the number is fine, else "Check by eye: ..." in plain words.
-    Only a night answer with a number can ask for one; a row with no distance says why in `flag` instead."""
-    if row.get("align_source") != lineup.NIGHT or row.get("align_status") != lineup.OK:
-        return ""
-    words = [CHECK_WORDS[c] for c in _detail(row).get("checks", []) if c in CHECK_WORDS]
-    return "Check by eye: " + ", ".join(words) if words else ""
 
 
 def _in_range(captured_at: str | None, date_from: str | None, date_to: str | None) -> bool:
@@ -150,6 +126,13 @@ def rows(site=None, date_from=None, date_to=None, folder=None, survey_site=None)
     return out
 
 
+def _one_method(rs: list[dict]) -> list[dict]:
+    """Only the MegaDetector-box answers (DEFAULT_METHOD): the window measures with no other method, and the export
+    holds one method (user decisions 2026-10-11, "I don't need sam3", "Export one method"). A photo an older run also
+    measured with SAM3 keeps one row per animal. Density reads `rows` itself and is not narrowed here."""
+    return [r for r in rs if r["method"] == DEFAULT_METHOD]
+
+
 def photos(site=None, date_from=None, date_to=None, folder=None, survey_site=None) -> list[dict]:
     """Photo rows in scope — measured and held."""
     folder = _as_stored(folder)
@@ -159,11 +142,15 @@ def photos(site=None, date_from=None, date_to=None, folder=None, survey_site=Non
 
 
 def summary(site=None, date_from=None, date_to=None, all_species=False, folder=None, survey_site=None) -> dict:
-    """Counts, a histogram of deer distances, and one line per camera. `suspicious` counts the rows the
-    export with the same species setting would leave out, so the number on screen is the number in the file.
-    `folder` narrows all of it to the photos measured out of one folder — what RESULTS shows by default, so
-    the screen answers for the folder in the bar rather than for everything ever measured."""
-    ph, rs = photos(site, date_from, date_to, folder, survey_site), rows(site, date_from, date_to, folder, survey_site)
+    """Counts, a histogram of deer distances, and one line per camera, over the MegaDetector-box answers the export
+    holds, so `deer` is the number of rows in the file. `suspicious` counts the rows with a reason; no screen shows
+    it since 2026-10-11. `folder` narrows all of it to the photos measured out of one folder — what RESULTS shows by
+    default, so the screen answers for the folder in the bar rather than for everything ever measured.
+    `photos` counts the photos whose stored answer is a MegaDetector-box one (and held photos), as the Table counts
+    them measured: a photo an older version measured last with SAM3 lists as "Not measured" there, so not here."""
+    ph = [p for p in photos(site, date_from, date_to, folder, survey_site)
+          if p["method"] == DEFAULT_METHOD or p["held_reason"]]
+    rs = _one_method(rows(site, date_from, date_to, folder, survey_site))
     deer = [r for r in rs if all_species or r["species"] in DEER]
     dists = [r["distance_m"] for r in deer if r["distance_m"] is not None]
     hist = {}
@@ -171,7 +158,8 @@ def summary(site=None, date_from=None, date_to=None, all_species=False, folder=N
         lo = int(d // BIN_M) * BIN_M
         hist[lo] = hist.get(lo, 0) + 1
     cams = []
-    for s in sorted({p["site"] for p in ph}):
+    # a camera with MegaDetector-box rows is listed even when its photos were last measured with SAM3
+    for s in sorted({p["site"] for p in ph} | {r["site"] for r in rs}):
         cp, cd = [p for p in ph if p["site"] == s], [r for r in deer if r["site"] == s]
         cdist = [r["distance_m"] for r in cd if r["distance_m"] is not None]
         cams.append({"site": s, "photos": len(cp), "held": sum(1 for p in cp if p["held_reason"]),
@@ -274,47 +262,30 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
 
 
 def camera_summary(folder: str, site: str) -> dict:
-    """One camera folder after a site run: photos on record, deer, their median distance, and photos that need a
-    look (any reason, as TABLE's filter counts them). Only the photos directly in `folder`: a nested folder is a
-    row of its own."""
+    """One camera folder after a site run: photos on record, deer, and their median distance. Only the photos
+    directly in `folder`: a nested folder is a row of its own."""
     d = Path(folder)
     ph = [p for p in store.photos() if p["site"] == site and Path(p["path"]).parent == d]
-    rs = [r for r in rows(site=site) if Path(r["path"]).parent == d]
+    rs = [r for r in _one_method(rows(site=site)) if Path(r["path"]).parent == d]
     deer = [r for r in rs if r["species"] in DEER]
     dist = [r["distance_m"] for r in deer if r["distance_m"] is not None]
-    return {"photos": len(ph), "deer": len(deer), "median_m": round(statistics.median(dist), 1) if dist else None,
-            "needs_look": len({r["path"] for r in rs if r["flag"]})}
+    return {"photos": len(ph), "deer": len(deer), "median_m": round(statistics.median(dist), 1) if dist else None}
 
 
 def _wanted(site, date_from, date_to, all_species, folder, survey_site) -> list[dict]:
-    """The rows an export with these filters looks at, before the rows that need a look are taken out."""
-    return [r for r in rows(site, date_from, date_to, folder, survey_site) if all_species or r["species"] in DEER]
+    """The rows an export with these filters holds: every MegaDetector-box result row of the species asked for."""
+    return [r for r in _one_method(rows(site, date_from, date_to, folder, survey_site))
+            if all_species or r["species"] in DEER]
 
 
-def export_csv(site=None, date_from=None, date_to=None, all_species=False, include_suspicious=False,
-               folder=None, survey_site=None) -> str:
-    """The documented CSV: header lines (#) state the filters, what was excluded, and every column's meaning."""
-    rs = _wanted(site, date_from, date_to, all_species, folder, survey_site)
-    kept = [r for r in rs if include_suspicious or not r["flag"]]
-    excluded = len(rs) - len(kept)
-    left_out = f"{excluded} row that needs a look left out" if excluded == 1 else f"{excluded} rows that need a look left out"
-    methods = sorted({r["method"] for r in kept})
+def export_csv(site=None, date_from=None, date_to=None, all_species=False, folder=None, survey_site=None) -> str:
+    """The CSV: the column header row, then one row per animal, every result row in the selection. Data only: no
+    `#` note lines and no warning text (user decisions 2026-10-11). The columns are explained in README.md."""
     buf = io.StringIO()
-    buf.write(f"# CamTrap Measure export {datetime.now().astimezone().isoformat(timespec='seconds')}; "
-              f"camera={site or 'all'}; site={survey_site or 'all'}; "
-              f"from={date_from or 'start'}; to={date_to or 'end'}; "
-              f"folder={folder or 'all'}; "
-              f"species={'all' if all_species else 'white-tailed deer + unsure'}; "
-              f"{'rows that need a look included (see flag)' if include_suspicious else left_out}\n")
-    buf.write(DOC)
-    if len(methods) > 1:
-        buf.write(f"# methods present: {', '.join(methods)}; a photo measured with both has one row per animal per method; "
-                  "filter on the method column before analysis\n")
     w = csv.DictWriter(buf, COLUMNS, extrasaction="ignore", lineterminator="\n")
     w.writeheader()
-    for r in kept:
-        w.writerow({**r, "photo": basename(r["path"]), "camera": r["site"], "site": site_of(r["site"]),
-                    "timestamp": r["captured_at"], "check": check_text(r)})
+    for r in _wanted(site, date_from, date_to, all_species, folder, survey_site):
+        w.writerow({**r, "photo": basename(r["path"]), "camera": r["site"], "timestamp": r["captured_at"]})
     return buf.getvalue()
 
 
@@ -339,24 +310,23 @@ def _write_new(folder: Path, name: str, text: str) -> Path:
 
 
 def export_split(to: str, by: str, site=None, date_from=None, date_to=None, all_species=False,
-                 include_suspicious=False, folder=None, survey_site=None) -> list[Path]:
+                 folder=None, survey_site=None) -> list[Path]:
     """The export as one file per site (by="site") or per camera (by="camera"), written into the folder `to`.
-    Each file is `export_csv` narrowed to its site or camera, so it has the same header lines and filters as
-    the combined file. Only a site or camera with rows to write gets a file. Raises ValueError with the message."""
+    Each file is `export_csv` narrowed to its site or camera, so it has the same columns and filters as the
+    combined file. Only a site or camera with rows to write gets a file. Raises ValueError with the message."""
     if by not in ("site", "camera"):
         raise ValueError(f"Split by site or camera, not {by!r}")
     d = Path(to).expanduser().resolve()
     if not d.is_dir():
         raise ValueError(f"Folder not found: {d}")
-    kept = [r for r in _wanted(site, date_from, date_to, all_species, folder, survey_site)
-            if include_suspicious or not r["flag"]]
+    kept = _wanted(site, date_from, date_to, all_species, folder, survey_site)
     written = []
     if by == "site":
         for s in sorted({site_of(r["site"]) for r in kept}):
-            text = export_csv(site, date_from, date_to, all_species, include_suspicious, folder, survey_site=s)
+            text = export_csv(site, date_from, date_to, all_species, folder, survey_site=s)
             written.append(_write_new(d, file_name(s, date_from, date_to), text))
     else:
         for cam in sorted({r["site"] for r in kept}):
-            text = export_csv(cam, date_from, date_to, all_species, include_suspicious, folder, survey_site)
+            text = export_csv(cam, date_from, date_to, all_species, folder, survey_site)
             written.append(_write_new(d, file_name(cam, date_from, date_to), text))
     return written

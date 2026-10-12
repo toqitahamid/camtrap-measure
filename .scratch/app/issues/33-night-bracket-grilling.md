@@ -258,3 +258,15 @@ answer that run (never the direct line-up, which could be a night -> flag link) 
 Research repo `experiments/refnet/`: 38, 42, 43 (rule and check against the chain), 57 (coverage, `anchor_gap/`),
 58 (flag-frame move check, `moved_cost/`), 59 (anchor threshold, Q6), 60_vote_check (vote, Chain gate, Fallback;
 Q8, Q9).
+
+## Note (2026-10-11, after the grilling): Q11's export decision reversed
+
+The user reversed Q11's export column. The words "Check by eye: ..." no longer go to the CSV `check` column: "Only
+save in the log don't include it in the csv which the wildlife collaborators will use. Don't need the same
+information to be saved in three places." The checks (`moved`, `unchecked`, `undated`) now live only in the
+researcher log (Q12, `night-rule.jsonl`, field `checks`) and in the stored line-up detail the app needs. The record
+above is kept as history.
+
+Later the same day Q12's log changed too: the night-only `night-rule.jsonl` became one researcher log,
+`research-log.jsonl`, with one line per measured photo, day or night, and its reasons ("A ok but can you make one
+research log"). A night photo's checks are now its line's `night.checks`.
