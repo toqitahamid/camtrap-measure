@@ -133,9 +133,123 @@ def test_photos_in_a_nested_folder_take_the_camera_of_the_nearest_folder_named_a
 
 def test_a_folder_with_photos_in_it_is_one_camera_not_a_site(c, tmp_path):
     d = make(tmp_path / "MAS_CAM01", {".": {"IMG_1.JPG": shot()}, "sub": {"IMG_2.JPG": shot()}})
-    assert plan(c, d) == {"status": "single"}
+    assert plan(c, d) == {"status": "single", "camera": "MAS_CAM01"}
     assert plan(c, make(tmp_path / "nothing", {"a": {}}))["status"] == "single"
     assert c.get("/api/site", params={"path": str(tmp_path / "gone")}).status_code == 400
+
+
+# --- one camera's folder: the camera it is named after (the Camera menu starts on it) ------------------------
+
+def test_one_cameras_folder_names_its_camera_however_it_is_written():
+    for name, want in [("MAS_CAM07", "MAS_CAM07"), ("2026_MAS_CAM07_filtered", "MAS_CAM07"), ("mas cam 2", "MAS_CAM02"),
+                       ("MASCAM-014", "MAS_CAM14")]:
+        assert batch.folder_camera(Path("/cards") / name, CAMERAS) == want, name
+
+
+def test_a_card_copied_whole_takes_the_camera_of_the_nearest_folder_above_named_after_one():
+    assert batch.folder_camera(Path("/cards/MAS_CAM07/DCIM/100BMCIM"), CAMERAS) == "MAS_CAM07"
+    assert batch.folder_camera(Path("/cards/MAS_CAM07/2026/DCIM/100BMCIM"), CAMERAS) == "MAS_CAM07"  # 3 levels up
+    assert batch.folder_camera(Path("/cards/MAS_CAM07/a/b/c/d"), CAMERAS) is None  # deeper than a site folder looks
+    # the nearest name wins: a camera folder kept inside another camera's folder is its own camera
+    assert batch.folder_camera(Path("/cards/MAS_CAM01/MAS_CAM14"), CAMERAS) == "MAS_CAM14"
+
+
+# The cameras FlagLabel has (data/flaglabel_supabase/labels, 2026-10-12): no lettered name among them.
+FLAGLABEL = ([f"MAS_CAM{i:02d}" for i in range(1, 33) if i != 6] + [f"MOR_CAM{i:02d}" for i in range(1, 25) if i != 16]
+             + [f"SHB_CAM{i:02d}" for i in range(1, 45) if i not in (19, 23, 30)] + [f"SRF_CAM{i:02d}" for i in range(1, 42)]
+             + [f"TON_CAM{i:02d}" for i in range(2, 33)])
+# The field folders (data/MAS, data/TON): a lettered folder is another deployment of the camera without the letter
+FIELD = ([f"MAS_CAM{i:02d}" for i in range(1, 33) if i not in (6, 10, 12)]
+         + ["MAS_CAM10A", "MAS_CAM10B", "MAS_CAM10C", "MAS_CAM12A", "MAS_CAM12D", "MAS_CAM12E"]
+         + [f"TON_CAM{i:02d}" for i in range(2, 33) if i != 8] + ["TON_CAM08A", "TON_CAM08B"])
+# Were FlagLabel ever to list lettered cameras, and a MAS_CAM1 beside MAS_CAM10 and MAS_CAM12
+LETTERED = ["MAS_CAM1", "MAS_CAM10", "MAS_CAM10B", "MAS_CAM10C", "MAS_CAM12", "MAS_CAM12E", "TON_CAM08", "TON_CAM08A"]
+
+
+def _old_matches(folder_name: str, cameras: list[str]) -> list[str]:
+    """batch.matches as it was before the most specific name won (main 6e15ed0), to prove what changed."""
+    key, cuts = batch._key(folder_name)
+    out = []
+    for cam in cameras:
+        ck = batch.norm(cam)
+        i = key.find(ck) if ck else -1
+        while i != -1:
+            if i in cuts and i + len(ck) in cuts:
+                out.append(cam)
+                break
+            i = key.find(ck, i + 1)
+    return out
+
+
+def test_every_field_folder_names_its_flaglabel_camera():
+    for name in FIELD:
+        want = name.rstrip("ABCDE")  # MAS_CAM10B -> MAS_CAM10
+        assert batch.folder_camera(Path("/data") / name, FLAGLABEL) == want, name
+        assert batch.folder_camera(Path("/data") / name / "DCIM" / "100BMCIM", FLAGLABEL) == want, name
+        assert batch.matches(f"2026_{name}_filtered", FLAGLABEL) == [want], name
+
+
+def test_the_most_specific_camera_name_wins():
+    assert batch.folder_camera(Path("/cards/MAS_CAM10"), LETTERED) == "MAS_CAM10"  # not 10B or 10C
+    assert batch.folder_camera(Path("/cards/MAS_CAM10B"), LETTERED) == "MAS_CAM10B"  # not MAS_CAM10
+    assert batch.folder_camera(Path("/cards/MAS_CAM10C_filtered/DCIM"), LETTERED) == "MAS_CAM10C"
+    assert batch.folder_camera(Path("/cards/MAS_CAM10A"), LETTERED) == "MAS_CAM10"  # no camera 10A: its camera
+    assert batch.folder_camera(Path("/cards/MAS_CAM12E"), LETTERED) == "MAS_CAM12E"
+    assert batch.folder_camera(Path("/cards/MAS_CAM12D"), LETTERED) == "MAS_CAM12"
+    assert batch.folder_camera(Path("/cards/TON_CAM08B"), LETTERED) == "TON_CAM08"
+    assert batch.folder_camera(Path("/cards/TON_CAM08A"), LETTERED) == "TON_CAM08A"
+    # whole numbers still: MAS_CAM1 is never found in MAS_CAM12, nor MAS_CAM10/12 in MAS_CAM01
+    assert batch.folder_camera(Path("/cards/MAS_CAM12"), LETTERED) == "MAS_CAM12"
+    assert batch.folder_camera(Path("/cards/MAS_CAM01"), LETTERED) == "MAS_CAM1"
+    # two names in different places are two cameras, even when one is the longer form of the other
+    assert batch.matches("MAS_CAM10 and MAS_CAM10B", LETTERED) == ["MAS_CAM10", "MAS_CAM10B"]
+    assert batch.folder_camera(Path("/cards/MAS_CAM10 and MAS_CAM10B"), LETTERED) is None
+
+
+def test_the_most_specific_rule_changes_only_names_that_fitted_two_cameras_before():
+    """A name that fitted no camera or one camera fits the same now, so a site row or a single folder that had a
+    camera keeps it. Only a name that fitted two or more can now fit fewer."""
+    names = FIELD + [f"2026_{n}_filtered" for n in FIELD] + [n.lower().replace("_", " ") for n in FIELD] + [
+        "MAS_CAM10 and MAS_CAM10B", "MAS_CAM01 and MAS_CAM14", "MAS_CAM10B_MAS_CAM10C", "card 3", "DCIM", "100BMCIM"]
+    changed = set()
+    for cameras in (FLAGLABEL, LETTERED, FLAGLABEL + ["MAS_CAM10B", "MAS_CAM10C", "MAS_CAM12E", "TON_CAM08A"], CAMERAS):
+        for name in names:
+            old, new = _old_matches(name, cameras), batch.matches(name, cameras)
+            if len(old) <= 1:
+                assert new == old, (name, cameras)
+            else:
+                assert new and set(new) <= set(old), (name, old, new)
+                if new != old:
+                    changed.add(name)
+    # what changed is exactly the lettered folders whose own lettered camera exists, as their only camera, and the
+    # name with two lettered cameras in it, which now fits those two and not also MAS_CAM10
+    assert {n.split("_filtered")[0].removeprefix("2026_").upper().replace(" ", "_") for n in changed} == {
+        "MAS_CAM10B", "MAS_CAM10C", "MAS_CAM12E", "TON_CAM08A", "MAS_CAM10B_MAS_CAM10C"}
+    assert batch.matches("MAS_CAM10B_MAS_CAM10C", LETTERED) == ["MAS_CAM10B", "MAS_CAM10C"]
+
+
+def test_a_site_folder_row_takes_the_most_specific_camera(c, tmp_path):
+    root = make(tmp_path / "site", {n: {"IMG_1.JPG": shot()} for n in ("MAS_CAM10A", "MAS_CAM10B", "MAS_CAM10C")})
+    p = plan(c, root)  # the synced cameras have MAS_CAM10 only: every deployment folder is that camera, as before
+    assert [row(p, n)["camera"] for n in ("MAS_CAM10A", "MAS_CAM10B", "MAS_CAM10C")] == ["MAS_CAM10"] * 3
+    # with MAS_CAM10B a camera too, its folder is that camera, where before the row asked "Choose the camera"
+    assert batch._camera(root, root / "MAS_CAM10B", LETTERED, {})[0] == "MAS_CAM10B"
+    assert _old_matches("MAS_CAM10B", LETTERED) == ["MAS_CAM10", "MAS_CAM10B"]
+    assert batch._camera(root, root / "MAS_CAM10A", LETTERED, {})[0] == "MAS_CAM10"
+
+
+def test_a_folder_that_names_no_camera_or_two_names_none():
+    assert batch.folder_camera(Path("/cards/card 3/DCIM/100BMCIM"), CAMERAS) is None
+    assert batch.folder_camera(Path("/cards/MAS_CAM14"), []) is None  # not synced yet
+    # two cameras at the nearest name: no pick, and no guess from a folder further up
+    assert batch.folder_camera(Path("/cards/MAS_CAM07/MAS_CAM01 and MAS_CAM14"), CAMERAS) is None
+
+
+def test_the_single_folder_answer_names_the_camera_or_null(c, tmp_path):
+    card = make(tmp_path / "MAS_CAM07", {"DCIM/100BMCIM": {"IMG_1.JPG": shot()}}) / "DCIM" / "100BMCIM"
+    assert plan(c, card) == {"status": "single", "camera": "MAS_CAM07"}
+    odd = make(tmp_path / "card 3", {".": {"IMG_1.JPG": shot()}})
+    assert plan(c, odd) == {"status": "single", "camera": None}
 
 
 def test_a_name_that_fits_two_cameras_waits_for_the_user_to_choose(c, tmp_path):
@@ -392,7 +506,7 @@ def test_a_single_camera_folder_reads_no_dates(c, tmp_path, monkeypatch):
     d = make(tmp_path / "MAS_CAM01", {".": {f"IMG_{i}.JPG": shot() for i in range(3)}})
     monkeypatch.setattr(calibration, "read_exif", lambda *a, **kw: pytest.fail("read a date of a single folder"))
     assert batch.read(d) == {"status": "single"}
-    assert plan(c, d) == {"status": "single"}
+    assert plan(c, d) == {"status": "single", "camera": "MAS_CAM01"}
 
 
 def test_reading_progress_is_told_now_and_then_and_at_the_end(c, tmp_path, monkeypatch):

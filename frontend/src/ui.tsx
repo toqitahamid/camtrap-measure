@@ -139,7 +139,8 @@ export type Site = {
 export type SiteState =
   | Site
   | { status: 'reading'; done: number; total: number }
-  | { status: 'single' }
+  // one camera's folder; `camera` is the camera its name names (null: none, or two), and the Camera menu starts on it
+  | { status: 'single'; camera?: string | null }
   | { status: 'error'; error: string }
 export type Comparison = {
   folder: string

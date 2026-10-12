@@ -196,15 +196,20 @@ def start_run(body: RunRequest):
 @app.get("/api/site")
 def site_folder(path: str, method: str = inference.DEFAULT_METHOD, refresh: bool = False):
     """Is this a site folder (camera folders inside it)? While its photos are read: {status: "reading", done,
-    total}, polled. Not a site folder: {status: "single"}, and the folder is measured as one camera. Read: the
-    confirmation table (`batch.plan`). refresh=true reads the folder again (new photos; known ones are cached)."""
+    total}, polled. Not a site folder: {status: "single", camera}, and the folder is measured as one camera; `camera`
+    is the one its name or a folder above it names (`batch.folder_camera`), or null, and the Camera menu starts
+    on it. Read: the confirmation table (`batch.plan`). refresh=true reads the folder again (new photos; known ones
+    are cached)."""
     try:
         s = batch.scan(path, refresh)
         if s["status"] == "ready":
             return batch.plan(path, method)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {k: s[k] for k in ("status", "done", "total", "error") if k in s}
+    out = {k: s[k] for k in ("status", "done", "total", "error") if k in s}
+    if s["status"] == "single":  # asked each time, not kept with the scan: a Sync can add the camera
+        out["camera"] = batch.folder_camera(Path(path).expanduser().resolve(), store.sites())
+    return out
 
 
 class SiteChoice(BaseModel):

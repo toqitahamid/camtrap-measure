@@ -11,6 +11,7 @@ the dates the plan needs are read (`_needed`), in a thread while the page polls,
 table: a folder is read once, and only a new or changed photo is read again.
 """
 
+import itertools
 import os
 import re
 import threading
@@ -52,18 +53,38 @@ def norm(name: str) -> str:
 
 def matches(folder_name: str, cameras: list[str]) -> list[str]:
     """Every camera whose name appears in the folder name as whole words and whole numbers, so MAS_CAM07 is in
-    "2026_MAS_CAM07_filtered" but MAS_CAM1 is not in "MAS_CAM14"."""
+    "2026_MAS_CAM07_filtered" but MAS_CAM1 is not in "MAS_CAM14". A lettered folder is a deployment of its camera:
+    "MAS_CAM10B" is MAS_CAM10 (the field folders MAS_CAM10A/B/C are all FlagLabel's MAS_CAM10). The most specific
+    name wins: a camera found only inside a longer camera's name at the same place does not count, so if FlagLabel
+    ever has MAS_CAM10B too, "MAS_CAM10B" is MAS_CAM10B alone. Two names in different places still both count."""
     key, cuts = _key(folder_name)
-    out = []
+    spans = {}  # camera -> every (start, end) where its name sits in the folder name as whole words
     for cam in cameras:
         ck = norm(cam)
-        i = key.find(ck) if ck else -1
-        while i != -1:
-            if i in cuts and i + len(ck) in cuts:
-                out.append(cam)
-                break
-            i = key.find(ck, i + 1)
-    return out
+        if found := [(i, i + len(ck)) for i in sorted(cuts) if ck and key.startswith(ck, i) and i + len(ck) in cuts]:
+            spans[cam] = found
+
+    def inside(s: tuple[int, int], cam: str) -> bool:  # within a longer name of another camera
+        return any(o != cam and a <= s[0] and s[1] <= b and (a, b) != s for o, f in spans.items() for a, b in f)
+
+    return [cam for cam, f in spans.items() if not all(inside(s, cam) for s in f)]
+
+
+def _named(dirs, cameras: list[str]) -> tuple[str | None, list[str]]:
+    """(the name of the first folder in `dirs` that fits any camera, the cameras it fits); (None, []) when none does."""
+    for d in dirs:
+        if found := matches(d.name, cameras):
+            return d.name, found
+    return None, []
+
+
+def folder_camera(folder: Path, cameras: list[str]) -> str | None:
+    """The camera one camera's folder is named after: its own name, else the nearest of the DEPTH folders above it
+    that names one, because a card copied whole keeps its photos in MAS_CAM07\\DCIM\\100BMCIM. None when no name
+    fits, or when the nearest name that fits names two cameras ("MAS_CAM07 and MAS_CAM14"): then the user picks,
+    because a wrong camera gives a wrong distance with no warning."""
+    candidates = _named([folder, *folder.parents][:DEPTH + 1], cameras)[1]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _number(camera: str) -> int | None:
@@ -218,13 +239,8 @@ def _list(root: Path) -> dict | None:
 def _camera(root: Path, folder: Path, cameras: list[str], pick: dict) -> tuple[str | None, str | None, str | None, list]:
     """(camera, chosen, matched_from, candidates) of one row: the camera the user chose, else the one camera its
     name, or the nearest folder above it that names one, fits."""
-    matched_from, candidates = None, []
-    for d in [folder, *folder.parents]:  # the folder itself, then the nearest folder above it
-        if d == root:
-            break
-        if found := matches(d.name, cameras):
-            matched_from, candidates = d.name, found
-            break
+    # the folder itself, then the nearest folder above it, up to the site folder
+    matched_from, candidates = _named(itertools.takewhile(lambda d: d != root, [folder, *folder.parents]), cameras)
     chosen = pick.get("camera") if pick.get("camera") in cameras else None
     return chosen or (candidates[0] if len(candidates) == 1 else None), chosen, matched_from, candidates
 

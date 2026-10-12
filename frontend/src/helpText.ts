@@ -15,7 +15,7 @@ export const HELP: Record<string, Topic> = {
   camera: {
     title: 'Camera',
     body: [
-      'The camera that took these photos. Pick the wrong one and the distances are wrong.',
+      'The camera that took these photos, set from the folder name. A wrong camera gives wrong distances.',
       'A camera marked "not labelled yet" has no flag photo. Label it in FlagLabel, then press Sync.',
     ],
   },

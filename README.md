@@ -58,9 +58,12 @@ a bar holding the three things every section works on: the camera, which of its 
 against, and the photo folder. The distance is always read at the bottom of the MegaDetector box.
 
 1. **Sync** — pulls the flag-photo labels from FlagLabel (first time: a few minutes; later: seconds).
-2. **Pick the camera and its flag photo**, then **Browse…** to the folder holding that camera's photos.
-   The folder's name does not matter; you choose which flag photo it belongs to. (Opened in a browser
-   rather than the app window there is no folder chooser, so the bar lets you type the path instead.)
+2. **Browse…** to the folder holding one camera's photos. The camera is set from the folder's name, or from
+   the nearest of the three folders above it that names one (`MAS_CAM07\DCIM\100BMCIM` is MAS_CAM07;
+   `mas cam 2` is MAS_CAM02; the deployment folder `MAS_CAM10B` is MAS_CAM10). When no name gives exactly one camera, the menu says *Pick a camera* and
+   Measure waits until you pick one. You can change the camera by hand; a new folder sets it again. Then
+   check the flag photo: it follows the camera. (Opened in a browser rather than the app window there is no
+   folder chooser, so the bar lets you type the path instead.)
 3. **Measure** — the whole folder with *Measure all*, one photo with the button on its row (every row has
    one, whether or not it already has a number) or the one in the panel beside the photo, or a few by
    ticking them in the Table and pressing *Measure these N*. A photo

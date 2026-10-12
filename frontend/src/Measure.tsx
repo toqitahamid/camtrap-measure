@@ -66,6 +66,7 @@ export default function Measure({
   folder,
   methods,
   busy,
+  clearBusy,
   running,
   onMeasure,
   onClear,
@@ -77,6 +78,8 @@ export default function Measure({
   folder: Folder | null
   methods: Methods
   busy: boolean
+  // Clear needs no camera, so it is not held back while no camera is picked, as Measure is; omitted: `busy`
+  clearBusy?: boolean
   running: boolean // a run is actually in flight; `busy` is also true while the models load
   onMeasure: (paths: string[]) => void
   onChooseFolder: () => void
@@ -353,7 +356,8 @@ export default function Measure({
             <div>
               <div className="grot" style={{ fontSize: 15, fontWeight: 600 }}>Not measured yet</div>
             </div>
-            <button className="btn btn-amber btn-wide" style={{ height: 34, fontSize: 13 }} onClick={() => onMeasure([cur.path])}>
+            <button className="btn btn-amber btn-wide" style={{ height: 34, fontSize: 13 }} disabled={busy}
+                    onClick={() => onMeasure([cur.path])}>
               <Icon name="measure" size={15} width={2.1} />
               Measure this photo
             </button>
@@ -453,7 +457,7 @@ export default function Measure({
               {cur.measured && (
                 <button
                   className="btn btn-wide"
-                  disabled={busy}
+                  disabled={clearBusy ?? busy}
                   style={confirmClear ? { color: 'var(--warn)', borderColor: 'var(--warn)' } : undefined}
                   onClick={() => {
                     if (!confirmClear) return setConfirmClear(true)

@@ -1991,3 +1991,37 @@ staff-facing output.
   the "Include other animals" checkbox (the Species filter stays), "Cameras" and "Date span" under "In this selection"
   (kept: "Rows in the file") and the "Distances" bar column (kept: "Median m"); the median / mean / range footer
   under the table is gone; the bottom run bar hides while the site run's own "Running" card shows its progress.
+
+## The camera is set from the folder name (2026-10-12, ticket 34)
+
+User choice: "set the camera from the folder name". Before, one camera's folder took the Camera menu as it stood,
+and with nothing picked that was the first camera with a usable flag photo (MAS_CAM01). A wrong camera is not
+caught: day photos line up to the wrong flag photo with 54 to 276 points, above `distance.MIN_INLIERS` = 15, so the
+run gives a plausible wrong distance and the CSV names the wrong camera.
+
+- **One matcher.** `batch.folder_camera` asks the site folder's `batch.matches` (whole words and whole numbers;
+  case, separators and leading zeros do not count) of the folder's own name, then of up to `DEPTH` (3) folders
+  above it, nearest first, because a card copied whole keeps its photos in `MAS_CAM07\DCIM\100BMCIM`. The site
+  folder's `_camera` and `folder_camera` share the walk (`batch._named`); `_camera` still stops at the site folder.
+- **Exactly one camera, or none.** The nearest name that fits decides. When it fits two cameras the answer is none,
+  not a guess, and no folder further up is asked.
+- **Lettered folders are deployments; the most specific name wins.** FlagLabel has 167 cameras and none is lettered
+  (`data/flaglabel_supabase`, 2026-10-12). The field folders MAS_CAM10A/B/C, MAS_CAM12A/D/E and TON_CAM08A/B are
+  deployments of MAS_CAM10, MAS_CAM12 and TON_CAM08; research folder 62 mapped them the same way. `matches` already
+  found MAS_CAM10 in "MAS_CAM10B" (whole words), and still does. New in `matches`: a camera found only inside a
+  longer camera's name at the same place does not count, so were MAS_CAM10B ever a camera of its own, "MAS_CAM10B"
+  would be MAS_CAM10B alone instead of fitting two. Names in different places ("MAS_CAM10 and MAS_CAM10B") still
+  fit both. A test against the old matcher proves it: a name that fitted none or one camera fits the same now, so
+  site rows change only where they asked "Choose the camera".
+- **The engine decides, the window reads.** `GET /api/site`, which the window already asks for every folder, answers
+  a single folder with `{status: "single", camera}` (null for none). It is worked out on each call, not kept with
+  the scan, so a Sync that adds the camera counts at once. An older bundle ignores the field.
+- **No camera, no Measure.** With no hand pick and no named camera (or a named one with no usable flag photo) the
+  menu says "Pick a camera" and Measure all, the row buttons and the panel's Measure buttons are disabled
+  (`busy`). Clear this measurement stays enabled (`Measure` prop `clearBusy`): clearing needs no camera. The photos
+  are still listed. Never the first camera in the list.
+- **A hand pick lasts until the folder changes.** A new folder forgets it and the name picks again; the flag-photo
+  menu follows the camera as before. Nothing about the camera is saved to disk (session.json holds the sign-in only).
+- Side effects: with no camera the Results screen opens on every camera (it opened on `usable[0]` before a folder
+  was chosen); the "Measure this photo" button of an unmeasured photo is now disabled while busy, like its
+  neighbours. Site folders are unchanged except where a name fitted two cameras (above).

@@ -96,7 +96,11 @@ export default function App() {
   const [preset, setPreset] = useState<{ n: number; to: TablePreset }>({ n: 0, to: {} })
 
   const usable = cameras.filter((c) => c.flags.some((f) => f.ok))
-  const cam = usable.find((c) => c.site === picked.site) ?? usable[0]
+  const site = siteScan && siteScan.of === picked.folder ? siteScan.data : null
+  // The camera picked by hand, until the folder changes; else the one the folder is named after. Never just the
+  // first in the list: a wrong camera gives a wrong distance with no warning. No camera: the menu asks for one.
+  const named = site !== null && site.status === 'single' ? (site.camera ?? '') : ''
+  const cam = usable.find((c) => c.site === (picked.site || named))
   const flags = cam?.flags ?? []
   // What the window actually acts on: what was picked, corrected to something that exists as the lists
   // load. Derived rather than stored — storing it would mean writing state back from an effect on every sync.
@@ -109,7 +113,6 @@ export default function App() {
     // always the engine's default (the MegaDetector box): the method picker was removed (user decision 2026-10-11)
     method: methods.default,
   }
-  const site = siteScan && siteScan.of === scope.folder ? siteScan.data : null
   const siteMode = site !== null && site.status !== 'single'
   // a site folder's listing is every camera folder in it, each photo against its own flag photo
   const listingMode = site === null ? null : site.status === 'single' ? 'single' : site.status === 'ready' ? 'site' : null
@@ -142,9 +145,13 @@ export default function App() {
   }, [loading, refresh])
 
   // listing a folder is a full scan of it plus a read of every unmeasured file, so a typed path waits
-  // until the typing stops; Browse… arrives whole and settles on the next tick anyway
+  // until the typing stops; Browse… arrives whole and settles on the next tick anyway. A new folder forgets
+  // the camera picked by hand: the new folder's name picks again.
   useEffect(() => {
-    const id = setTimeout(() => setPicked((s) => ({ ...s, folder: typedPath.trim() })), 400)
+    const id = setTimeout(() => {
+      const to = typedPath.trim()
+      setPicked((s) => (s.folder === to ? s : { ...s, folder: to, site: '' }))
+    }, 400)
     return () => clearTimeout(id)
   }, [typedPath])
 
@@ -177,7 +184,8 @@ export default function App() {
   }, [path, method, stale])
 
   useEffect(() => {
-    if (!path || !method || !listingMode || (listingMode === 'single' && (!camera || !flag))) return
+    // with no camera yet the photos are still listed, so the folder shows; measuring waits for a camera
+    if (!path || !method || !listingMode) return
     let live = true // a slower answer for a folder the user has already left must not land
     const key = listingMode === 'site' ? [path, '', '', method] : [path, camera, flag, method]
     const q = new URLSearchParams(listingMode === 'site' ? { path, method } : { path, site: camera, flag, method })
@@ -418,7 +426,9 @@ export default function App() {
     )
   }
 
-  const shownError = path && method && (siteMode || (camera && flag)) ? folderError : null
+  const shownError = path && method && (siteMode || listingMode === 'single') ? folderError : null
+  // one camera's folder measures nothing until a camera is chosen
+  const noCamera = !siteMode && !scope.site
   const inf = status.inference
   const measured = folder ? folder.rows.filter((r) => r.measured).length : 0
   const ready = inf.status === 'ready'
@@ -488,6 +498,7 @@ export default function App() {
                         disabled={cameras.length === 0}>
                   {cameras.length === 0 && <option value="">Sync first</option>}
                   {cameras.length > 0 && usable.length === 0 && <option value="">No camera labelled yet</option>}
+                  {usable.length > 0 && !cam && <option value="" disabled>Pick a camera</option>}
                   {usable.map((c) => <option key={c.site} value={c.site}>{c.site}</option>)}
                   {/* Listed, not hidden: someone looking for a camera must learn why it cannot be picked. Its flag
                       photo is labelled in FlagLabel, never here, because this app only reads the cloud. */}
@@ -564,7 +575,7 @@ export default function App() {
                 Stop
               </button>
             ) : (
-              <button className="btn btn-amber" onClick={() => measure([])} disabled={!ready || !folder || folder.total === 0}>
+              <button className="btn btn-amber" onClick={() => measure([])} disabled={!ready || noCamera || !folder || folder.total === 0}>
                 <Icon name="measure" size={14} width={2.1} />
                 Measure all{folder ? ` ${folder.total}` : ''}
               </button>
@@ -590,7 +601,7 @@ export default function App() {
                    onTable={openTable} />
           )}
           {section === 'measure' && !siteMode && (
-            <Measure scope={scope} folder={folder} methods={methods} busy={running || !ready} running={running}
+            <Measure scope={scope} folder={folder} methods={methods} busy={running || !ready || noCamera} clearBusy={running || !ready} running={running}
               onClear={clearResults}
                      onMeasure={measure} focus={focus} error={shownError} onChooseFolder={chooseFolder} />
           )}
@@ -615,7 +626,7 @@ export default function App() {
           )}
           {section === 'table' && folder !== null && (
             <TableView key={preset.n} initial={preset.to} folder={folder} methods={methods}
-                       busy={running || !ready} error={shownError}
+                       busy={running || !ready || noCamera} error={shownError}
                        onMeasure={siteMode ? (paths) => void measureSite(paths.length ? paths : undefined) : measure}
                        onOpen={siteMode ? undefined : (p) => { setFocus(p); setSection('measure') }} />
           )}
