@@ -153,7 +153,9 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   through the reference ModelB gives D_R (2–18 m, else 0), 7-channel input
   [target RGB, reference RGB, D_R/20] at 518² into the unified DA-V2 net,
   [q05, q50, q95] upsampled to the photo and read as a 5×5 nanmedian at each
-  box's bottom-centre. Raw band, no conformal widening (paper R4 rollfix).
+  box's bottom-centre. Raw band, no conformal widening (paper R4 rollfix). (2026-10-13, ticket 37: a weights
+  manifest may now carry a range factor k, which multiplies each log arm of the band around q50; with none, as
+  today, the band stays raw.)
 - Reference = the flag photo of the matched calibration window, cached at
   sync under `~/.camtrap-measure/refs/<site>/<image>`; a green calibration
   whose file is missing is refetched on the next sync, and a photo whose flag
@@ -2167,3 +2169,39 @@ separate step that needs the user's OK; this change only makes the app ready for
 3. Merge this branch. 4. Upload new weights (a new manifest version). Merged before step 2, the harm is: a bundle
 machine with no token shows a warning at every start but keeps measuring on its copy; a fresh non-bundle install with
 no token gets WeightsMissing and cannot measure at all.
+
+## Range factor k: the weights manifest widens the 90% range (2026-10-13, ticket 37)
+
+**Decision.** A weights manifest may carry a *range factor k* (`"range_k"`, a float): the one number by which the app
+widens every animal's 90% range around its distance. Each log arm is multiplied by k: lo = q50 · (q05/q50)^k,
+hi = q50 · (q95/q50)^k; q50, the distance, never moves. With no key, k = 1.0 and the range is the raw one, bit for bit,
+so today's weights (2026.08.20c) and every stored answer are unchanged. This amends "Real distance" (ticket 07) on one
+point: the band is raw only while the manifest says so. ADR 0004.
+
+Why: the retrained model (Run 2) gives ranges that are too narrow. On held-out tape (research folder 73: 644 contacts,
+33 cameras) the app net's range holds the truth 93.2% of the time (median width 4.76 m), but Run 2's held-out twin,
+Run 1, only 87.4% and 86.0% (two seeds); Run 2 is narrower still. k = 1.308, the leave-one-camera-out median, brings
+Run 1 to 0.901 (the in-sample global k is 1.304). Run 2 needs about 1.6 (one camera; to be firmed fleet-wide before release). The right k belongs to one
+set of weights, so it travels in their manifest, not in the code.
+
+- **Where it applies.** `inference.Real` reads k once from the loaded manifest (`distance.range_factor`) and widens
+  each read-out (the 5×5 nanmedian at the box's ground contact, the very values the research fitted k on) with
+  `distance.widen` before it becomes a Detection. Every range the app shows comes from the stored q05/q95 (the window,
+  the CSV, and the density's per-deer spread, reachable only by direct API call since the Density tab went in
+  aa52dd7), so all are widened at that single place. `Distance.read` and
+  `Distance.quantiles` stay raw.
+- **Edge cases.** A None or non-finite value passes through; with q50 None, non-finite or ≤ 0 nothing changes; an arm
+  ≤ 0 is not scaled; an inverted arm (q05 > q50 or q95 < q50) comes back as q50, so lo ≤ q50 ≤ hi.
+- **Cap.** Only a finite number with 0 < k ≤ 5 (`distance.RANGE_K_MAX`; a copy in `upload_weights.py`) is used. A JSON
+  integer too large for a float (10**400) is unusable, not a crash; `widen` never raises OverflowError for a usable k.
+- **Staff never see k** (user decision 2026-10-13). An unusable value falls back to k = 1.0; the models still load and
+  runs go on. Its problem goes to the research log (`"range_k_problem"` on each measured-photo line, only then) and to
+  the launcher log (`main.say`), never to the window, the status line or `/api/status`. Test mode and the fake always
+  use k = 1.0.
+- **No stale rule of its own.** k lives in the manifest, so a new k ships as a new manifest version, which already
+  turns every older answer "Out of date" (ticket 36). `measure.current_answer` is unchanged. `upload_weights.py
+  --force` refuses a range_k (missing = 1.0) that differs from the repo's under the same version.
+- **Research log.** Each measured-photo line gains `"range_k"` (the k used) next to `weights_version`, and
+  `"range_k_problem"` when the manifest's value was unusable. Nothing new in the window or the CSV.
+- **Upload.** `scripts/upload_weights.py --range-k K` (or `RANGE_K`) writes the key into the staged manifest only when
+  given. A bad K stops `stage` before the multi-GB copy.

@@ -263,6 +263,39 @@ def test_small_gpu_warning_is_shown(cloud, hub, models_installed, start, monkeyp
     assert s["status"] == "ready" and "6.0 GB" in s["warning"]
 
 
+def test_an_unusable_range_k_never_reaches_the_window_and_the_run_goes_on(cloud, hub, models_installed, start,
+                                                                          monkeypatch, tmp_path):
+    """Ticket 37: Real reads range_k once from its manifest (distance.range_factor). Staff never see k (user decision
+    2026-10-13): an unusable value is not on the status line nor anywhere in /api/status. It goes to the launcher log
+    here and to the research log on each measured photo (inference.range_problem: test_lineup). The models still load
+    and k falls back to 1.0."""
+    log = tmp_path / "launcher.log"
+    monkeypatch.setenv("CAMTRAP_LAUNCHER_LOG", str(log))
+
+    def bad(d):
+        r = StubReal(d)
+        r.manifest = {"version": "x", "range_k": "wide"}
+        r.range_k, r.range_problem = distance.range_factor(r.manifest)
+        return r
+    monkeypatch.setattr(inference, "Real", bad)
+    c, s = start()
+    assert s["status"] == "ready" and s["backend"] == "real"
+    shown = json.dumps(c.get("/api/status").json())
+    assert "\"range_k" not in shown and "not widened" not in shown and s["warning"] is None
+    assert "range_k" in log.read_text() and "not widened" in log.read_text()
+    assert inference.backend.range_k == inference.range_k() == 1.0
+    assert "not widened" in inference.range_problem()
+
+
+def test_the_fake_and_test_mode_never_widen_a_range(monkeypatch):
+    assert inference.backend is inference.fake and inference.range_k() == 1.0
+    stand_in = StubReal(Path("."))  # no manifest of its own: Test mode
+    stand_in.range_k = 1.6
+    monkeypatch.setattr(inference, "backend", stand_in)
+    stand_in.range_problem = "a problem"
+    assert inference.test_mode() and inference.range_k() == 1.0 and inference.range_problem() is None
+
+
 def test_model_load_failure_is_reported_not_fatal(cloud, hub, models_installed, start, monkeypatch):
     def broken(d):
         raise RuntimeError("CUDA driver version is insufficient")

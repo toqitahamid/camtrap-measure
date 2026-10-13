@@ -196,7 +196,8 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, ch
     And the models: an answer read by another weights manifest version (`weights`, inference.weights_version()) is
     measured again, so a new distance model on the hub turns every older answer "Out of date". An answer stored before
     2026-10-12 (NULL), or `weights` left out, reads as LEGACY_WEIGHTS_VERSION. inference.NO_WEIGHTS_VERSION (no
-    manifest anywhere; also the stamp of every Test mode answer) matches no real run's version."""
+    manifest anywhere; also the stamp of every Test mode answer) matches no real run's version. The range factor k
+    (ticket 37) needs no check of its own: it lives in the manifest, so a new k ships as a new version."""
     return bool(known and known["method"] == method and known.get("fidelity") == fidelity
                 and known["site"] == cal["site"] and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at")
                 and known.get("fit_version") == cal.get("fit_version")
@@ -280,14 +281,18 @@ def _log_unreadable(run: dict, p: Path, camera: str, reason: str) -> None:
     lineup.log_research({"photo": str(p), "camera": camera, "status": "unreadable", "reasons": [reason]})
 
 
-def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment: dict | None) -> None:
+def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment: dict | None,
+                  range_k: float = 1.0, range_k_problem: str | None = None) -> None:
     """One researcher-log line for a photo just measured and stored, day or night (user decision 2026-10-11: one log,
     and the reasons go there only). `reasons` are report.reasons of each stored box row, as the store holds it
     (photo fields under box fields), in order and without repeats; [] when there are none. A night photo also carries
     its Night-rule detail under `night`; a day photo lined up by the day rule (ticket 35: its own line-up was weak)
     carries the day-rule detail under `day_borrow` (path, side, anchor, own points, A and B with their tries, the
     move check, the checks by eye, and why there is no answer). A day photo lined up directly carries neither.
-    Every line names the weights manifest version that read it (`weights_version`)."""
+    Every line names the weights manifest version that read it (`weights_version`) and the range factor k its 90%
+    ranges were widened by (`range_k`, inference.range_k(); 1.0 = raw, ticket 37). When the manifest's range_k was
+    unusable, `range_k_problem` says why (inference.range_problem()); the key is there only then. This log is the one
+    place a k problem is recorded: staff never see k (user decision 2026-10-13)."""
     from .report import reasons  # report imports this module
 
     try:
@@ -300,7 +305,9 @@ def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment
         line = {"photo": str(p), "camera": camera, "status": "measured",
                 "day_night": None if night is None else "night" if night else "day",
                 "distance": any(d["distance_m"] is not None for d in dets), "animals": len(dets), "reasons": why,
-                "weights_version": photo.get("weights_version")}
+                "weights_version": photo.get("weights_version"), "range_k": range_k}
+        if range_k_problem:
+            line["range_k_problem"] = range_k_problem
         if alignment and alignment.get("night"):  # lined up by the Night rule
             line["night"] = lineup.rule_detail(alignment)
         elif alignment and alignment.get("source") == lineup.DAY_BORROW:  # lined up by the day rule
@@ -316,6 +323,8 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
     from .report import DEER, UNREADABLE  # report imports this module
 
     cal, method, fidelity, weights = job["cal"], run["method"], run["fidelity"], run["weights"]
+    # what the backend widens this job's ranges by, and why not when its range_k was unusable: researcher log only
+    range_k, range_k_problem = inference.range_k(), inference.range_problem()
 
     def count(**more) -> None:
         for k, v in more.items():
@@ -364,7 +373,7 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
         photo = {**rows[str(res.path)], **lined_up(res.alignment), "match_score": res.match_score}
         dets = [asdict(d) for d in res.detections]
         store.record(photo, method, dets)
-        _log_measured(res.path, cal["site"], photo, dets, res.alignment)  # the researcher log (Q12): every photo
+        _log_measured(res.path, cal["site"], photo, dets, res.alignment, range_k, range_k_problem)  # the researcher log (Q12): every photo
         count(detections=len(dets))
         if cam:
             cam["deer"] += sum(1 for d in dets if d["species"] in DEER)

@@ -24,7 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageFile
 
-from camtrap_measure import api, batch, calibration, inference, lineup, measure, report, store
+from camtrap_measure import api, batch, calibration, distance, inference, lineup, measure, report, store
 
 from tests.conftest import flag_photo_data
 
@@ -982,7 +982,7 @@ RUN_BOXES = {"IMG_0004.JPG": []}
 
 def fake_models(**kw) -> inference.FakeModels:
     return inference.FakeModels(boxes={**RUN_BOXES, **kw.get("boxes", {})}, links=kw.get("links"),
-                                weights=kw.get("weights", "test"))
+                                weights=kw.get("weights", "test"), range_k=kw.get("range_k"))
 
 
 def links_of(models: inference.FakeModels) -> list[tuple]:
@@ -1061,6 +1061,62 @@ def test_the_run_copies_a_day_line_up_for_night_photos_and_never_lines_them_up_w
     assert not any(r["stale"] for r in rows.values())
     got = {r["photo"]: r for r in export_rows(synced)}
     assert "lineup" not in got["IMG_0002.JPG"] and "check" not in got["IMG_0002.JPG"]  # the check is in the log only
+
+
+def _log_lines() -> list[dict]:
+    return [json.loads(x) for x in (store.DATA_DIR / "logs" / lineup.LOG_NAME).read_text().splitlines()]
+
+
+def test_the_manifests_range_factor_widens_every_stored_exported_and_logged_range(synced, tmp_path, monkeypatch):
+    """Ticket 37: a manifest without range_k gives the raw range, exactly as before. A manifest with range_k = k (a new
+    weights version) widens each read-out's range around q50 (distance.widen) before it is stored, exported and
+    logged; q50 does not move. Each researcher-log line names the k it used."""
+    monkeypatch.setattr(inference, "backend", fake_models())
+    d = camera(tmp_path, RUN_CAM, SITE)
+    run(synced, d)
+    measured = [n for n in RUN_CAM if answers(d / n)["detections"]]
+    raw = {n: answers(d / n)["detections"][0] for n in measured}
+    assert len(raw) == 4 and all(x["distance_m"] is not None for x in raw.values())
+    for x in raw.values():  # FakeModels._read's own numbers, untouched
+        assert x["q05_m"] == round(x["distance_m"] * 0.8, 4) and x["q95_m"] == round(x["distance_m"] * 1.25, 4)
+    assert [r["range_k"] for r in _log_lines()] == [1.0] * len(RUN_CAM)
+
+    monkeypatch.setattr(inference, "backend", fake_models(weights="test-k", range_k=1.6))
+    assert inference.range_k() == 1.6
+    assert run(synced, d)["skipped"] == 0  # a new weights version: every answer is measured again
+    got = {n: answers(d / n)["detections"][0] for n in measured}
+    for n, x in raw.items():
+        lo, mid, hi = distance.widen(x["q05_m"], x["distance_m"], x["q95_m"], 1.6)
+        assert got[n]["distance_m"] == mid == x["distance_m"]
+        assert (got[n]["q05_m"], got[n]["q95_m"]) == pytest.approx((lo, hi))
+        assert got[n]["q05_m"] < x["q05_m"] and got[n]["q95_m"] > x["q95_m"]
+    rows = {r["photo"]: r for r in export_rows(synced)}
+    for n in measured:
+        assert (rows[n]["distance_m"], rows[n]["q05_m"], rows[n]["q95_m"]) == \
+            tuple(f"{got[n][k]:.2f}" for k in ("distance_m", "q05_m", "q95_m"))
+        assert "range_k" not in rows[n]  # nothing new in the CSV
+    assert [r["range_k"] for r in _log_lines()] == [1.0] * len(RUN_CAM) + [1.6] * len(RUN_CAM)
+    assert not any("range_k_problem" in r for r in _log_lines())  # only when the manifest's value was unusable
+    assert "range_k" not in synced.get("/api/run").json()  # nothing new in the window
+
+
+def test_an_unusable_range_k_measures_with_the_raw_range(synced, tmp_path, monkeypatch):
+    """A manifest whose range_k is not a finite number in (0, 5] does not stop a run: k falls back to 1.0, the ranges
+    are the raw ones, and each research-log line says why under range_k_problem. Nothing about k reaches the window
+    (user decision 2026-10-13; the launcher log: test_inference)."""
+    models = fake_models(range_k=-1.0)
+    assert models.range_k == 1.0 and "range_k" in models.range_problem
+    monkeypatch.setattr(inference, "backend", models)
+    d = camera(tmp_path, RUN_CAM, SITE)
+    run(synced, d)
+    for n in RUN_CAM:
+        for x in answers(d / n)["detections"]:
+            assert x["q05_m"] == round(x["distance_m"] * 0.8, 4) and x["q95_m"] == round(x["distance_m"] * 1.25, 4)
+    lines = _log_lines()
+    assert {r["range_k"] for r in lines} == {1.0}
+    assert {r["range_k_problem"] for r in lines} == {models.range_problem} and "not widened" in models.range_problem
+    shown = json.dumps(synced.get("/api/run").json()) + json.dumps(synced.get("/api/status").json())
+    assert "\"range_k" not in shown and "not widened" not in shown  # no k key and no k problem in the window
 
 
 def test_the_researcher_log_records_each_measured_photo_in_the_apps_logs_folder(synced, tmp_path, monkeypatch):

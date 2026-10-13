@@ -275,9 +275,88 @@ def test_an_upload_under_a_version_the_repo_already_holds_is_refused(tmp_path, m
             return []
 
     monkeypatch.setattr(huggingface_hub, "HfApi", Api)
-    monkeypatch.setattr(up, "remote_version", lambda: up.VERSION)
+    monkeypatch.setattr(up, "remote_manifest", lambda: {"version": up.VERSION})
     with pytest.raises(SystemExit, match="Bump VERSION"):
         up.upload(tmp_path)
     assert pushed == []
     up.upload(tmp_path, force=True)
+    assert len(pushed) == 1
+
+
+def _upload_script():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("upload_weights", ROOT / "scripts" / "upload_weights.py")
+    up = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(up)
+    return up
+
+
+def test_staging_writes_range_k_into_the_manifest_only_when_given():
+    """Ticket 37: `--range-k` puts the range factor into the staged manifest.json; left out, the manifest has no range_k
+    key (the app shows the raw range). VERSION and the checkpoint are not touched. k is capped at RANGE_K_MAX, the same
+    cap as the app's. Nothing is staged or uploaded here."""
+    from camtrap_measure import distance
+
+    up = _upload_script()
+    assert up.RANGE_K is None and "range_k" not in up.manifest()
+    m = up.manifest(1.6)
+    assert m["range_k"] == 1.6 and m["version"] == up.VERSION == "2026.08.20c"
+    assert {k: v for k, v in m.items() if k != "range_k"} == up.manifest()
+    assert up.RANGE_K_MAX == distance.RANGE_K_MAX == 5.0
+    assert up.manifest(5.0)["range_k"] == 5.0 and up.manifest(5)["range_k"] == 5.0
+    for bad in (0.0, -1.0, float("nan"), float("inf"), 5.01, 6, 10**400, True):
+        with pytest.raises(SystemExit, match="--range-k"):
+            up.manifest(bad)
+
+
+def test_a_bad_range_k_stops_staging_before_anything_is_copied(tmp_path, monkeypatch):
+    """The multi-GB copy and SAM3 download come after the --range-k check, so a bad value costs nothing."""
+    import shutil
+
+    up = _upload_script()
+    copied = []
+    monkeypatch.setattr(shutil, "copy2", lambda *a, **kw: copied.append(a))
+    with pytest.raises(SystemExit, match="--range-k"):
+        up.stage(tmp_path / "out", range_k=-1.0)
+    assert copied == [] and not (tmp_path / "out").exists()
+
+
+def test_force_never_uploads_another_range_factor_under_the_same_version(tmp_path, monkeypatch):
+    """--force may re-upload files under the repo's VERSION, but not a changed range_k: that changes every stored range
+    while old answers would still look current. A manifest without range_k counts as k = 1.0. Nothing reaches the hub."""
+    import huggingface_hub
+
+    up = _upload_script()
+    pushed = []
+
+    class Api:
+        def create_repo(self, *a, **kw):
+            pass
+
+        def upload_folder(self, **kw):
+            pushed.append(kw)
+
+        def list_repo_files(self, repo):
+            return []
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+    staged = tmp_path / "manifest.json"
+    for local, remote, refused in [({}, {}, False), ({"range_k": 1.6}, {}, True), ({}, {"range_k": 1.6}, True),
+                                   ({"range_k": 1.6}, {"range_k": 1.3}, True), ({"range_k": 1.6}, {"range_k": 1.6}, False),
+                                   ({"range_k": 1.0}, {}, False)]:
+        staged.write_text(json.dumps({"version": up.VERSION, **local}))
+        monkeypatch.setattr(up, "remote_manifest", lambda remote=remote: {"version": up.VERSION, **remote})
+        pushed.clear()
+        if refused:
+            with pytest.raises(SystemExit, match="A range factor change needs a new VERSION"):
+                up.upload(tmp_path, force=True)
+            assert pushed == []
+        else:
+            up.upload(tmp_path, force=True)
+            assert len(pushed) == 1
+    staged.write_text(json.dumps({"version": "2099.01.01", "range_k": 1.6}))  # a new version: any k may go up
+    monkeypatch.setattr(up, "remote_manifest", lambda: {"version": up.VERSION})
+    pushed.clear()
+    up.upload(tmp_path)
     assert len(pushed) == 1

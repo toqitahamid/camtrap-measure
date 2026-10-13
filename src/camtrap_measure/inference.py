@@ -188,6 +188,8 @@ class Real:
         self.gpu = self._gpu_name()
         self.weights_dir = weights_dir
         self.manifest = json.loads((weights_dir / "manifest.json").read_text())
+        # the range factor k travels with the weights (ticket 37): read once here, applied to every read-out in __call__
+        self.range_k, self.range_problem = distance.range_factor(self.manifest)
         self.precision = str(distance.autocast_dtype(torch, self.device, self.fidelity)).replace("torch.", "")
         self.warning = self._card_warning()
         self.batch = None if self.device == "cuda" else 4  # probed when SpeciesNet arrives, not before
@@ -323,7 +325,8 @@ class Real:
         return self.measuring().align(crops[keys[1]], crops[keys[0]])
 
     def _read(self, dist, im, calibration: dict, Hm, points: list[tuple[float, float]]) -> list[tuple | None]:
-        """[q05, q50, q95] at pixel points, read through the line-up Hm into the flag photo of `calibration`."""
+        """[q05, q50, q95] at pixel points, read through the line-up Hm into the flag photo of `calibration`. Raw:
+        __call__ widens each by the range factor k before it becomes a Detection."""
         return dist.quantiles(dist.predict(im, calibration, Hm), points)
 
     def link_setting(self) -> str:
@@ -388,7 +391,9 @@ class Real:
             dets = []
             for d, name, q in zip(animals, names, quantiles):
                 x, y, w, h = d["bbox"]
-                q05, q50, q95 = q if q else (None, None, None)
+                # the one place a range is made: widened by this manifest's range factor k (1.0 = raw) before it is
+                # stored, shown, exported or logged (ticket 37)
+                q05, q50, q95 = distance.widen(*q, self.range_k) if q else (None, None, None)
                 dets.append(Detection(x, y, x + w, y + h, name, float(d["conf"]), q50, q05, q95))
             yield PhotoResult(dets, line.score, p, line.public())
             tick("measuring distances", i, len(found))
@@ -467,15 +472,16 @@ class FakeModels(Real):
     homography that shifts by (dx, dy) px (default 8,000 points and a sub-pixel shift). A link decodes both photos
     first, as Real's does, so a broken file fails where it would fail there. The distance read is a plain function
     of where the line-up puts the point, so two line-ups give two numbers. `weights` is the manifest version the
-    links are kept under. `calls` records every model call, and asking a model that is not loaded fails, as running
-    it off the card would."""
+    links are kept under; `range_k`, when given, is the manifest's range factor (ticket 37). `calls` records every
+    model call, and asking a model that is not loaded fails, as running it off the card would."""
 
     DEFAULT_BOX = ("1", 0.40, 0.30, 0.10, 0.20)
 
     def __init__(self, boxes: dict | None = None, links: dict | None = None, fidelity_: str = distance.RESEARCH,
-                 weights: str = "test"):
+                 weights: str = "test", range_k=None):
         self.np, self.torch, self.fidelity, self.device = np, None, fidelity_, "cpu"  # cpu: link_setting asks no torch
-        self.manifest = {"version": weights}
+        self.manifest = {"version": weights, **({} if range_k is None else {distance.RANGE_K: range_k})}
+        self.range_k, self.range_problem = distance.range_factor(self.manifest)
         self.gpu, self.precision, self.warning, self.batch = "test models", None, None, None
         self._detect = self._dist = self.sam3 = None
         self.box_table, self.link_table = boxes or {}, links or {}
@@ -562,6 +568,19 @@ def weights_version() -> str:
         return NO_WEIGHTS_VERSION
 
 
+def range_k() -> float:
+    """The range factor k the running models widen every 90% range by (distance.widen, ticket 37): the loaded
+    manifest's `range_k`, or 1.0 (raw) when it has none or an unusable one. 1.0 in Test mode and on the fake, whose
+    made-up ranges are never widened. What the researcher log records next to weights_version."""
+    return 1.0 if test_mode() else float(getattr(backend, "range_k", 1.0))
+
+
+def range_problem() -> str | None:
+    """Why the loaded manifest's `range_k` was not used (distance.range_factor), or None. For the research log only:
+    nothing about k reaches the window or the status payload (user decision 2026-10-13: staff never see k)."""
+    return None if test_mode() else getattr(backend, "range_problem", None)
+
+
 def models_installed() -> bool:
     """Is the [inference] extra (torch, MegaDetector, SpeciesNet) importable?"""
     try:
@@ -595,6 +614,11 @@ def warmup() -> None:
         if w.get("notice"):
             warnings.append(w["notice"])
         real = Real(w["dir"])  # constructing it loads nothing: the first run pays for the weights
+        if getattr(real, "range_problem", None):  # an unusable range_k: raw ranges. Never in the window (staff never
+            # see k, user decision 2026-10-13): the launcher log here, and the research log on each measured photo
+            from .main import say  # stdlib-only module: no import cycle
+
+            say(f"range factor: {real.range_problem}")
     except Exception as e:
         state["download"] = None
         state.update(status="error", error=str(e) if isinstance(e, weights.WeightsMissing)

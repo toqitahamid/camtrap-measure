@@ -9,13 +9,15 @@ Ported from ../distance_estimation@6a6eed5 — change the math there first:
                                              the numbers and lets the export gate exclude them — CONTEXT "Trust / review UX")
   experiments/refnet/10_cv4e_pipeline/model.py                        QuantileHead + load_unified (verbatim)
   experiments/refnet/29_testsplit_revision/eval_intervals_rollfix.py  7-ch input, bf16, 5×5 nanmedian readout
-The paper ships the raw [q05, q95] band (E = 0; docs/claims.md, R4 rollfix refresh).
+The paper ships the raw [q05, q95] band (E = 0; docs/claims.md, R4 rollfix refresh). A weights manifest may carry a
+range factor k (`range_k`, ticket 37) that widens the band around q50 (`widen`); without one the band stays raw.
 
 The numpy half (distance_map, read_at, crop_banner) has no torch dependency and is unit-tested;
 `Distance` needs the [inference] extra and the weights manifest entries unified / roma / dinov2.
 """
 
 import json
+import math
 import threading
 from pathlib import Path
 
@@ -74,6 +76,77 @@ def read_at(pred: np.ndarray, u: float, v: float) -> float | None:
     iu, iv = int(round(u)), int(round(v))
     patch = pred[max(0, iv - HALF):iv + HALF + 1, max(0, iu - HALF):iu + HALF + 1]
     return float(np.nanmedian(patch)) if patch.size and np.isfinite(patch).any() else None
+
+
+RANGE_K = "range_k"  # the weights manifest key that carries the range factor k (ticket 37)
+RANGE_K_MAX = 5.0  # the largest usable k; scripts/upload_weights.py keeps a copy (RANGE_K_MAX there), keep them equal
+
+
+def usable_range_k(k) -> bool:
+    """Is k a usable range factor: a real number (not a bool), finite, above 0 and at most RANGE_K_MAX? A JSON integer
+    too large for a float (10**400) is not: math.isfinite raises OverflowError on it, which counts as no."""
+    if isinstance(k, bool) or not isinstance(k, (int, float)):
+        return False
+    try:
+        return math.isfinite(k) and 0 < k <= RANGE_K_MAX
+    except OverflowError:
+        return False
+
+
+def range_factor(manifest: dict) -> tuple[float, str | None]:
+    """The range factor k of a weights manifest, and the problem when the manifest's value is unusable.
+
+    No `range_k` key gives (1.0, None): the raw range, as every manifest before ticket 37. A value that is not a finite
+    number above 0 and at most RANGE_K_MAX (a string, true, 0, -1, NaN, infinity, 6, 10**400) gives (1.0, why): the
+    run goes on with the raw range. The problem goes to the research log and the backend's stderr, never to the
+    window: staff never see k (user decision 2026-10-13)."""
+    if RANGE_K not in manifest:
+        return 1.0, None
+    k = manifest[RANGE_K]
+    if not usable_range_k(k):
+        try:
+            shown = repr(k)
+        except ValueError:  # an integer past Python's digit limit for str()
+            shown = "a very large integer"
+        if len(shown) > 40:
+            shown = shown[:37] + "..."
+        return 1.0, (f"The models' range_k setting ({shown}) is not a number above 0 and at most {RANGE_K_MAX:g}, "
+                     "so the 90% ranges are not widened.")
+    return float(k), None
+
+
+def widen(q05, q50, q95, k: float) -> tuple:
+    """The 90% range of one read-out, widened by the range factor k around its median: each log arm is multiplied by k.
+
+        lo = q50 · (q05 / q50)^k,   hi = q50 · (q95 / q50)^k,   q50 unchanged.
+
+    k = 1.0 returns the three values exactly as given (no arithmetic, so current answers do not move by a rounding).
+    k must pass usable_range_k (0 < k ≤ RANGE_K_MAX, not a bool), else ValueError. An arm too large for a float comes
+    back as infinity, never as an OverflowError.
+    The research fitted k on these very values: per-point (q05, q50, q95) after read_at's 5×5 nanmedian (research
+    folder 73, widen_loco.py). Edge cases: a None or non-finite value is passed through; with q50 None, non-finite or
+    ≤ 0 nothing is changed (there is no log arm); an arm at or below 0 is not scaled. The order lo ≤ q50 ≤ hi is kept:
+    an inverted arm (q05 > q50 or q95 < q50) comes back as q50."""
+    if isinstance(k, bool):  # before the k = 1.0 shortcut: True == 1.0
+        raise ValueError(f"range factor k must be a number, not {k!r}")
+    if k == 1.0:
+        return q05, q50, q95
+    if not usable_range_k(k):
+        raise ValueError(f"range factor k must be a finite number above 0 and at most {RANGE_K_MAX:g}")
+    if q50 is None or not math.isfinite(q50) or q50 <= 0:
+        return q05, q50, q95
+
+    def arm(q):
+        if q <= 0:
+            return q
+        try:
+            return q50 * (q / q50) ** k
+        except OverflowError:  # (q / q50)^k past the largest float: only an arm above q50 can get there
+            return math.inf
+
+    lo = q05 if q05 is None or not math.isfinite(q05) else min(arm(q05), q50)
+    hi = q95 if q95 is None or not math.isfinite(q95) else max(arm(q95), q50)
+    return lo, q50, hi
 
 
 KDE_CHUNK = 4096  # rows of the density matrix computed at once; the whole matrix is 3.2 GB
@@ -282,7 +355,8 @@ class Distance:
 
     def read(self, im: Image.Image, calibration: dict, contacts: list[tuple[float, float]]) -> tuple[list[tuple | None], int]:
         """contacts = (x, y) fractions of the image. → ([(q05, q50, q95) | None per contact], inliers).
-        A photo that does not align to its flag photo gets no numbers at all."""
+        A photo that does not align to its flag photo gets no numbers at all. The raw range: the app reads through
+        inference.Real, which widens it by the manifest's range factor (`widen`); nothing in the app calls this."""
         ref_crop, _, _ = self.reference(calibration)
         Hm, inliers = self.align(ref_crop, crop_banner(im))
         if Hm is None:
@@ -308,7 +382,8 @@ class Distance:
 
     @staticmethod
     def quantiles(pred: np.ndarray, points: list[tuple[float, float]]) -> list[tuple | None]:
-        """(q05, q50, q95) at each pixel (u, v), 5×5 nanmedian; None where the window holds nothing."""
+        """(q05, q50, q95) at each pixel (u, v), 5×5 nanmedian; None where the window holds nothing. Raw: the range
+        factor is applied by the caller (inference.Real.__call__, `widen`)."""
         out = []
         for u, v in points:
             qs = [read_at(pred[i], u, v) for i in range(3)]
