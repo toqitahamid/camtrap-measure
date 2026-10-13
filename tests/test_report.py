@@ -190,6 +190,98 @@ def test_folder_calls_an_answer_from_before_a_relabel_stale(cloud, synced, tmp_p
     assert [x["stale"] for x in listing(synced, d)["rows"]] == [False]
 
 
+class Versioned:
+    """The fake's numbers, under a weights manifest version (a real backend's manifest)."""
+
+    def __init__(self, version):
+        self.manifest, self.seen = {"version": version}, []
+
+    def __call__(self, paths, calibration, method, **_):
+        self.seen.extend(p.name for p in paths)
+        yield from inference.fake(paths, calibration, method)
+
+
+def test_a_new_weights_version_makes_older_answers_stale_and_measuring_redoes_them(synced, tmp_path, monkeypatch):
+    """Ticket 36: answers carry the weights manifest version that read them. A new version on the hub makes them
+    "Out of date", and measuring the folder redoes exactly those. An answer from before the column counts as
+    LEGACY_WEIGHTS_VERSION. The researcher log names the version on each line."""
+    import json
+    from contextlib import closing
+
+    from camtrap_measure import lineup, measure, store
+
+    d = folder(tmp_path)
+    old = Versioned(measure.LEGACY_WEIGHTS_VERSION)
+    monkeypatch.setattr(inference, "backend", old)
+    run(synced, d)
+    assert [p["weights_version"] for p in store.photos()] == ["2026.08.20c"]
+    log = [json.loads(x) for x in (lineup.log_dir() / lineup.LOG_NAME).read_text().splitlines()]
+    assert [x["weights_version"] for x in log] == ["2026.08.20c"]
+    with closing(store._db()) as con, con:
+        con.execute("update photos set weights_version=null")  # an answer stored before the column
+    assert [x["stale"] for x in listing(synced, d)["rows"]] == [False]
+    assert run(synced, d)["skipped"] == 1 and old.seen == ["IMG_0005.JPG"]
+
+    new = Versioned("2026.10.12")  # Run 2 uploaded: the next start loads it
+    monkeypatch.setattr(inference, "backend", new)
+    assert [x["stale"] for x in listing(synced, d)["rows"]] == [True]
+    assert run(synced, d)["skipped"] == 0 and new.seen == ["IMG_0005.JPG"]
+    assert [x["stale"] for x in listing(synced, d)["rows"]] == [False]
+    assert [p["weights_version"] for p in store.photos()] == ["2026.10.12"]
+
+
+def test_without_models_the_weights_folder_names_the_version_and_test_mode_overwrites_no_real_answer(
+        synced, tmp_path, monkeypatch):
+    """While the models load (or with none, Test mode) the backend has no manifest. The weights folder's manifest then
+    names the version, so a startup listing does not call every answer "Out of date". With no manifest anywhere the
+    version is NO_WEIGHTS_VERSION: no real answer is current under it, and a Test mode run skips the real answer
+    rather than replace it with made-up numbers."""
+    import json
+
+    from camtrap_measure import store
+
+    monkeypatch.delenv("CAMTRAP_WEIGHTS_DIR", raising=False)
+    d = folder(tmp_path)
+    monkeypatch.setattr(inference, "backend", Versioned("2026.10.12"))
+    run(synced, d)
+    before = store.photos()
+    monkeypatch.setattr(inference, "backend", inference.fake)
+    assert inference.weights_version() == inference.NO_WEIGHTS_VERSION
+    assert [x["stale"] for x in listing(synced, d)["rows"]] == [True]  # never current under no weights
+    assert run(synced, d)["skipped"] == 1 and store.photos() == before  # and never overwritten by the fake
+    (store.DATA_DIR / "weights").mkdir()
+    (store.DATA_DIR / "weights" / "manifest.json").write_text(json.dumps({"version": "2026.10.12"}))
+    assert inference.weights_version() == "2026.10.12"  # the models are loading: the folder's manifest stands in
+    assert [x["stale"] for x in listing(synced, d)["rows"]] == [False]
+    pinned = tmp_path / "pinned"
+    pinned.mkdir()
+    (pinned / "manifest.json").write_text(json.dumps({"version": "local"}))
+    monkeypatch.setenv("CAMTRAP_WEIGHTS_DIR", str(pinned))
+    assert inference.weights_version() == "local"
+
+
+def test_test_mode_answers_carry_no_weights_version_and_a_real_run_redoes_them(synced, tmp_path, monkeypatch):
+    """A machine with a weights manifest on disk but no models runs Test mode. Its made-up answers are stamped
+    NO_WEIGHTS_VERSION, never the manifest version, so the first real run of that version measures them again."""
+    import json
+
+    from camtrap_measure import store
+
+    monkeypatch.delenv("CAMTRAP_WEIGHTS_DIR", raising=False)
+    (store.DATA_DIR / "weights").mkdir()
+    (store.DATA_DIR / "weights" / "manifest.json").write_text(json.dumps({"version": "2026.10.12"}))
+    d = folder(tmp_path)
+    monkeypatch.setattr(inference, "backend", inference.fake)
+    assert inference.test_mode() and inference.weights_version() == "2026.10.12"
+    run(synced, d)
+    assert [p["weights_version"] for p in store.photos()] == [inference.NO_WEIGHTS_VERSION]
+    assert [x["stale"] for x in listing(synced, d)["rows"]] == [True]  # the listing compares with the manifest
+    real = Versioned("2026.10.12")
+    monkeypatch.setattr(inference, "backend", real)
+    assert run(synced, d)["skipped"] == 0 and real.seen == ["IMG_0005.JPG"]
+    assert [p["weights_version"] for p in store.photos()] == ["2026.10.12"]
+
+
 def test_folder_that_is_not_there_is_refused_in_plain_words(synced, tmp_path):
     r = synced.get("/api/folder", params={"path": str(tmp_path / "nope"), "site": SITE, "flag": FLAG})
     assert r.status_code == 400 and "not found" in r.json()["detail"]

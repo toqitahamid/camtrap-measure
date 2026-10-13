@@ -1276,7 +1276,7 @@ def test_old_answers_measure_again_once_for_night_photos_and_weak_direct_day_pho
                   "align_source": "direct", "align_status": "ok"}, "md", [])
     store.record({**base, "path": str(d / "IMG_0003.JPG"), "match_score": None, "alignment_version": 1, "night": 1,
                   "align_source": "bracket", "align_status": "none", "align_detail": json.dumps({"why": "moved"})}, "md", [])
-    models = fake_models()
+    models = fake_models(weights=measure.LEGACY_WEIGHTS_VERSION)  # the answers above (no weights_version) were read by it
     monkeypatch.setattr(inference, "backend", models)
     run(synced, d)
     assert {c[1] for c in models.calls if c[0] == "detect"} == {"IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG",
@@ -1288,7 +1288,7 @@ def test_old_answers_measure_again_once_for_night_photos_and_weak_direct_day_pho
     assert (v1["photo"]["align_source"], v1["photo"]["align_status"], v1["photo"]["alignment_version"]) == \
         ("night", "ok", lineup.VERSION)  # the first design's "no distance" now has an answer
     assert answers(d / "IMG_0005.JPG")["photo"]["alignment_version"] == 1  # a version-1 day answer is kept
-    monkeypatch.setattr(inference, "backend", fake_models())
+    monkeypatch.setattr(inference, "backend", fake_models(weights=measure.LEGACY_WEIGHTS_VERSION))
     assert run(synced, d)["skipped"] == len(RUN_CAM)  # once only
 
 

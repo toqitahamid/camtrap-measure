@@ -52,26 +52,44 @@ def models_installed(monkeypatch):
 
 @pytest.fixture
 def hub(monkeypatch, tmp_path):
-    """Fake Hugging Face hub: reachable unless offline; a bad token is rejected; downloads write a manifest."""
-    calls = {"offline": False, "bad_token": False, "n": 0, "version": "2026.08.20", "tokens": []}
+    """Fake Hugging Face hub: reachable unless offline; with `bad_token` a token (ours, or a cached login when None)
+    is refused, as huggingface_hub raises it: a set token as a plain 401, no token as 401 Repository Not Found; no
+    credential at all (False) reads the repo only if `public`. `missing`: the repo is not there for anyone. The bulk
+    download fails with `fail_bulk` if set; manifest.json is fetched on its own, last."""
+    calls = {"offline": False, "bad_token": False, "public": False, "missing": False, "fail_bulk": None, "n": 0,
+             "version": "2026.08.20", "tokens": [], "downloads": []}
 
     def hub_check(token):
         calls["tokens"].append(token)
         if calls["offline"]:
             raise ConnectionError("hub unreachable")
-        if calls["bad_token"]:
-            resp = httpx.Response(401, request=httpx.Request("GET", "https://huggingface.co/api/models/x"))
+        resp = httpx.Response(401, request=httpx.Request("GET", "https://huggingface.co/api/models/x"))
+        if calls["missing"]:
+            raise RepositoryNotFoundError("404 Client Error: Repository Not Found",
+                                          response=httpx.Response(404, request=resp.request))
+        if calls["bad_token"] and isinstance(token, str):
+            raise weights.HfHubHTTPError("401 Client Error: Invalid credentials in Authorization header", response=resp)
+        if calls["bad_token"] and not (token is False and calls["public"]):
             raise RepositoryNotFoundError("401 Client Error: Repository Not Found", response=resp)
-        return 7 * 2**30  # the repo's size, for the download progress
+        return 7 * 2**30, "c0ffee", []  # the repo's size, for the download progress, its commit, its files
 
     def snapshot_download(repo, local_dir, token=None, **kw):
-        calls["n"] += 1
+        calls["downloads"].append({"token": token, **kw})
+        if calls["fail_bulk"]:
+            raise calls["fail_bulk"]
         Path(local_dir).mkdir(parents=True, exist_ok=True)
-        (Path(local_dir) / "manifest.json").write_text(json.dumps({"version": calls["version"], "megadetector": "md.pt", "speciesnet": "sn"}))
+        (Path(local_dir) / "md.pt").write_bytes(calls["version"].encode())
         return str(local_dir)
+
+    def hf_hub_download(repo, filename, local_dir, token=None, **kw):
+        calls["n"] += 1
+        assert filename == "manifest.json" and kw["revision"] == "c0ffee"
+        (Path(local_dir) / filename).write_text(json.dumps({"version": calls["version"], "megadetector": "md.pt", "speciesnet": "sn"}))
+        return str(Path(local_dir) / filename)
 
     monkeypatch.setattr(weights, "hub_check", hub_check)
     monkeypatch.setattr(weights, "snapshot_download", snapshot_download)
+    monkeypatch.setattr(weights, "hf_hub_download", hf_hub_download)
     return calls
 
 
@@ -134,7 +152,8 @@ def test_offline_first_start_is_an_error_and_runs_are_refused(cloud, hub, models
     assert r.status_code == 503 and "internet" in r.json()["detail"]
 
 
-def test_rejected_token_is_named_not_mistaken_for_offline(cloud, hub, models_installed, start):
+def test_rejected_token_is_named_not_mistaken_for_offline(cloud, hub, models_installed, start, tmp_path):
+    (tmp_path / "config.json").write_text(json.dumps({"hf_token": "hf_bad"}))  # optional, but this one is set
     hub["bad_token"] = True
     c, s = start()
     assert s["status"] == "error" and "token" in s["error"] and "internet" not in s["error"]
@@ -143,6 +162,72 @@ def test_rejected_token_is_named_not_mistaken_for_offline(cloud, hub, models_ins
     hub["bad_token"] = True  # token expired after a good first download: cached copy + loud warning
     c, s = start()
     assert s["status"] == "ready" and s["weights"] == "2026.08.20" and "token" in s["warning"]
+
+
+def test_a_repo_that_is_not_public_is_named_without_blaming_a_token(cloud, hub, models_installed, start):
+    """No token is the normal case now; a refusal then means the repo is missing or private, not a bad token. The
+    one retry sends no credential at all (a cached CLI login may have gone with the first ask)."""
+    start()
+    hub["bad_token"] = True  # the hub refuses this request: 401, Repository Not Found
+    c, s = start()
+    assert s["status"] == "ready" and s["weights"] == "2026.08.20" and hub["tokens"] == [None, None, False]
+    assert f"the weights repo {weights.REPO} was not found" in s["warning"] and "token" not in s["warning"]
+
+
+def test_a_refused_stored_login_is_retried_without_it(cloud, hub, models_installed, start):
+    """No token set, but huggingface_hub sends a cached `hf auth login`; a stale one must not cut the machine off
+    from the public repo. Exactly one retry, with token=False."""
+    start()
+    hub["bad_token"], hub["public"], hub["version"] = True, True, "2026.10.12"
+    c, s = start()
+    assert s["status"] == "ready" and s["weights"] == "2026.10.12" and hub["tokens"] == [None, None, False]
+    assert hub["downloads"][-1]["token"] is False
+    assert "stored Hugging Face login" in s["warning"] and "hf auth logout" in s["warning"]
+    assert "hf_token" not in s["warning"]
+
+
+def test_a_missing_repo_is_named_not_blamed_on_a_good_token(cloud, hub, models_installed, start, monkeypatch, tmp_path):
+    """A token the hub accepts, and a repo nobody can see (404 with it, 401 without): the repo id is the fault."""
+    start()
+    (tmp_path / "config.json").write_text(json.dumps({"hf_token": "hf_good"}))
+    hub["missing"] = True
+    c, s = start()
+    assert hub["tokens"][1:] == ["hf_good", False] and s["weights"] == "2026.08.20"
+    assert f"the weights repo {weights.REPO} was not found" in s["warning"] and "token" not in s["warning"]
+    assert "CAMTRAP_WEIGHTS_REPO" not in s["warning"]
+    monkeypatch.setenv("CAMTRAP_WEIGHTS_REPO", weights.REPO)
+    c, s = start()
+    assert "check CAMTRAP_WEIGHTS_REPO" in s["warning"]
+
+
+def test_a_refused_token_does_not_block_the_public_repo(cloud, hub, models_installed, start, tmp_path):
+    """A stale hf_token must not cut a machine off from new weights: the public repo is read with no token at all
+    (token=False, not even a cached login), and the warning only says the stored token can go."""
+    (tmp_path / "config.json").write_text(json.dumps({"hf_token": "hf_old"}))
+    start()
+    hub["bad_token"], hub["public"], hub["version"] = True, True, "2026.10.12"
+    c, s = start()
+    assert s["status"] == "ready" and s["weights"] == "2026.10.12" and hub["tokens"][1:] == ["hf_old", False]
+    assert hub["downloads"][-1]["token"] is False
+    assert "refused the stored access token" in s["warning"] and "Remove hf_token" in s["warning"]
+    assert "could not be checked" not in s["warning"]
+
+
+def test_an_interrupted_update_keeps_the_old_manifest(cloud, hub, models_installed, start, tmp_path):
+    """manifest.json comes last and from the same commit, so a download cut off half-way keeps the old version (files
+    already downloaded may be new) and no answer is stamped with a version whose files are not all there."""
+    start()
+    d = hub["downloads"][0]
+    assert d["ignore_patterns"] == weights.SKIP + ["manifest.json"] and d["revision"] == "c0ffee"
+    hub["version"], hub["fail_bulk"] = "2026.10.12", ConnectionError("connection reset mid-file")
+    c, s = start()
+    assert json.loads((tmp_path / "weights" / "manifest.json").read_text())["version"] == "2026.08.20"
+    assert s["status"] == "ready" and s["weights"] == "2026.08.20 (offline — cached copy)" and hub["n"] == 1
+    resp = httpx.Response(500, request=httpx.Request("GET", "https://huggingface.co/x"))
+    hub["fail_bulk"] = weights.HfHubHTTPError("500 Server Error", response=resp)
+    c, s = start()
+    assert s["weights"] == "2026.08.20" and "answered 500" in s["warning"] and hub["n"] == 1
+    assert inference.weights_version() == "2026.08.20"
 
 
 def test_updated_manifest_is_picked_up_on_next_start(cloud, hub, models_installed, start):
@@ -284,17 +369,21 @@ def test_an_offline_day_still_measures(cloud, hub, models_installed, start, tmp_
 
 def test_weights_download_progress_is_reported(cloud, monkeypatch, tmp_path):
     """The first start downloads ~6.5 GB; the status line shows how far it is."""
-    monkeypatch.setattr(weights, "hub_check", lambda token: 1000)  # total bytes the hub says the repo holds
+    monkeypatch.setattr(weights, "hub_check", lambda token: (1000, None, []))  # total bytes the hub says the repo holds
 
     def slow_download(repo, local_dir, token=None, **kw):
         d = Path(local_dir)
         d.mkdir(parents=True, exist_ok=True)
         (d / "big.bin").write_bytes(b"x" * 600)
         time.sleep(0.7)  # a few watcher ticks (0.25 s) even on a loaded CI box
-        (d / "manifest.json").write_text(json.dumps({"version": "v", "megadetector": "md.pt", "speciesnet": "sn"}))
         return str(local_dir)
 
+    def manifest(repo, filename, local_dir, token=None, **kw):
+        (Path(local_dir) / filename).write_text(json.dumps({"version": "v", "megadetector": "md.pt", "speciesnet": "sn"}))
+        return str(Path(local_dir) / filename)
+
     monkeypatch.setattr(weights, "snapshot_download", slow_download)
+    monkeypatch.setattr(weights, "hf_hub_download", manifest)
     seen = []
     w = weights.ensure(progress=lambda done, total: seen.append((done, total)))
     assert w["version"] == "v" and seen and seen[-1][1] == 1000 and any(600 <= d <= 1000 for d, _ in seen)

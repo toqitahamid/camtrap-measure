@@ -1,9 +1,10 @@
 """The installer's checks, run as `camtrap-measure --preflight` once uv has built the environment.
 
 Each check says what it found and, when it fails, what to do about it in plain words — never a stack
-trace. It also collects the two credentials the app needs (Hugging Face read token for the weights,
-FlagLabel login by emailed one-time code) and stores them where the app reads them, so the first real
-launch is already set up.
+trace. On a console it also collects the FlagLabel login (emailed one-time code) and stores it where the
+app reads it, so the first real launch is already set up. The weights need no credential: the Hugging Face
+repo is public from the release of ticket 36 (2026-10-12). A token someone did set is still checked and a refused
+one named, as a warning: the app then reads the public repo without it.
 The logic lives here (not in the PowerShell installer) so it is testable without a Windows machine.
 """
 
@@ -182,14 +183,39 @@ def check_window() -> Result | None:
 
 
 def check_token(token: str) -> Result:
+    """A token someone set: the app sends it, so it is checked. Never a hard failure: once the weights repo is
+    public the app reads it without a token the hub refuses (weights.ensure), and offline is no fault of the token."""
+    config = store.DATA_DIR / "config.json"
     try:
         weights.hub_check(token)
+    except weights.HfHubHTTPError as e:
+        if not weights.refused(e):
+            return _token_unchecked(e)
+        try:
+            weights.hub_check(False)  # no token at all: is the repo public yet?
+        except weights.HfHubHTTPError as e2:
+            if not weights.refused(e2):
+                return _token_unchecked(e2)
+            return Result("Model weights access", False,
+                          f"token not accepted ({type(e).__name__}), and the weights repo {weights.REPO} is not readable "
+                          "without one", f"Paste a valid read token from https://huggingface.co/settings/tokens into "
+                          f"hf_token in {config}, or ask the researcher whether the weights repo is public yet; once it "
+                          "is, remove hf_token.", hard=False)
+        except Exception as e2:
+            return _token_unchecked(e2)
+        return Result("Model weights access", False, f"token not accepted ({type(e).__name__}); the app reads the "
+                      "public weights repo without it", f"Remove hf_token from {config} (and HF_TOKEN from the "
+                      "environment): the weights repo needs no token.", hard=False)
     except Exception as e:
-        return Result("Model weights access", False, f"token not accepted ({type(e).__name__})",
-                      "Get a read token from https://huggingface.co/settings/tokens for an account that has access to the "
-                      f"weights repo {weights.REPO} (ask the researcher), and paste it exactly.")
+        return _token_unchecked(e)
     store.save_config({**store.config(), "hf_token": token})
     return Result("Model weights access", True, "token accepted and saved")
+
+
+def _token_unchecked(e: Exception) -> Result:
+    return Result("Model weights access", False, f"the stored token could not be checked (offline or Hugging Face "
+                  f"answered with an error: {type(e).__name__})", "Nothing to do now; the app checks the weights again at each start "
+                  "while online.", hard=False)
 
 
 def check_code_sent(email: str) -> Result:
@@ -246,32 +272,19 @@ def run(ask=input, say=print, prompt: bool | None = None) -> int:
 
     `prompt=False` asks nothing: the installer's window has no console to ask through, and a bare
     `input()` there raises EOFError before a single check is read (seen 2026-08-23). What is already
-    stored is checked instead: a missing token (with no bundled models) is a warning, never a hard
-    failure, and the sign-in is left to the app window. Left at None it asks when there is a terminal.
+    stored is checked instead, and the sign-in is left to the app window. Left at None it asks when there is
+    a terminal. Neither way asks for a Hugging Face token: none is needed, and a stored one is only checked.
     """
     if prompt is None:
         prompt = bool(getattr(sys.stdin, "isatty", lambda: False)())
     results = [r for r in (check_gpu(), *check_disk(), *check_network(), check_window(), check_engine()) if r]
+    # Only what a person must act on (the researcher, 2026-09-25): no token is needed, so a line appears only for
+    # a token someone set.
+    results += [r for r in (_stored_token(),) if r]
     say("")
     if not prompt:
-        # Only what a person must act on (the researcher, 2026-09-25): signing in to FlagLabel happens in the
-        # app after the install, and bundled models need no token, so neither gets a line here.
-        results += [r for r in (_stored_token(),) if r]
+        # signing in to FlagLabel happens in the app after the install
         return _report(results, say)
-    for _ in range(ATTEMPTS):
-        token = ask("Hugging Face read token for the model weights (Enter to skip for now): ").strip()
-        if not token:
-            results.append(Result("Model weights access", True, "skipped",
-                                  "Continuing without a token: the app will start with made-up numbers until hf_token is set "
-                                  f"in {store.DATA_DIR / 'config.json'}.", hard=False))
-            break
-        r = check_token(token)
-        if r.ok:
-            results.append(r)
-            break
-        say(f"  ✗ {r.detail}")
-    else:
-        results.append(r)
     for _ in range(ATTEMPTS):  # three tries at an email that gets a code; then three tries at typing that code
         email = ask("FlagLabel email (a one-time sign-in code will be emailed to it): ").strip()
         r = check_code_sent(email)
@@ -288,15 +301,10 @@ def run(ask=input, say=print, prompt: bool | None = None) -> int:
 
 
 def _stored_token() -> Result | None:
-    """What the weights loader will find, when nobody can be asked for a token. None with bundled models."""
+    """A token the weights loader will send, checked. None when there is none: the repo, public from ticket 36,
+    needs no token."""
     token = os.environ.get("HF_TOKEN") or store.config().get("hf_token")
-    if not token and store.config().get("weights_from") == "bundle":
-        return None
-    if not token:
-        return Result("Model weights access", False, "no token stored yet",
-                      "The app will start with made-up numbers until hf_token is set in "
-                      f"{store.DATA_DIR / 'config.json'} (ask the researcher for the token).", hard=False)
-    return check_token(token)
+    return check_token(token) if token else None
 
 
 def _report(results: list[Result], say) -> int:

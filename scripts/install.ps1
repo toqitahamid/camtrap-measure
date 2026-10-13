@@ -31,10 +31,10 @@
 [CmdletBinding()]
 param(
     [switch]$Console,
-    # A folder of model weights to install instead of downloading them. Given this, the installer never
-    # asks for a Hugging Face token and the app never contacts the hub: the department is handed the
-    # models, not a credential. Defaults to a "weights" folder sitting beside this script, which is what
-    # scripts\make_bundle.ps1 builds, so the bundle installs by double-click with no arguments.
+    # A folder of model weights to install instead of downloading them at the first start. The app still
+    # checks the weights repo (public from ticket 36) at every start and fetches only what changed (2026-10-12). Defaults to a
+    # "weights" folder sitting beside this script, which is what scripts\make_bundle.ps1 builds, so the
+    # bundle installs by double-click with no arguments.
     [string]$WeightsFrom,
     # Where to install, so the installer does not ask. A parent folder: D:\ becomes D:\CamTrapMeasure.
     # CAMTRAP_INSTALL_DIR in the environment does the same. Ignored when the app is already installed.
@@ -563,8 +563,8 @@ function Fail($msg) {
 # --- the log ----------------------------------------------------------------------------------------
 # The details pane disappears with the window, and the person running the installer is usually not the
 # person who can fix what it says. So every run - window or -Console - writes the same lines to $LogFile,
-# overwriting it, so the file is always the last run and nothing else. The Hugging Face token never
-# reaches the pane (see Ask-Token), which is why it never reaches this file either.
+# overwriting it, so the file is always the last run and nothing else. The installer asks for no credential,
+# so none can reach the pane or this file.
 $script:LogOff = $true  # until the header below is written
 function Log($line) {
     if ($script:LogOff) { return }
@@ -742,43 +742,6 @@ function Run($exe, $arguments, $where) {
 }
 
 function Quote($text) { "'" + ([string]$text).Replace("'", "''") + "'" }  # a PowerShell string literal
-
-function Ask-Token {
-    # Asks for the Hugging Face read token. Never echoed and never written to the details pane: the
-    # installer only hands it to the app, which stores it in config.json.
-    $ask = "Hugging Face read token for the model weights (ask the researcher). Leave it empty to carry " +
-           "on without one: the app then shows made-up numbers until the token is set."
-    if ($Console) {
-        $secure = Read-Host "$ask`nToken" -AsSecureString
-        return [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-    }
-    $box = New-Object System.Windows.Forms.Form
-    $box.Text = "$Name Setup"
-    $box.Size = New-Object System.Drawing.Size(560, 220)
-    $box.StartPosition = "CenterParent"
-    $box.FormBorderStyle = "FixedDialog"
-    $box.MaximizeBox = $false
-    $box.MinimizeBox = $false
-    $label = New-Object System.Windows.Forms.Label
-    $label.Text = $ask
-    $label.SetBounds(18, 18, 510, 62)
-    $box.Controls.Add($label)
-    $field = New-Object System.Windows.Forms.TextBox
-    $field.UseSystemPasswordChar = $true  # a token is a credential: it does not belong on a screen
-    $field.SetBounds(18, 88, 510, 24)
-    $box.Controls.Add($field)
-    $ok = New-Object System.Windows.Forms.Button
-    $ok.Text = "Continue"
-    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    $ok.SetBounds(428, 128, 100, 28)
-    $box.Controls.Add($ok)
-    $box.AcceptButton = $ok
-    $box.ShowDialog($Form) | Out-Null
-    $typed = $field.Text
-    $box.Dispose()
-    return $typed
-}
 
 # The app names its process "SIU.CamTrapMeasure" to the taskbar (win_icon.py). A shortcut with the same
 # name is how Windows ties the running window to the app: a pin then starts the app through this shortcut,
@@ -977,14 +940,15 @@ if ((Run "uv" @("sync", "--frozen") $Dir) -ne 0) {
     Fail "The environment could not be built. Check the internet connection and the free disk space, then run this again."
 }
 
-# --- 4. the weights token, then the checks ----------------------------------------------------------
+# --- 4. the weights, then the checks ----------------------------------------------------------------
 # The checks ask nothing now: they run with no console to ask through, and a bare input() there raised
-# EOFError before a single check was read (2026-08-23). The token is the one thing only a person can
-# supply, so the installer asks for it in its own window and hands it over in the environment; signing in
-# to FlagLabel happens in the app window, which has had its own sign-in since ticket 14.
+# EOFError before a single check was read (2026-08-23). Nothing here needs a person either: the weights repo
+# is public from the release of ticket 36 (it must be public before that ships), so no token is asked for
+# (2026-10-12), and signing in to FlagLabel happens in the app window,
+# which has had its own sign-in since ticket 14.
 $cfg = Join-Path $DataDir "config.json"  # where the app will look: CAMTRAP_DATA_DIR, set above for this process
 
-# Weights that came with the installer: copy them in and the token question never arises.
+# Weights that came with the installer: copy them in, so the first start downloads nothing new.
 if (-not $WeightsFrom) {
     $beside = Join-Path $PSScriptRoot "weights"
     if (Test-Path (Join-Path $beside "manifest.json")) { $WeightsFrom = $beside }
@@ -1010,25 +974,18 @@ if ($WeightsFrom) {
         Detail "Models installed in $target."
     }
     $bundled = $true
-} else {
-    $hasToken = $env:HF_TOKEN -or ((Test-Path $cfg) -and ((Get-Content $cfg -Raw) -match '"hf_token"\s*:\s*"\S'))  # already answered: do not ask again
-    if (-not $hasToken) {
-        $token = Ask-Token
-        if ($token) { $env:HF_TOKEN = $token }
-    }
-}
+}  # no bundle: the app downloads the weights from the repo (public from ticket 36) at its first start
 
 if ($bundled) {
-    # Said in config.json rather than guessed from the absence of a token: a developer machine has no
-    # token either and still reaches the hub through a cached huggingface-cli login, and must go on
-    # picking up new weights versions.
+    # A label only (2026-10-12): the status line says the models came with the installer. The app checks
+    # the weights repo for new weights versions all the same.
     New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
     $conf = if (Test-Path $cfg) { Get-Content $cfg -Raw -Encoding UTF8 | ConvertFrom-Json } else { New-Object PSObject }
     $conf | Add-Member -NotePropertyName "weights_from" -NotePropertyValue "bundle" -Force
     # UTF-8 without a byte order mark: Set-Content -Encoding utf8 writes one in PowerShell 5, and the app's
     # config reader failed on it (2026-09-25, Seth's machine).
     [IO.File]::WriteAllText($cfg, ($conf | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
-    Detail "This machine uses the models that came with the installer; no Hugging Face token is needed."
+    Detail "This machine uses the models that came with the installer; the app checks for newer ones at each start."
 }
 
 Step "Checking this machine (before the big download)"

@@ -66,8 +66,9 @@ before ticket 24 (this workstation's included) keep `%LOCALAPPDATA%\CamTrapMeasu
 (never `run.bat`: a shortcut to a .bat means a console window), an entry in Settings > Apps under HKCU,
 first launch
 (~6.5 GB weights download with a progress bar). The installer itself runs in a window;
-`install.ps1 -Console` is the console fallback. It asks for the HF read token and the FlagLabel
-email + the one-time code FlagLabel emails (no passwords — ticket 14).
+`install.ps1 -Console` is the console fallback. It asks for no Hugging Face token (the weights repo is
+public from the release of ticket 36, 2026-10-12; it must be public before that ships); the FlagLabel email + the one-time code FlagLabel emails are asked in the app
+window (no passwords — ticket 14).
 
 Run on the workstation 2026-08-21 (CONTEXT "Windows acceptance"): everything above passed
 except the steps that need a FlagLabel mailbox (preflight login, the window's sign-in) — those
@@ -85,9 +86,10 @@ uv run camtrap-measure --no-window               # engine only, prints the URL �
 cd frontend; npm ci; npm run build               # rebuild UI into src/camtrap_measure/ui/ (commit it)
 ```
 
-- Weights token: `HF_TOKEN` env var or `%USERPROFILE%\.camtrap-measure\config.json`
-  `{"hf_token": "hf_..."}` — read access to the private HF repo `toqi/camtrap-measure-weights`.
-  Without it the engine runs the `fake` backend and the UI says so.
+- Weights: the HF repo `toqi/camtrap-measure-weights` (public from the release of ticket 36) needs no token.
+  A token in `HF_TOKEN` or `%USERPROFILE%\.camtrap-measure\config.json` `{"hf_token": "hf_..."}` is still sent
+  when set; a rejected one is dropped for that start and the repo is read without it.
+  Without the `[inference]` extra the engine runs the `fake` backend and the UI says so.
 - Local state (login session, annotations mirror, results SQLite, weights, cached flag photos):
   `%USERPROFILE%\.camtrap-measure\` (override with `CAMTRAP_DATA_DIR`; an installed copy's launcher sets it only
   for its own process, so a dev clone on the same PC keeps its own folder). Delete it for a fresh start.
@@ -121,8 +123,9 @@ or whatever `CAMTRAP_DATA_DIR` says).
 ## 5. Credentials you will need
 
 - GitHub: `toqitahamid` (private repos).
-- Hugging Face: a **read** token for `toqi/camtrap-measure-weights`; `scripts/upload_weights.py`
-  needs a write token (only when changing weights; bump `VERSION` there).
+- Hugging Face: no token to read `toqi/camtrap-measure-weights` (public from the release of ticket 36); `scripts/upload_weights.py`
+  needs a write token (only when changing weights; bump `VERSION` there, which marks every older answer
+  out of date).
 - Supabase/FlagLabel: a department user account (email; sign-in is by one-time code emailed by
   Supabase — no passwords); the app uses it through the read-only wrapper. Project
   `uggjzcbozdxvuawxddrn` — no service key anywhere, keep it that way.
@@ -153,8 +156,10 @@ or whatever `CAMTRAP_DATA_DIR` says).
 - `romatch` is a git dependency pinned to RoMa@77f8d68; it pulls `poselib`, whose win64 cp312
   wheel resolves from the lockfile (verified 2026-08-21). What did *not* resolve was `onnx`
   (see `[tool.uv] override-dependencies` in `pyproject.toml`).
-- A developer machine with a cached Hugging Face login (`~/.cache/huggingface/token`) gives the
-  app weights access even without `hf_token`; the test suite is pinned offline so it cannot.
+- A developer machine with a cached Hugging Face login (`~/.cache/huggingface/token`) sends that
+  token even without `hf_token`; a stale cached token is rejected even by a public repo, so the app retries once
+  with no token at all and the warning names "the stored Hugging Face login". The test
+  suite is pinned offline so it never reaches the hub.
 - The dept machines have no administrator rights: nothing in the installer may need elevation.
 - Capture dates are naive local time; Windows locale affects only the UI's `toLocaleString`.
 - pywebview needs the WebView2 runtime (built into Windows 11; preflight names the download).

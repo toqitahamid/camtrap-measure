@@ -207,7 +207,7 @@ def test_the_installer_never_asks_through_a_console_it_does_not_have():
     """A window has no stdin: `input()` in the checks raised EOFError before one was read (2026-08-23)."""
     install = text(SCRIPTS / "install.ps1")
     assert '"--preflight", "--no-prompt"' in install
-    assert "Ask-Token" in install and "UseSystemPasswordChar = $true" in install  # the one thing it must ask
+    assert "Ask-Token" not in install and "UseSystemPasswordChar" not in install  # no token: the weights repo is public
     main = text(ROOT / "src" / "camtrap_measure" / "main.py")
     assert '"--no-prompt"' in main and "prompt=False if args.no_prompt else None" in main
 
@@ -294,12 +294,11 @@ def test_the_preflight_failure_points_at_the_list_and_the_log():
     assert "$send = \"The full record is in $LogFile" in fail_body(install)
 
 
-def test_the_token_never_reaches_the_log():
-    """The log is fed from the details pane, and the token has never been written to the pane."""
+def test_no_token_can_reach_the_log():
+    """The log is fed from the details pane. The installer asks for no Hugging Face token (the weights repo is public,
+    2026-10-12), so none can reach the pane or the log."""
     install = text(SCRIPTS / "install.ps1")
-    ask = install.split("function Ask-Token", 1)[1].split("\nfunction ", 1)[0]
-    assert "Detail" not in ask and "Log " not in ask
-    assert "UseSystemPasswordChar = $true" in ask
+    assert "Ask-Token" not in install and "HF_TOKEN" not in install and "hf_token" not in install
 
 
 def test_the_log_goes_in_the_install_folder():

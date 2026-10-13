@@ -439,12 +439,12 @@ def _build(root: Path, method: str = inference.DEFAULT_METHOD) -> tuple[list[dic
     usable = {c: [r for r in cals if r["site"] == c and r["ok"]] for c in cameras}
     sites = {_site_of(c) for c in cameras}
     known = {p["path"]: p for p in store.photos()}
-    fid = inference.state["fidelity"] or inference.fidelity()
+    fid, wv = inference.state["fidelity"] or inference.fidelity(), inference.weights_version()
     picks = CHOICES.get(root, {})
     rows = []
     for f in scan_["folders"]:
         report.LISTED_FOLDERS.add(f["path"])  # its photos may be shown: the Compare dialog, the table
-        rows.append(_row(root, f, cameras, usable, sites, picks.get(str(f["path"]), {}), known, method, fid))
+        rows.append(_row(root, f, cameras, usable, sites, picks.get(str(f["path"]), {}), known, method, fid, wv))
     _duplicates(rows)
     for r in rows:
         explicit = picks.get(r["folder"], {}).get("tick")
@@ -457,7 +457,7 @@ def _build(root: Path, method: str = inference.DEFAULT_METHOD) -> tuple[list[dic
 
 
 def _row(root: Path, f: dict, cameras: list[str], usable: dict, sites: set[str], pick: dict, known: dict,
-         method: str, fid: str) -> dict:
+         method: str, fid: str, wv: str | None) -> dict:
     camera, chosen, matched_from, candidates = _camera(root, f["path"], cameras, pick)
     row = {"folder": str(f["path"]), "name": f["rel"], "photos": len(f["photos"]), "camera": camera,
            "candidates": candidates, "state": "ok", "note": None, "stamp": None, "flags": [], "flag_choice": "",
@@ -507,7 +507,7 @@ def _row(root: Path, f: dict, cameras: list[str], usable: dict, sites: set[str],
                              "photos": used[c["image_name"]],
                              "visit": None if not c["captured_at"] else "setup" if c is first else "service"})
     check = lineup.Check()  # one folder signature for the row; photos are not opened here
-    row["measured"] = sum(1 for p, c in got.items() if measure.current_answer(known.get(p), c, method, fid, check))
+    row["measured"] = sum(1 for p, c in got.items() if measure.current_answer(known.get(p), c, method, fid, check, wv))
     row["tickable"], row["_default_tick"], row["_got"] = True, not mismatch, got
     return row
 

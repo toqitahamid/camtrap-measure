@@ -31,8 +31,8 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
   babysitting, updater targets the wrong layer, signing burden.
 - **Auto-update**: uv upgrade-on-launch from GitHub in `run.bat`; offline →
   runs current version. Weights excluded from code updates.
-- **Weights**: private Hugging Face model repo, `snapshot_download`, versioned
-  manifest checked at startup, token in app config.
+- **Weights**: Hugging Face model repo, public from the release of ticket 36 (it must be public before that ships),
+  `snapshot_download`, versioned manifest checked at startup by every install, no token needed.
 - **Results**: local SQLite (single GPU machine is the record — Q13); rerun of a
   photo replaces its rows, so one current answer per photo. CSV is an export
   view, never the store.
@@ -117,7 +117,7 @@ distance+CQR net and calibration method from `../distance_estimation` (CV4E/ECCV
 
 ## Weights and real inference (ticket 06, 2026-08-20)
 
-- Weights repo: private HF `toqi/camtrap-measure-weights` (move to the org later
+- Weights repo: HF `toqi/camtrap-measure-weights`, private until the release of ticket 36, which needs it public (move to the org later
   via HF repo transfer; id is `CAMTRAP_WEIGHTS_REPO`). `manifest.json`
   {version, megadetector, speciesnet}; `snapshot_download` into
   `~/.camtrap-measure/weights/` is the entire update/resume/cache mechanism.
@@ -2106,3 +2106,64 @@ the wrong-camera guard (the reviewer's probe, a deployment start, a service visi
 at 2 s and 2 min spacing; the burst's own tries), an undated and an unplaced weak photo, a locked own line-up, no
 neighbour at 2,500 / 2,499 and 300 points, a wrong-camera folder, an unlistable folder, the stale rule, and a
 FakeModels run with its log line. Three earlier tests changed (ticket 35 lists them).
+
+## Public weights repo: every install gets new weights (2026-10-12, ticket 36)
+
+**Decision.** The weights repo `toqi/camtrap-measure-weights` becomes public, and the app treats it so: every install
+asks the hub at start, with no token, and downloads only the files that changed. This replaces "The models ship with
+the installer; nobody gets a token" (2026-08-24, ticket 21) on one point: a bundle install is no longer kept away
+from the hub. Why: a bundle install (Seth's) never asked the hub, so it could never receive a new weights version,
+and a retrained distance model (Run 2, research folders 69 and 70) is about to ship. Making the repo public is a
+separate step that needs the user's OK; this change only makes the app ready for it. ADR 0003.
+
+- **Bundle installs.** `weights.ensure` no longer skips the hub when config.json says `"weights_from": "bundle"`.
+  `bundled` stays in its result as a label only, and the status line still says "(installed with the app)" unless
+  the start was offline. The installer still copies the bundle's weights in and still writes the marker, so the
+  first start downloads nothing new: `snapshot_download` keeps a large file whose SHA-256 matches the hub's.
+- **Offline.** Unchanged: an unreachable hub means the copy on disk, with "(offline — cached copy)". `CAMTRAP_WEIGHTS_DIR`
+  still pins a folder and skips the hub.
+- **Tokens.** Optional. HF_TOKEN or `hf_token` is still sent when set; with none set, huggingface_hub still sends a
+  cached `hf auth login`. A refusal (401, 403, RepositoryNotFound, Gated; `weights.refused`) of either is retried once
+  with `token=False` (no token at all, not even the cached login; huggingface_hub 1.28.0 `get_token_to_send(False)` →
+  None). If that works, the warning only says the stored token, or the stored Hugging Face login, was refused and can
+  be removed. If not: RepositoryNotFound both times (the credential was accepted, since a bad one is a plain 401)
+  reads "the weights repo <id> was not found" (plus "check CAMTRAP_WEIGHTS_REPO" when that is set); otherwise the
+  token, or the stored login, was rejected and the repo is not readable without it. The installer no longer
+  asks for a token (`Ask-Token` removed). The preflight no longer asks or warns "no token stored yet"; it checks a
+  token someone set, as a warning only (`hard=False`): refused with the repo public, refused with no way in, or "could
+  not be checked (offline or Hugging Face answered with an error)".
+- **Interrupted update.** `ensure` downloads every file but `manifest.json` (and SKIP) first, then `manifest.json`
+  alone, both at the commit `hub_check` saw. Before the manifest, every other repo file must have hf_hub's download
+  record (`.cache/huggingface/download/<file>.metadata`) at that commit: huggingface_hub 1.28.0 keeps an old local file
+  and only logs a warning when its per-file check times out or gets a 5xx/429, and `snapshot_download` still returns
+  normally. An interrupted update keeps the OLD manifest, but files it already downloaded may be new: the app may run
+  a mix of old and new files under the old version until the next complete update, which then changes the version
+  and redoes the answers. It reports offline or a problem meanwhile. Pinning the commit also stops `snapshot_download`
+  from quietly returning the local folder when it cannot list the branch.
+- **SAM3 is not downloaded.** `weights.SKIP = ["sam3/*"]` goes to `snapshot_download` as `ignore_patterns`, and
+  `hub_check` leaves the same files out of the progress total. SAM3 stays in the repo; a `sam3/` folder already on a
+  machine is left alone. The precise method (`method=sam3`, no longer offered in the window) now fails with a plain
+  message when the manifest has no `sam3` entry or the folder is missing.
+- **Answers carry their weights version.** `photos.weights_version` (text, added to old databases on open) holds the
+  manifest version that read the answer (`inference.weights_version()`: the running backend's manifest; while the
+  models load and on the fake, the weights folder's `manifest.json`, so a startup listing does not call every answer
+  "Out of date"; with no manifest anywhere, `inference.NO_WEIGHTS_VERSION`, which no real answer carries).
+  `measure.current_answer` also requires it to equal the running version, so a new manifest version turns
+  every older answer "Out of date" in the listing, the site rows count it as not measured, and Measure all redoes it.
+  An answer stored before the column (NULL) reads as `measure.LEGACY_WEIGHTS_VERSION` = "2026.08.20c", the manifest
+  version shipped when the column arrived; so today's answers stay current until a new version ships. A Test mode run
+  (`inference.test_mode()`: no manifest of its own) never redoes an answer for its weights version alone, so made-up
+  numbers never replace an answer the real models read. It stamps its own answers `NO_WEIGHTS_VERSION`, even with a
+  manifest on disk, so the first real run of that manifest's version redoes them. The CSV is unchanged (stale rows stay in the export, user decision). The researcher log line of each
+  measured photo gains `weights_version`. Nothing new in the window.
+- **Model card.** `scripts/upload_weights.py` writes a card with `license: other` and a per-component table: the unified
+  net CC-BY-NC-4.0 (modified from Depth-Anything-V2-Metric-Outdoor-Large, Yang et al.; non-commercial only), SpeciesNet
+  Apache-2.0, DINOv2 Apache-2.0, MegaDetector MIT, RoMa code MIT with no separate weights licence stated upstream, SAM3
+  under the SAM License. VERSION and the checkpoint path are unchanged. `--upload` reads the repo's `manifest.json`
+  first and refuses when it already names this VERSION ("Bump VERSION"); `--force` uploads anyway.
+
+**Order of release.** 1. Put a copy of the SAM License into `sam3/` in the repo and the per-component model card
+(`scripts/upload_weights.py --stage` with `--sam-license`, then upload). 2. Make the repo public (the user's OK).
+3. Merge this branch. 4. Upload new weights (a new manifest version). Merged before step 2, the harm is: a bundle
+machine with no token shows a warning at every start but keeps measuring on its copy; a fresh non-bundle install with
+no token gets WeightsMissing and cannot measure at all.

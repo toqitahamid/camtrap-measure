@@ -7,10 +7,10 @@
   It will not build into OneDrive without being told twice: the dept's Desktop is redirected there, and
   6.5 GB of weights would upload to the university's cloud the moment they were written.
 
-  Why this exists: the weights live in a private Hugging Face repo, and the only way for a team machine
-  to download them is a read token. Handing that token to twelve people is handing out a credential that
-  cannot be taken back from any one of them. So the models travel with the installer instead, on a USB
-  stick or a share, and no team machine ever needs an account.
+  Why this exists: the models are 6.5 GB. Carried on a USB stick or a share, they install without that
+  download. The weights repo is public from the release of ticket 36 (2026-10-12; it must be public before
+  that ships), so no team machine needs an account or a token either way, and the app still checks the repo
+  at every start and fetches only the files that changed.
 
   The result is about 6.5 GB and installs by double-click. The app itself still comes from GitHub during
   the install, which is public, so the machine needs the internet - it just needs no credentials.
@@ -96,6 +96,7 @@ CamTrap Measure - installer for the wildlife team
 =================================================
 
 Models included: version $version. No Hugging Face account or token is needed on this computer.
+The app checks for newer models each time it starts and downloads only what changed.
 
 To install:
   1. Copy this whole folder onto the computer (or plug in the stick and run it from there).

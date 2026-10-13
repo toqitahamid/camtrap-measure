@@ -22,5 +22,5 @@ cd frontend && npm ci && npm run build  # rebuild src/camtrap_measure/ui/ — co
 
 - Supabase is read-only from this app: `supabase_ro.py` is the only client; `tests/test_supabase_ro.py` enforces it. No service key, ever.
 - Frontend stays dumb: no router, no state library; renders JSON, posts clicks.
-- Weights are not code: private HF repo via `weights.py`; never in git.
+- Weights are not code: HF repo via `weights.py` (public from ticket 36, no token needed); never in git.
 - Workflow per ticket: `/mattpocock-skills:implement <issue file>` → tests green → `/mattpocock-skills:code-review` → commit; mark the issue `done (date) — evidence` and add the CONTEXT section.

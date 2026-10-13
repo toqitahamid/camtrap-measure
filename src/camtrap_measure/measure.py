@@ -4,7 +4,7 @@ streamed through the inference boundary.
 One run at a time (one GPU machine); progress lives in `current` and is polled by the UI. Results are
 written per photo, so a cancel, a crash or a power cut loses at most the photo in flight: the next run
 of the same folder skips every photo that already has a current answer (same method, same flag photo,
-same fidelity, same annotation version) unless asked to `rerun`.
+same fidelity, same annotation version, same weights version) unless asked to `rerun`.
 
 A run happens in stages, and `phase` says which one it is in: the detector looks at every photo first,
 then the distance models measure only the photos it found an animal in. The photos with nothing in them
@@ -117,8 +117,13 @@ def start_jobs(fields: dict, jobs: list[dict], method: str, rerun: bool) -> dict
     with _lock:
         if current and current["status"] == "running":
             raise RuntimeError("A run is already in progress.")
+        test_mode = inference.test_mode()
         current = {**fields, "id": next(_runs), "method": method,
-                   "fidelity": inference.state["fidelity"] or inference.fidelity(), "status": "running",
+                   "fidelity": inference.state["fidelity"] or inference.fidelity(),
+                   # Test mode's made-up answers never carry the manifest version a listing compares with, even
+                   # when a manifest is on disk: a later real run of that version must redo them
+                   "weights": inference.NO_WEIGHTS_VERSION if test_mode else inference.weights_version(),
+                   "test_mode": test_mode, "status": "running",
                    "total": sum(len(j["photos"]) for j in jobs), "done": 0, "skipped": 0, "unreadable": 0,
                    "detections": 0, "error": None, "cancel": False,
                    # the run happens in stages, and which one it is in is the difference between "nothing is
@@ -149,7 +154,8 @@ def cancel() -> dict | None:
 def status() -> dict | None:
     if current is None:
         return None
-    r = {k: v for k, v in current.items() if k not in ("started", "cancel", "logged")}  # logged: log bookkeeping
+    # logged: log bookkeeping; weights, test_mode: what answers are stamped and skipped by, not shown in the window
+    r = {k: v for k, v in current.items() if k not in ("started", "cancel", "logged", "weights", "test_mode")}
     if current["status"] == "running":
         r["elapsed_s"] = round(time.monotonic() - current["started"], 1)
     measured = current["done"] - current["skipped"] - current["unreadable"]  # only inferred photos set the pace
@@ -158,7 +164,13 @@ def status() -> dict | None:
     return r
 
 
-def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, check: lineup.Check | None = None) -> bool:
+# The weights manifest version shipped when answers started to record theirs (weights_version, 2026-10-12): an answer
+# stored before then (NULL) was made by it. Never change this; ship a new manifest version instead.
+LEGACY_WEIGHTS_VERSION = "2026.08.20c"
+
+
+def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, check: lineup.Check | None = None,
+                   weights: str | None = None) -> bool:
     """Does the store already hold this photo's answer under this method, this fidelity and this very
     calibration? The calibration's annotation `updated_at` is its version: a relabel changes it → measure
     again. Versions are compared, never clocks (the dept machine's and the cloud's need not agree).
@@ -179,10 +191,17 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, ch
     answer stands, unless it was lined up directly with fewer than lineup.DAY_WEAK points (ticket 35: the day rule
     measures it again, once). A photo that lacked a day photo on a side is planned again once its folder or the
     camera's flag photos change. `check` carries what that asks of the disk across one listing or run (a run passes
-    `lineup.Check(read=True)`)."""
+    `lineup.Check(read=True)`).
+
+    And the models: an answer read by another weights manifest version (`weights`, inference.weights_version()) is
+    measured again, so a new distance model on the hub turns every older answer "Out of date". An answer stored before
+    2026-10-12 (NULL), or `weights` left out, reads as LEGACY_WEIGHTS_VERSION. inference.NO_WEIGHTS_VERSION (no
+    manifest anywhere; also the stamp of every Test mode answer) matches no real run's version."""
     return bool(known and known["method"] == method and known.get("fidelity") == fidelity
                 and known["site"] == cal["site"] and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at")
-                and known.get("fit_version") == cal.get("fit_version") and lineup.current(known, check))
+                and known.get("fit_version") == cal.get("fit_version")
+                and (known.get("weights_version") or LEGACY_WEIGHTS_VERSION) == (weights or LEGACY_WEIGHTS_VERSION)
+                and lineup.current(known, check))
 
 
 def lined_up(alignment: dict | None) -> dict:
@@ -267,7 +286,8 @@ def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment
     (photo fields under box fields), in order and without repeats; [] when there are none. A night photo also carries
     its Night-rule detail under `night`; a day photo lined up by the day rule (ticket 35: its own line-up was weak)
     carries the day-rule detail under `day_borrow` (path, side, anchor, own points, A and B with their tries, the
-    move check, the checks by eye, and why there is no answer). A day photo lined up directly carries neither."""
+    move check, the checks by eye, and why there is no answer). A day photo lined up directly carries neither.
+    Every line names the weights manifest version that read it (`weights_version`)."""
     from .report import reasons  # report imports this module
 
     try:
@@ -279,7 +299,8 @@ def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment
             night = lineup.read_night(p)  # None only when the file cannot be read just now
         line = {"photo": str(p), "camera": camera, "status": "measured",
                 "day_night": None if night is None else "night" if night else "day",
-                "distance": any(d["distance_m"] is not None for d in dets), "animals": len(dets), "reasons": why}
+                "distance": any(d["distance_m"] is not None for d in dets), "animals": len(dets), "reasons": why,
+                "weights_version": photo.get("weights_version")}
         if alignment and alignment.get("night"):  # lined up by the Night rule
             line["night"] = lineup.rule_detail(alignment)
         elif alignment and alignment.get("source") == lineup.DAY_BORROW:  # lined up by the day rule
@@ -294,7 +315,7 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
     """Measure one job's photos against its flag photo. -> how many went through the models."""
     from .report import DEER, UNREADABLE  # report imports this module
 
-    cal, method, fidelity = job["cal"], run["method"], run["fidelity"]
+    cal, method, fidelity, weights = job["cal"], run["method"], run["fidelity"], run["weights"]
 
     def count(**more) -> None:
         for k, v in more.items():
@@ -306,7 +327,11 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
     batch = []
     check = lineup.Check(read=True)  # an answer from before ticket 33 is read once here: was it a night photo?
     for p in job["photos"]:
-        if not rerun and current_answer(known.get(str(p)), cal, method, fidelity, check):
+        had = known.get(str(p))
+        # Test mode has no weights version of its own: it redoes no answer for its weights version alone, so its
+        # made-up numbers never replace an answer the real models read
+        w = (had or {}).get("weights_version") if run["test_mode"] else weights
+        if not rerun and current_answer(had, cal, method, fidelity, check, w):
             count(skipped=1)
             continue
         if not readable(p):
@@ -315,7 +340,7 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
             continue
         batch.append((p, {"path": str(p), "site": cal["site"], **calibration.read_exif(p), "held_reason": None,
                           "calibration_image": cal["image_name"], "calibration_version": cal.get("updated_at"),
-                          "fidelity": fidelity, "fit_version": cal.get("fit_version")}))
+                          "fidelity": fidelity, "fit_version": cal.get("fit_version"), "weights_version": weights}))
     if not batch or run["cancel"]:
         return 0
     ref = {**cal, "ref_path": str(store.ref_path(cal["site"], cal["image_name"]))}

@@ -23,7 +23,7 @@ create table if not exists calibrations (
 create table if not exists photos (
     path text primary key, site text not null, captured_at text, make text, model text,
     calibration_image text, held_reason text, measured_at text not null, match_score integer, method text,
-    calibration_version text, fidelity text, fit_version integer);
+    calibration_version text, fidelity text, fit_version integer, weights_version text);
 create table if not exists detections (
     path text not null, idx integer not null, method text not null,
     x1 real, y1 real, x2 real, y2 real, species text, confidence real,
@@ -58,7 +58,8 @@ def _db() -> sqlite3.Connection:
                             ("photos", "alignment_version", "integer"), ("photos", "night", "integer"),
                             ("photos", "align_source", "text"), ("photos", "align_status", "text"),
                             ("photos", "anchor", "text"), ("photos", "align_detail", "text"),
-                            ("photos", "align_folder", "text")):  # pre bracket rule (ticket 33)
+                            ("photos", "align_folder", "text"),  # pre bracket rule (ticket 33)
+                            ("photos", "weights_version", "text")):  # pre public weights (ticket 36)
         if col not in {r["name"] for r in con.execute(f"pragma table_info({table})")}:
             try:
                 con.execute(f"alter table {table} add column {col} {typ}")
@@ -294,12 +295,13 @@ def record(photo: dict, method: str, detections: list[dict]) -> None:
     photo = {**photo, "measured_at": datetime.now().astimezone().isoformat(timespec="seconds")}
     with closing(_db()) as con, con:
         con.execute("insert or replace into photos (path, site, captured_at, make, model, calibration_image, held_reason, "
-                    "measured_at, match_score, method, calibration_version, fidelity, fit_version, alignment_version, "
-                    "night, align_source, align_status, anchor, align_detail, align_folder) values (:path, :site, "
-                    ":captured_at, :make, :model, :calibration_image, :held_reason, :measured_at, :match_score, :method, "
-                    ":calibration_version, :fidelity, :fit_version, :alignment_version, :night, :align_source, "
-                    ":align_status, :anchor, :align_detail, :align_folder)",
+                    "measured_at, match_score, method, calibration_version, fidelity, fit_version, weights_version, "
+                    "alignment_version, night, align_source, align_status, anchor, align_detail, align_folder) values "
+                    "(:path, :site, :captured_at, :make, :model, :calibration_image, :held_reason, :measured_at, "
+                    ":match_score, :method, :calibration_version, :fidelity, :fit_version, :weights_version, "
+                    ":alignment_version, :night, :align_source, :align_status, :anchor, :align_detail, :align_folder)",
                     {"match_score": None, "calibration_version": None, "fidelity": None, "fit_version": None,
+                     "weights_version": None,
                      **dict.fromkeys(ALIGN_KEYS), **photo, "method": method})
         if photo["held_reason"]:
             con.execute("delete from detections where path=?", (photo["path"],))

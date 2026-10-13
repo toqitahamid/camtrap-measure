@@ -403,9 +403,10 @@ class Real:
     def _sam3(self):
         """SAM3 (transformers port of facebook/sam3), loaded on first use so the fast method never pays its VRAM."""
         if self.sam3 is None:
-            if "sam3" not in self.manifest:
-                raise RuntimeError("SAM3 outline needs a download this computer does not have yet. "
-                                   "Restart the app while online, then try again.")
+            # The app downloads no SAM3 (weights.SKIP, 2026-10-12): only a machine that got it before has the folder.
+            if "sam3" not in self.manifest or not (self.weights_dir / self.manifest["sam3"]).is_dir():
+                raise RuntimeError("SAM3 outline is not on this computer, and the app no longer downloads it. "
+                                   "Measure with the MegaDetector box instead.")
             from transformers import Sam3Model, Sam3Processor
             d = self.weights_dir / self.manifest["sam3"]
             # ponytail: fp32 weights (3.4 GB) under bf16 autocast as the research ran it; load in bf16 if a small card
@@ -536,6 +537,31 @@ state: dict = {"status": "ready", "backend": "fake", "device": None, "gpu": None
                "fidelity": None, "batch": None, "weights": None, "warning": None, "error": None, "download": None}  # download: {done_gb, total_gb} while weights are fetched
 
 
+# What weights_version() says when no manifest exists anywhere: no manifest uses it, so no answer the real models
+# read is current under it. Every Test mode answer is stamped with it (measure.start_jobs), manifest on disk or not.
+NO_WEIGHTS_VERSION = "none (test mode)"
+
+
+def test_mode() -> bool:
+    """Is the backend the fake or a stand-in with no weights manifest of its own (made-up numbers)?"""
+    return not (getattr(backend, "manifest", None) or {}).get("version")
+
+
+def weights_version() -> str:
+    """The manifest version of the models in use: what an answer is stamped with and checked against
+    (measure.current_answer). While the models load, and on the fake, the weights folder's manifest stands in, so a
+    listing at startup does not call every answer "Out of date"; with no manifest there either, NO_WEIGHTS_VERSION."""
+    if not test_mode():
+        return backend.manifest["version"]
+    from . import store
+
+    pinned = os.environ.get("CAMTRAP_WEIGHTS_DIR")
+    try:
+        return json.loads(((Path(pinned) if pinned else store.DATA_DIR / "weights") / "manifest.json").read_text())["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return NO_WEIGHTS_VERSION
+
+
 def models_installed() -> bool:
     """Is the [inference] extra (torch, MegaDetector, SpeciesNet) importable?"""
     try:
@@ -562,10 +588,12 @@ def warmup() -> None:
         w = weights.ensure(progress=lambda done, total: state.update(download={"done_gb": round(done / 2**30, 2),
                                                                                "total_gb": round(total / 2**30, 2)}))
         state["download"] = None
-        state["weights"] = w["version"] + (" (installed with the app)" if w.get("bundled")
-                                           else " (offline — cached copy)" if w["offline"] else "")
+        state["weights"] = w["version"] + (" (offline — cached copy)" if w["offline"]
+                                           else " (installed with the app)" if w.get("bundled") else "")
         if w["problem"]:
             warnings.append(f"Weights could not be checked for updates: {w['problem']}. Using the cached copy.")
+        if w.get("notice"):
+            warnings.append(w["notice"])
         real = Real(w["dir"])  # constructing it loads nothing: the first run pays for the weights
     except Exception as e:
         state["download"] = None

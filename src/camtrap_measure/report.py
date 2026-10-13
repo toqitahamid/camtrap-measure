@@ -249,7 +249,7 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
     for r in store.detections():
         if r["method"] == method:
             dets.setdefault(r["path"], []).append(r)
-    fid = inference.fidelity()
+    fid, wv = inference.fidelity(), inference.weights_version()
     check = lineup.Check()  # one folder signature per folder for the whole listing; photos are not opened here
     out, unreadable = [], 0
     for p, name, cal, read in photos:
@@ -266,7 +266,7 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
             row.update(captured_at=seen["captured_at"], match_score=seen["match_score"], method=seen["method"],
                        flag_image=seen["calibration_image"], flag_site=seen["site"],
                        **{k: seen.get(k) for k in ("align_source", "align_status", "anchor")},
-                       stale=cal is not None and not measure.current_answer(seen, cal, method, fid, check),
+                       stale=cal is not None and not measure.current_answer(seen, cal, method, fid, check, wv),
                        reasons=[seen["held_reason"]] if seen["held_reason"] else [])
             for r in sorted(dets.get(str(p), []), key=lambda r: r["idx"]):
                 why = reasons(r)

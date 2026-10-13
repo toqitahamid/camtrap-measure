@@ -435,3 +435,36 @@ def test_a_file_windows_marks_hidden_or_system_is_not_a_photo(synced, tmp_path):
     ctypes.windll.kernel32.SetFileAttributesW(str(d / "IMG_3.JPG"), 0x4)  # FILE_ATTRIBUTE_SYSTEM
     g = synced.get("/api/folder", params={"path": str(d), "site": SITE, "flag": FLAG}).json()
     assert [r["name"] for r in g["rows"]] == ["IMG_1.JPG"] and g["unreadable"] == 0
+
+
+# --- the weights version an answer was read by (ticket 36) ------------------------------------------------------
+
+def test_an_answer_is_current_only_under_the_weights_version_that_read_it():
+    """A new distance model on the hub turns every older answer "Out of date". An answer stored before answers
+    carried a version (NULL) was read by LEGACY_WEIGHTS_VERSION, so it stays current until a new version ships."""
+    from camtrap_measure import measure
+
+    cal = {"site": "MAS_CAM01", "image_name": "IMG_0004.JPG", "updated_at": "2026-08-01T00:00:00"}
+    done = {"method": "md", "fidelity": "research", "site": "MAS_CAM01", "calibration_image": "IMG_0004.JPG",
+            "calibration_version": "2026-08-01T00:00:00"}
+    old, new = measure.LEGACY_WEIGHTS_VERSION, "2026.10.12"
+    assert old == "2026.08.20c"  # the manifest version shipped when the column arrived; never changes
+    assert measure.current_answer({**done, "weights_version": new}, cal, "md", "research", weights=new)
+    assert not measure.current_answer({**done, "weights_version": old}, cal, "md", "research", weights=new)
+    assert measure.current_answer({**done, "weights_version": None}, cal, "md", "research", weights=old)
+    assert not measure.current_answer({**done, "weights_version": None}, cal, "md", "research", weights=new)
+    assert measure.current_answer({**done, "weights_version": None}, cal, "md", "research")  # the fake: no manifest
+
+
+def test_an_old_database_gains_the_weights_version_column(tmp_path):
+    """A store written before ticket 36 has no weights_version; opening it adds the column, empty, and keeps rows."""
+    import sqlite3
+
+    with closing(sqlite3.connect(tmp_path / "camtrap.db")) as con, con:
+        con.execute("create table photos (path text primary key, site text not null, captured_at text, make text, "
+                    "model text, calibration_image text, held_reason text, measured_at text not null, "
+                    "match_score integer, method text, calibration_version text, fidelity text, fit_version integer)")
+        con.execute("insert into photos (path, site, measured_at, method) values "
+                    "('/x/IMG_0001.JPG', 'TON_CAM02', '2026-10-01T00:00:00', 'md')")
+    [row] = store.photos()
+    assert row["path"] == "/x/IMG_0001.JPG" and "weights_version" in row and row["weights_version"] is None
