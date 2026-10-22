@@ -890,6 +890,28 @@ progress::-webkit-progress-value {
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
+/* the 90% range under the big number: about half its size (46px), high contrast, never wraps */
+.range-big {
+  margin-top: 3px;
+  font-family: var(--grot);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+/* each animal's range in the list: a size up from the 12px note under it */
+.range-row {
+  display: block;
+  margin-top: 1px;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  white-space: nowrap;
+}
 .scale {
   position: relative;
   height: 22px;

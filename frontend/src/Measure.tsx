@@ -94,6 +94,8 @@ export default function Measure({
   const [showFlag, setShowFlag] = useState(false)
   const [showBoxes, setShowBoxes] = useState(true)
   const [hot, setHot] = useState<number | null>(null) // the animal the pointer is on, in the frame or the panel
+  const [pin, setPin] = useState<number | null>(null) // the animal clicked; it stays picked when the pointer leaves
+  const sel = hot ?? pin
   // Clearing throws away work, so it asks once. Two clicks rather than a modal: the window has no dialog
   // of its own, and a browser confirm() blocks the whole WebView until it is answered.
   const [confirmClear, setConfirmClear] = useState(false)
@@ -115,6 +117,7 @@ export default function Measure({
   const go = (r: Row) => {
     setPath(r.path)
     setHot(null)
+    setPin(null)
   }
   const step = (d: number) => {
     // no useCallback: the compiler memoizes `list`, so the key handler below re-binds only when it changes
@@ -141,10 +144,13 @@ export default function Measure({
     setPath(focus)
     setView('all')
     setHot(null)
+    setPin(null)
   }, [focus])
 
   const st = cur ? state(cur) : null
-  const best = cur ? lead(cur) : null
+  // the big number and the 90% range follow the animal picked in the frame or the list; else the nearest one
+  const picked = cur && sel !== null ? cur.detections[sel] : undefined
+  const best = picked && picked.distance_m !== null ? picked : cur ? lead(cur) : null
   const against = cur ? (cur.flag_image ?? scope.flag) : scope.flag
   // The camera comes from the photo's own record, not from the dropdown. Choosing another camera while
   // looking at a measured photo used to ask for one camera's flag under another camera's name, which the
@@ -291,7 +297,7 @@ export default function Measure({
                 {boxes.map((d, i) => (
                   <div
                     key={`${d.method}-${d.idx}`}
-                    className={`bbox${hot === i ? ' bbox-hot' : ''}${d.y1 < 0.08 ? ' bbox-low' : ''}`}
+                    className={`bbox${sel === i ? ' bbox-hot' : ''}${d.y1 < 0.08 ? ' bbox-low' : ''}`}
                     style={{
                       left: `${d.x1 * 100}%`,
                       top: `${d.y1 * 100}%`,
@@ -300,6 +306,7 @@ export default function Measure({
                     }}
                     onMouseEnter={() => setHot(i)}
                     onMouseLeave={() => setHot(null)}
+                    onClick={() => setPin(pin === i ? null : i)}
                   >
                     <span className="tag">{i + 1} · {d.species} · {metres(d)}</span>
                     {/* the dashed line sits where the ground was read: the distance is that line's, not the box's */}
@@ -386,11 +393,11 @@ export default function Measure({
                       <span className="hero">{best.distance_m.toFixed(1)}</span>
                       <span className="grot dim" style={{ fontSize: 17 }}>m</span>
                       <Help topic="distance" />
-                      <div className="spacer" />
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="cap">90% range <Help topic="interval" align="right" /></div>
-                        <div className="small" style={{ color: 'var(--text-2)' }}>{interval(best)}</div>
-                      </div>
+                    </div>
+                    {/* the range on its own line, about half the big number's size: read from across a room */}
+                    <div style={{ marginTop: 14 }}>
+                      <div className="cap">90% range <Help topic="interval" /></div>
+                      <div className="range-big">{interval(best)}</div>
                     </div>
                     <div style={{ marginTop: 18 }}>
                       <div className="scale">
@@ -419,15 +426,18 @@ export default function Measure({
                       <button
                         key={`${d.method}-${d.idx}`}
                         className="animal"
-                        aria-current={hot === i}
+                        aria-current={sel === i}
                         onMouseEnter={() => setHot(i)}
                         onMouseLeave={() => setHot(null)}
                         onFocus={() => setHot(i)}
-                        onClick={() => setHot(hot === i ? null : i)} // click pins the box so the pointer can leave
+                        onClick={() => setPin(pin === i ? null : i)} // click pins the box so the pointer can leave
                       >
                         <span className="n">{i + 1}</span>
                         <span style={{ flex: 1, minWidth: 0 }}>
                           <span className="ellipsis" style={{ display: 'block' }}>{d.species}</span>
+                          {d.q05_m !== null && d.q95_m !== null && (
+                            <span className="range-row">90% range {interval(d)}</span>
+                          )}
                           <span className="tiny faint" style={{ display: 'block' }}>{sure(d)} sure it is an animal</span>
                         </span>
                         <span className="grot" style={{ fontSize: 15, fontWeight: 600 }}>{metres(d)}</span>

@@ -2205,3 +2205,17 @@ set of weights, so it travels in their manifest, not in the code.
   `"range_k_problem"` when the manifest's value was unusable. Nothing new in the window or the CSV.
 - **Upload.** `scripts/upload_weights.py --range-k K` (or `RANGE_K`) writes the key into the staged manifest only when
   given. A bad K stops `stage` before the multi-GB copy.
+
+## The result panel follows the clicked animal; the 90% range in large type (2026-10-22, user decision)
+
+**Decision.** The big distance and its 90% range show the animal the user clicks, in the animal list or on its box in
+the photo. The click stays after the pointer leaves; a second click on the same animal clears it. With nothing clicked,
+the panel shows the nearest animal, as before. Moving to another photo clears the click. Each row in the animal list
+shows its own 90% range (from the stored `q05_m`/`q95_m`, the fields `/api/folder` returns).
+
+Why: on a photo with two deer, the panel only ever showed the nearest one, so the range of any other deer could not be
+read. Ported from the Mac copy (commits 76ab2ba, 548fea0); only the UI part, not its offline data layer.
+
+- **Layout.** The range sits on its own line under the big number, with a "90% range" label above it: 24px semibold
+  in the brightest text colour (`.range-big`), about half the 46px number. It was 12px grey at the right edge. Each
+  animal row's range is 14px (`.range-row`); the "% sure" note under it stays 12px.
