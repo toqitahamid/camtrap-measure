@@ -1,0 +1,65 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "CamTrap Measure: Distance Estimation of White-Tailed Deer in Camera-Trap Photos"
+version: "0.3.0"
+license: MIT
+repository-code: "https://github.com/toqitahamid/camtrap-measure"
+abstract: >-
+  CamTrap Measure is a Windows desktop app that gives the distance to each
+  white-tailed deer in camera-trap photos. It combines MegaDetector, SpeciesNet
+  and a reference-conditioned distance network to give each animal a distance
+  with a 90% interval.
+keywords:
+  - camera traps
+  - wildlife
+  - distance estimation
+  - white-tailed deer
+  - MegaDetector
+authors:
+  - family-names: Sarker
+    given-names: Toqi Tahamid
+    orcid: "https://orcid.org/0000-0003-2482-8059"
+    affiliation: Southern Illinois University Carbondale
+  - family-names: Islam
+    given-names: Taminul
+    orcid: "https://orcid.org/0000-0002-7803-4564"
+    affiliation: Southern Illinois University Carbondale
+  - family-names: Morelock
+    given-names: Seth J.
+    orcid: "https://orcid.org/0009-0003-1657-1895"
+    affiliation: Southern Illinois University Carbondale
+  - family-names: Bastille-Rousseau
+    given-names: Guillaume
+    orcid: "https://orcid.org/0000-0001-6799-639X"
+    affiliation: Southern Illinois University Carbondale
+  - family-names: Ahmed
+    given-names: Khaled R.
+    orcid: "https://orcid.org/0000-0002-3707-4316"
+    affiliation: Southern Illinois University Carbondale
+references:
+  - type: conference-paper
+    title: "Reference-Conditioned Distance Intervals on Unseen Camera Traps"
+    year: 2026
+    collection-title: "Computer Vision for Ecology Workshop, European Conference on Computer Vision (ECCV)"
+    authors:
+      - family-names: Sarker
+        given-names: Toqi Tahamid
+        orcid: "https://orcid.org/0000-0003-2482-8059"
+        affiliation: Southern Illinois University Carbondale
+      - family-names: Islam
+        given-names: Taminul
+        orcid: "https://orcid.org/0000-0002-7803-4564"
+        affiliation: Southern Illinois University Carbondale
+      - family-names: Morelock
+        given-names: Seth J.
+        orcid: "https://orcid.org/0009-0003-1657-1895"
+        affiliation: Southern Illinois University Carbondale
+      - family-names: Bastille-Rousseau
+        given-names: Guillaume
+        orcid: "https://orcid.org/0000-0001-6799-639X"
+        affiliation: Southern Illinois University Carbondale
+      - family-names: Ahmed
+        given-names: Khaled R.
+        orcid: "https://orcid.org/0000-0002-3707-4316"
+        affiliation: Southern Illinois University Carbondale
