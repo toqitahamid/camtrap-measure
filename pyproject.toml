@@ -3,6 +3,7 @@ name = "camtrap-measure"
 version = "0.3.0"
 description = "Distance measurement for camera-trap deer photos"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "fastapi",
     "uvicorn",
