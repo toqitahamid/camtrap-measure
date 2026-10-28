@@ -134,8 +134,8 @@ developer's tree, not an install. The running version and checkout show in the p
   they are asked for by name.
 - The lockfile `uv.lock` is committed and installed `--frozen`, so a release is exactly the
   set of packages it was tested with and `uv` never modifies a tracked file on the dept
-  machine. The CUDA build of torch needs care in the installer:
-  a frozen sync of the current lock would install the CPU torch.
+  machine. On Windows the lock pins the CUDA 12.8 build of torch and torchvision (the `pytorch-cu128`
+  index in `pyproject.toml`), so the frozen sync installs the CUDA build; Linux gets PyPI's build.
 - **Model weights are not code**: they live in `~/.camtrap-measure/weights/` and are
   updated by the app itself through the weights manifest (see below), never by Git.
 
@@ -154,8 +154,8 @@ Local state (cached login session, SQLite mirror of cloud annotations/sites)
 lives in `~/.camtrap-measure/`; override with `CAMTRAP_DATA_DIR`.
 
 Measurement runs go through the inference boundary in `inference.py`. With the
-`inference` extra installed (`uv sync --extra inference`, plus a CUDA build of
-torch — see below) the engine downloads the model weights at startup and runs real
+`inference` extra installed (`uv sync --extra inference`; on Windows this brings the CUDA
+build of torch from the lockfile) the engine downloads the model weights at startup and runs real
 MegaDetector + SpeciesNet; without it, the shipped `fake` backend produces
 deterministic detections per file name and the UI says so, so the whole app
 runs and demos without a GPU. Set `CAMTRAP_FAKE_DELAY=0.3` (seconds per photo)
@@ -183,8 +183,8 @@ measured again.
 and is skipped unless CUDA, the extra, `CAMTRAP_WEIGHTS_DIR`, `CAMTRAP_SMOKE_PHOTO`
 and `CAMTRAP_SMOKE_FLAG` (the camera's flag photo + `.json`) are all present. On DeltaAI: `scripts/hpc_env.sh` once
 (layered venv on the module torch), then `sbatch scripts/gpu_smoke.sbatch`.
-On the department's Windows machine torch comes from the installer,
-not from `uv sync` — the lockfile deliberately does not pin a CUDA build.
+On the department's Windows machine torch comes from the same frozen `uv sync --extra inference`:
+the lockfile pins the CUDA 12.8 build for Windows.
 
 Supabase is read-only from this app: `supabase_ro.py` is the only client and
 exposes auth plus three reads; `tests/test_supabase_ro.py` enforces it.
