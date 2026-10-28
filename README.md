@@ -1,8 +1,6 @@
 # CamTrap Measure
 
 Windows desktop app: distance to each white-tailed deer in camera-trap photos.
-Design context in `CONTEXT.md`; spec and tickets in `.scratch/app/`; picking the work up on
-another machine: `HANDOFF.md`.
 
 ## Install (department machine, Windows — no expert needed)
 
@@ -76,7 +74,7 @@ against, and the photo folder. The distance is always read at the bottom of the 
 ### The CSV export
 
 The CSV holds data only: the column header row, then one row per animal. It has no `#` note lines and no
-warning text, and it holds every result row in the selection (user decisions 2026-10-11). Every row is a
+warning text, and it holds every result row in the selection. Every row is a
 MegaDetector-box answer; a photo an older run also measured with SAM3 still gives one row per animal. A photo
 measured only with SAM3 by an older version is not in the CSV until it is measured again. The seven columns, in
 order:
@@ -106,7 +104,7 @@ photo's line also says how it was lined up through a day photo (`night`, with `c
 `undated`). A file that cannot be read gets one line per run. The file is never trimmed.
 
 The app gives distances only. Density estimation (for example with R's `Distance` package) is the wildlife
-staff's own task, done outside the app from this CSV (user decision 2026-10-11).
+staff's own task, done outside the app from this CSV.
 
 The bar at the bottom says what the models are doing. During a run in one camera folder it becomes the
 progress line, with the photo in flight and how many are left. During a site run the run card shows the
@@ -132,11 +130,11 @@ developer's tree, not an install. The running version and checkout show in the p
   PowerShell now, which reads a script whole before running it — cmd re-read a running `.bat` by byte
   offset, which is why `run.bat` still keeps its one command on the last line, ending in `exit /b`.)
 - **Remove it**: Settings ▸ Apps ▸ CamTrap Measure ▸ Uninstall. It asks before deleting the app, and asks
-  separately about the measurements and downloaded models (`<folder>\data`, or `~/.camtrap-measure` for an install from before ticket 24), which are kept unless
+  separately about the measurements and downloaded models (`<folder>\data`, or `~/.camtrap-measure` for an install from before the install folder could be chosen), which are kept unless
   they are asked for by name.
 - The lockfile `uv.lock` is committed and installed `--frozen`, so a release is exactly the
   set of packages it was tested with and `uv` never modifies a tracked file on the dept
-  machine. The CUDA build of torch is the open question for the installer (ticket 12):
+  machine. The CUDA build of torch needs care in the installer:
   a frozen sync of the current lock would install the CPU torch.
 - **Model weights are not code**: they live in `~/.camtrap-measure/weights/` and are
   updated by the app itself through the weights manifest (see below), never by Git.
@@ -185,7 +183,7 @@ measured again.
 and is skipped unless CUDA, the extra, `CAMTRAP_WEIGHTS_DIR`, `CAMTRAP_SMOKE_PHOTO`
 and `CAMTRAP_SMOKE_FLAG` (the camera's flag photo + `.json`) are all present. On DeltaAI: `scripts/hpc_env.sh` once
 (layered venv on the module torch), then `sbatch scripts/gpu_smoke.sbatch`.
-On the department's Windows machine torch comes from the installer (ticket 12),
+On the department's Windows machine torch comes from the installer,
 not from `uv sync` — the lockfile deliberately does not pin a CUDA build.
 
 Supabase is read-only from this app: `supabase_ro.py` is the only client and
