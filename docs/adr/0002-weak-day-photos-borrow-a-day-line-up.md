@@ -1,6 +1,6 @@
 # 0002. A weak day photo borrows a day photo's line-up (day rule)
 
-Date: 2026-10-12. Status: accepted; implemented 2026-10-12 on branch `fix/day-borrow`, not committed (ticket 35).
+Date: 2026-10-12. Status: accepted; implemented 2026-10-12 on branch `fix/day-borrow`, not committed.
 
 ## Context
 
@@ -14,7 +14,7 @@ plausible wrong distance with no reason. Night photos already avoid their own li
 
 ## Decision
 
-User decisions, 2026-10-12:
+Decided 2026-10-12:
 
 - A day photo keeps its direct line-up only when it has a homography and at least 4,000 points (the Night rule's
   `DAY_MIN`). Otherwise the day rule runs.

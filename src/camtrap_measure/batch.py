@@ -1,5 +1,5 @@
 """A site folder: the camera folders inside it, each matched to its camera by name, checked against the camera
-name the photos carry, and every photo given its flag photo by date. Then one queue measures them (ticket 27).
+name the photos carry, and every photo given its flag photo by date. Then one queue measures them (the site-folder change).
 
 A folder is a *site folder* when it holds no JPEGs itself and its subfolders do. A folder with JPEGs directly in
 it is one camera's card, as before, and none of this applies.

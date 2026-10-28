@@ -185,7 +185,7 @@ if ($running.Count -gt 0) {
 # say "something is happening", and a click that shows nothing for a minute reads as broken (2026-09-29: the
 # researcher clicked twice and wrote "it dont show anything"). It comes up before anything else is done.
 # System colours, like the installer. launch.vbs starts this process hidden, and Windows applies that to the
-# first window it shows: the splash was built here since ticket 18 and never seen. Show-Now is the installer's
+# first window it shows: the splash was built here since the installer and launcher change and never seen. Show-Now is the installer's
 # answer (see install.ps1): an explicit ShowWindow as the window loads, then a moment of TopMost to bring it in
 # front of whatever was on screen.
 $E = [char]0x2026  # the ellipsis, as one character: this file is ASCII, with no byte order mark
@@ -326,7 +326,7 @@ try {
 }
 
 # --- where the data and uv's folders are ------------------------------------------------------------
-# An install made by ticket 24 or later sits under one folder R: R\app (this clone), R\data, R\uv-cache and
+# An install made since the install-folder change sits under one folder R: R\app (this clone), R\data, R\uv-cache and
 # R\python. R\camtrap-install.json names the last three, and they are set here for this process only, before
 # any uv or git step, so uv and the app inherit them. The file is in R, not in the clone: an untracked file
 # there would make the clone look changed and stop its updates.
@@ -334,7 +334,7 @@ try {
 # on a developer's PC, uv in their own repo used the installed app's cache and Python, and their copy of the
 # app its data (2026-09-25). An install from that time has the variables and no file; its first start with
 # this launcher writes the file and removes exactly those variables (only ones pointing inside R). An install
-# from before ticket 24 has neither and keeps the app's defaults (%USERPROFILE%\.camtrap-measure).
+# from before the install-folder change has neither and keeps the app's defaults (%USERPROFILE%\.camtrap-measure).
 # Any failure is a log line and the start carries on.
 $EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
 $LayoutKeys = @{ "CAMTRAP_DATA_DIR" = "data"; "UV_CACHE_DIR" = "uv_cache"; "UV_PYTHON_INSTALL_DIR" = "uv_python" }
@@ -359,7 +359,7 @@ try {
     } elseif ([IO.Path]::GetFileName($Dir.TrimEnd("\")) -ine "app") {
         Log "layout: none (an install from before ticket 24 - the app's defaults)"
     } else {
-        # An install made after ticket 24 but before the layout file: its folders are in user variables.
+        # An install made after the install-folder change but before the layout file: its folders are in user variables.
         $legacy = [ordered]@{}
         foreach ($n in $EnvNames) {
             $v = [Environment]::GetEnvironmentVariable($n, "User")

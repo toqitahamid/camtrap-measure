@@ -1,6 +1,6 @@
 # 0001. Night photos copy or chain from a day photo's line-up (Night rule)
 
-Date: 2026-10-10; final 2026-10-11. Status: accepted; implemented 2026-10-11 on branch `fix/night-bracket`, not committed (ticket 33).
+Date: 2026-10-10; final 2026-10-11. Status: accepted; implemented 2026-10-11 on branch `fix/night-bracket`, not committed.
 
 ## Context
 

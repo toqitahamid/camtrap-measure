@@ -8,14 +8,14 @@
   6.5 GB of weights would upload to the university's cloud the moment they were written.
 
   Why this exists: the models are 6.5 GB. Carried on a USB stick or a share, they install without that
-  download. The weights repo is public from the release of ticket 36 (2026-10-12; it must be public before
-  that ships), so no team machine needs an account or a token either way, and the app still checks the repo
-  at every start and fetches only the files that changed.
+  download. The weights repo is public since the public-weights change (2026-10-12, ADR 0003), so no team
+  machine needs an account or a token either way, and the app still checks the repo at every start and
+  fetches only the files that changed.
 
   The result is about 6.5 GB and installs by double-click. The app itself still comes from GitHub during
   the install, which is public, so the machine needs the internet - it just needs no credentials.
 
-  Weights are not code (CLAUDE.md): this writes a distributable, never anything that goes into git.
+  Weights are not code and never go into git: this writes a distributable, nothing that is committed.
 #>
 [CmdletBinding()]
 param(

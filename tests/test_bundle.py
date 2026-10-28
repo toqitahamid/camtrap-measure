@@ -293,7 +293,7 @@ def _upload_script():
 
 
 def test_staging_writes_range_k_into_the_manifest_only_when_given():
-    """Ticket 37: `--range-k` puts the range factor into the staged manifest.json; left out, the manifest has no range_k
+    """The range-factor change (ADR 0004): `--range-k` puts the range factor into the staged manifest.json; left out, the manifest has no range_k
     key (the app shows the raw range). VERSION and the checkpoint are not touched. k is capped at RANGE_K_MAX, the same
     cap as the app's. Nothing is staged or uploaded here."""
     from camtrap_measure import distance

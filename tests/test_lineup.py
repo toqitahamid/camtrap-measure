@@ -1,4 +1,4 @@
-"""How a photo is lined up with its flag photo (tickets 33 and 35): a day photo directly when its own line-up has
+"""How a photo is lined up with its flag photo (the Night-rule and day-rule changes): a day photo directly when its own line-up has
 4,000 points or more, else by the day rule (Copy or Fallback from a day photo near it, no vote and no Chain; with none,
 its own line-up from 2,500 points, else no distance); a night photo by the Night rule. Copy
 the nearer day photo's line-up when the day photos before (A) and after (B) agree the camera did not move; when it
@@ -9,8 +9,8 @@ the Night-rule detail), and the same answer on every path.
 
 The rules run on stand-in models: `Stub` hands the planner made-up links, and `inference.FakeModels` runs Real's own
 two-stage run without a GPU. Numbers in the links are inliers, or (inliers, dx, dy) for a homography that shifts by
-(dx, dy) px; the shift p95 of such a link is exactly hypot(dx, dy). Every rule's source is the grilling log
-(.scratch/app/issues/33-night-bracket-grilling.md) and research folders 43, 59 and 60 of ../distance_estimation."""
+(dx, dy) px; the shift p95 of such a link is exactly hypot(dx, dy). Every rule's source is the design review
+summarised in docs/adr/0001 and 0002, and research folders 43, 59 and 60 of ../distance_estimation."""
 
 import json
 import os
@@ -146,13 +146,13 @@ def log_lines() -> list[dict]:
 def logged(line: lineup.Line) -> dict | None:
     """The `night` object of the researcher-log line measure._job writes for a photo with this line-up (no boxes):
     None for a day photo, which has no `night` object. What a night answer asks to check by eye is its `checks` field:
-    the only place it is kept (user decision 2026-10-11; the export's `check` column is gone)."""
+    the only place it is kept (decided 2026-10-11; the export's `check` column is gone)."""
     measure._log_measured(Path("IMG_N.JPG"), "CAM", {}, [], line.public())
     return log_lines()[-1].get("night")
 
 
 def logged_day(line: lineup.Line) -> dict | None:
-    """The `day_borrow` object of the researcher-log line for a day photo with this line-up (ticket 35): None for a
+    """The `day_borrow` object of the researcher-log line for a day photo with this line-up (the day-rule change): None for a
     day photo lined up directly, and for a night photo."""
     measure._log_measured(Path("IMG_D.JPG"), "CAM", {}, [], line.public())
     return log_lines()[-1].get("day_borrow")
@@ -210,7 +210,7 @@ def test_a_day_photo_lines_up_directly_as_before(tmp_path):
     assert line.H[0, 2] == 1.0 and stub.calls == [("IMG_1.JPG", FLAG)]
 
 
-# --- day photos whose own line-up is weak: the day rule (ticket 35) ------------------------------------------------
+# --- day photos whose own line-up is weak: the day rule (ADR 0002) ------------------------------------------------
 
 W = "IMG_2.JPG"  # the weak day photo: a frame-filling animal hides the background (TON_CAM04 IMG_0982: 9.30 m, burst
                  # mates 11.18-11.40 m)
@@ -466,7 +466,7 @@ def test_a_weak_day_photo_whose_folder_cannot_be_listed_keeps_its_own_line_up_or
 
 @pytest.mark.parametrize("got", [(None, 3), (None, 40)])  # 40: points, but no homography from them
 def test_a_day_photo_with_no_line_up_of_its_own_is_not_lined_up(tmp_path, got):
-    """Changed by the day rule (ticket 35). Before, such a day photo was a direct answer with status none and the
+    """Changed by the day rule (ADR 0002). Before, such a day photo was a direct answer with status none and the
     reason "lines up poorly" (3 points) or "did not line up" (40 points). Now its own line-up is weak, so it looks for
     a day photo near it; there is none (alone in its folder; the flag photo is undated, so it cannot stand as A), and
     with no homography its own line-up cannot be kept: no distance, with the day rule's reason, and a researcher-log
@@ -891,7 +891,7 @@ def test_an_answer_from_an_earlier_line_up_version_is_measured_again_only_for_a_
 
 
 def test_an_old_weak_direct_day_answer_is_measured_again_once_and_strong_and_night_answers_are_not(monkeypatch):
-    """Ticket 35: a day answer lined up directly with fewer than 4,000 points is what the day rule now answers another
+    """The day-rule change: a day answer lined up directly with fewer than 4,000 points is what the day rule now answers another
     way, so it is out of date under any version. VERSION stays 2, so no current night answer is measured again."""
     monkeypatch.setattr(lineup, "read_night", lambda p: pytest.fail("read a photo the rule did not need"))
     v2 = {**KNOWN, "path": "/x/IMG_1.JPG", "alignment_version": lineup.VERSION}
@@ -1068,7 +1068,7 @@ def _log_lines() -> list[dict]:
 
 
 def test_the_manifests_range_factor_widens_every_stored_exported_and_logged_range(synced, tmp_path, monkeypatch):
-    """Ticket 37: a manifest without range_k gives the raw range, exactly as before. A manifest with range_k = k (a new
+    """The range-factor change (ADR 0004): a manifest without range_k gives the raw range, exactly as before. A manifest with range_k = k (a new
     weights version) widens each read-out's range around q50 (distance.widen) before it is stored, exported and
     logged; q50 does not move. Each researcher-log line names the k it used."""
     monkeypatch.setattr(inference, "backend", fake_models())
@@ -1103,7 +1103,7 @@ def test_the_manifests_range_factor_widens_every_stored_exported_and_logged_rang
 def test_an_unusable_range_k_measures_with_the_raw_range(synced, tmp_path, monkeypatch):
     """A manifest whose range_k is not a finite number in (0, 5] does not stop a run: k falls back to 1.0, the ranges
     are the raw ones, and each research-log line says why under range_k_problem. Nothing about k reaches the window
-    (user decision 2026-10-13; the launcher log: test_inference)."""
+    (decided 2026-10-13; the launcher log: test_inference)."""
     models = fake_models(range_k=-1.0)
     assert models.range_k == 1.0 and "range_k" in models.range_problem
     monkeypatch.setattr(inference, "backend", models)
@@ -1120,7 +1120,7 @@ def test_an_unusable_range_k_measures_with_the_raw_range(synced, tmp_path, monke
 
 
 def test_the_researcher_log_records_each_measured_photo_in_the_apps_logs_folder(synced, tmp_path, monkeypatch):
-    """One log (user decision 2026-10-11): one line per photo measured, day or night; a night answer carries the
+    """One log (decided 2026-10-11): one line per photo measured, day or night; a night answer carries the
     Night-rule detail under `night`. A run that skips current answers writes nothing more."""
     monkeypatch.setattr(inference, "backend", fake_models())
     d = camera(tmp_path, RUN_CAM, SITE)
@@ -1159,8 +1159,8 @@ def test_a_researcher_log_that_cannot_be_written_never_stops_a_run(monkeypatch, 
 
 
 def test_a_day_photo_with_a_reason_gets_a_log_line_with_that_reason(synced, tmp_path, monkeypatch):
-    """The reasons are written only to the researcher log (user decision 2026-10-11), as report.reasons words them.
-    Changed by the day rule (ticket 35): before, this day photo (9 points, alone in its folder) was a direct answer
+    """The reasons are written only to the researcher log (decided 2026-10-11), as report.reasons words them.
+    Changed by the day rule (ADR 0002): before, this day photo (9 points, alone in its folder) was a direct answer
     with a distance and the reason "lines up poorly (9 points, needs 15)". Now it has no day photo near it (the synced
     flag photo is 2 x 2 px, so it cannot stand as A) and too few points to keep its own line-up: no distance, with the
     day rule's reason, and the day-rule detail under `day_borrow`."""
@@ -1249,7 +1249,7 @@ def test_a_night_photo_between_day_photos_that_moved_is_chained_through_the_winn
         {"IMG_0002.JPG": ([], "chain", "A", "IMG_0001.JPG"), "IMG_0003.JPG": (["moved"], "fallback", "B", "IMG_0005.JPG")}
     got = export_rows(synced)
     assert {r["photo"] for r in got} == {"IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0005.JPG"}
-    assert "check" not in got[0]  # the camera move is in the researcher log only (user decision 2026-10-11)
+    assert "check" not in got[0]  # the camera move is in the researcher log only (decided 2026-10-11)
 
 
 def test_with_the_flag_photo_as_day_photo_a_the_run_still_never_links_a_night_photo_to_it(full_flag, tmp_path, monkeypatch):
@@ -1265,7 +1265,7 @@ def test_with_the_flag_photo_as_day_photo_a_the_run_still_never_links_a_night_ph
 
 def test_a_night_photo_that_copies_the_flag_photo_itself_is_exported_and_its_check_is_only_in_the_log(
         full_flag, tmp_path, monkeypatch):
-    """Follow-up F, after the user decisions of 2026-10-11 (the window's "Lines up" line and the export's `check`
+    """Follow-up F, after the decisions of 2026-10-11 (the window's "Lines up" line and the export's `check`
     column are gone). The flag photo's own line-up is the identity, so the night photo has a distance but no points of
     its own (match_score empty, review fix 10). The export writes the number; what to check by eye (only one day
     photo, so the camera move was not checked) is in the researcher log and nowhere else."""
@@ -1281,7 +1281,7 @@ def test_a_night_photo_that_copies_the_flag_photo_itself_is_exported_and_its_che
 
 def test_a_night_photo_with_no_answer_is_exported_without_a_distance_and_empty_frames_are_not_rows(synced, tmp_path,
                                                                                                  monkeypatch):
-    """Follow-up F, option (a), after the user decisions of 2026-10-11: the export holds every result row. A night
+    """Follow-up F, option (a), after the decisions of 2026-10-11: the export holds every result row. A night
     photo with no day photo on either side is a row with an empty distance. A photo with no animal (day or night)
     is no row at all; the window lists it as measured with no animal (`detections` empty)."""
     monkeypatch.setattr(inference, "backend", fake_models(boxes={"IMG_0001.JPG": []},
@@ -1317,7 +1317,7 @@ def test_a_day_photo_arriving_later_gives_the_one_sided_night_photos_a_checked_a
 
 
 def test_old_answers_measure_again_once_for_night_photos_and_weak_direct_day_photos(synced, tmp_path, monkeypatch):
-    """Changed by the day rule (ticket 35; was "... and never for day photos"). IMG_0001's answer from before ticket 33
+    """Changed by the day rule (ADR 0002; was "... and never for day photos"). IMG_0001's answer from before the Night-rule change
     has 37 points: lined up directly with fewer than 4,000, so it is out of date now and measured again, once (the
     fake's 8,000 points: direct). A strong day answer (IMG_0005, 9,000 points, version 1) is still kept."""
     d = camera(tmp_path, RUN_CAM, SITE)
@@ -1325,7 +1325,7 @@ def test_old_answers_measure_again_once_for_night_photos_and_weak_direct_day_pho
     base = {"site": SITE, "captured_at": None, "make": None, "model": None, "calibration_image": SITE_FLAG,
             "held_reason": None, "calibration_version": cal["updated_at"], "fidelity": "research",
             "fit_version": cal["fit_version"]}
-    for n in ("IMG_0001.JPG", "IMG_0002.JPG"):  # measured before ticket 33: no line-up fields at all
+    for n in ("IMG_0001.JPG", "IMG_0002.JPG"):  # measured before the Night-rule change: no line-up fields at all
         store.record({**base, "path": str(d / n), "match_score": 37}, "md", [])
     # measured by the first bracket design (line-up version 1): a day photo, and a night photo it called "moved"
     store.record({**base, "path": str(d / "IMG_0005.JPG"), "match_score": 9000, "alignment_version": 1, "night": 0,

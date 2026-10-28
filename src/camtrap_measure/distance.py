@@ -6,11 +6,11 @@ Ported from ../distance_estimation@6a6eed5 — change the math there first:
   transport/matchers.py                      match_roma: dense warp → sampled matches
   transport/build_prompts_roma.py            MAGSAC homography → stride-4 grid → pixel_to_distance → D_R
   transport/gate_roma.py                     published gate: fewer than MIN_INLIERS inliers → suspicious (the app stores
-                                             the numbers and lets the export gate exclude them — CONTEXT "Trust / review UX")
+                                             the numbers and lets the export gate exclude them)
   experiments/refnet/10_cv4e_pipeline/model.py                        QuantileHead + load_unified (verbatim)
   experiments/refnet/29_testsplit_revision/eval_intervals_rollfix.py  7-ch input, bf16, 5×5 nanmedian readout
 The paper ships the raw [q05, q95] band (E = 0; docs/claims.md, R4 rollfix refresh). A weights manifest may carry a
-range factor k (`range_k`, ticket 37) that widens the band around q50 (`widen`); without one the band stays raw.
+range factor k (`range_k`, the range-factor change, ADR 0004) that widens the band around q50 (`widen`); without one the band stays raw.
 
 The numpy half (distance_map, read_at, crop_banner) has no torch dependency and is unit-tested;
 `Distance` needs the [inference] extra and the weights manifest entries unified / roma / dinov2.
@@ -40,7 +40,7 @@ TIGHT_CARD_GB = 10        # below this much VRAM in total, the 864 warp does not
 # Two ways to run the same models. RESEARCH reproduces the published pipeline exactly — bfloat16 autocast
 # over fp32 weights and RoMa at its own defaults — and is what the app uses unless told otherwise, because
 # the numbers this app prints are the paper's numbers. FAST trades a few centimetres for roughly ten times
-# the speed on a card too small for the published settings; every difference is listed in CONTEXT.md.
+# the speed on a card too small for the published settings; every difference is a `fidelity == FAST` branch below.
 RESEARCH, FAST = "research", "fast"
 FIDELITIES = (RESEARCH, FAST)
 # What the status line calls the two models this stage puts on the card. RoMa's DINOv2 backbone is not
@@ -50,7 +50,7 @@ FIDELITIES = (RESEARCH, FAST)
 MODELS = ["RoMa", "distance model"]
 MIN_INLIERS = 15  # published gate (reports/gate_57cam.md): fewer homography inliers = misfiled or moved camera
 SEED = 0  # RoMa samples its matches with torch.multinomial; every line-up seeds torch with this first, so the same two
-          # photos line up the same way on the same computer, software, device and fidelity (ticket 30).
+          # photos line up the same way on the same computer, software, device and fidelity (the fixed-seed change).
           # MAGSAC needs no seed: it is already deterministic on the same matches.
 HALF = 2  # 5×5 readout window
 
@@ -78,7 +78,7 @@ def read_at(pred: np.ndarray, u: float, v: float) -> float | None:
     return float(np.nanmedian(patch)) if patch.size and np.isfinite(patch).any() else None
 
 
-RANGE_K = "range_k"  # the weights manifest key that carries the range factor k (ticket 37)
+RANGE_K = "range_k"  # the weights manifest key that carries the range factor k (the range-factor change, ADR 0004)
 RANGE_K_MAX = 5.0  # the largest usable k; scripts/upload_weights.py keeps a copy (RANGE_K_MAX there), keep them equal
 
 
@@ -96,10 +96,10 @@ def usable_range_k(k) -> bool:
 def range_factor(manifest: dict) -> tuple[float, str | None]:
     """The range factor k of a weights manifest, and the problem when the manifest's value is unusable.
 
-    No `range_k` key gives (1.0, None): the raw range, as every manifest before ticket 37. A value that is not a finite
+    No `range_k` key gives (1.0, None): the raw range, as every manifest before the range-factor change (ADR 0004). A value that is not a finite
     number above 0 and at most RANGE_K_MAX (a string, true, 0, -1, NaN, infinity, 6, 10**400) gives (1.0, why): the
     run goes on with the raw range. The problem goes to the research log and the backend's stderr, never to the
-    window: staff never see k (user decision 2026-10-13)."""
+    window: staff never see k (decided 2026-10-13)."""
     if RANGE_K not in manifest:
         return 1.0, None
     k = manifest[RANGE_K]
@@ -292,7 +292,7 @@ def upsample_res(torch, device: str, fidelity: str) -> int:
     needs 6.3 GB, more than Windows leaves free with a browser open, so the driver quietly serves the
     overflow from system memory over PCIe and a photo takes 3.6 to 26 seconds - the same run, the same
     settings, a lottery. At 672 it needs 4.4 GB, fits, and takes about 2. The metres move by ~8 cm,
-    which is inside the 3-17 cm that repeat runs of identical settings moved before ticket 30 seeded
+    which is inside the 3-17 cm that repeat runs of identical settings moved before the fixed-seed change seeded
     RoMa's match sampling (the draw-to-draw spread). A card big enough for 864 keeps the research default.
     """
     if device != "cuda" or fidelity == RESEARCH:

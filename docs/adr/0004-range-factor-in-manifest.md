@@ -1,6 +1,6 @@
 # 0004. The range factor k travels in the weights manifest, not in the code
 
-Date: 2026-10-13. Status: accepted; implemented 2026-10-13 on branch `fix/range-k`, not committed (ticket 37).
+Date: 2026-10-13. Status: accepted; implemented 2026-10-13 on branch `fix/range-k`, not committed.
 
 ## Context
 
@@ -15,13 +15,13 @@ needs about 1.6 (an estimate from one camera). The current app model needs no wi
 
 ## Decision
 
-User decision, 2026-10-13: k is a key of the weights manifest, `"range_k"` (a float), written by
+Decided 2026-10-13: k is a key of the weights manifest, `"range_k"` (a float), written by
 `scripts/upload_weights.py --range-k`. The app reads it once when the models are set up (`inference.Real`) and widens
 every read-out with `distance.widen` before the range is stored. With no key, k = 1.0 and the range is the raw one,
 bit for bit. k is capped: only a finite number with 0 < k ≤ 5 (`distance.RANGE_K_MAX`) is used. Any other value falls
 back to 1.0.
 
-Staff never see k (user decision, 2026-10-13): nothing about k appears in the window, the status line or
+Staff never see k (decided 2026-10-13): nothing about k appears in the window, the status line or
 `/api/status`. An unusable value's problem goes to the research log (`"range_k_problem"` on each measured-photo line)
 and the launcher log only.
 
@@ -30,7 +30,7 @@ and the launcher log only.
 - A k always goes with the weights it was fitted on. A new model with its own k is one upload; no app release is needed.
 - The current manifest (2026.08.20c) has no key, so every current answer stays exactly as it is.
 - k needs no stale rule of its own. It lives in the manifest, so a new k ships as a new manifest version, and a new
-  version already makes every older answer "Out of date" (ticket 36). Changing k under an unchanged version would
+  version already makes every older answer "Out of date" (the public-weights change). Changing k under an unchanged version would
   leave old answers looking current, so `upload_weights.py --force` refuses when the repo's manifest names the same
   version with another range_k (a missing key counts as 1.0).
 - Every range shown comes from the stored q05/q95, so the window and the CSV use the widened range. So does the

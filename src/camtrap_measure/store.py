@@ -39,7 +39,7 @@ create table if not exists links (
     primary key (target, reference, setting, version));
 """
 
-# How a photo was lined up with its flag photo (ticket 33): the line-up version, day or night, source direct /
+# How a photo was lined up with its flag photo (the Night-rule change): the line-up version, day or night, source direct /
 # night, status ok / none, the day photo whose line-up a night photo uses, the detail (JSON: Copy / Chain / Fallback,
 # the day photos, the move check, the vote, the checks by eye), and (only when a side had no day
 # photo) the folder's signature then.
@@ -58,8 +58,8 @@ def _db() -> sqlite3.Connection:
                             ("photos", "alignment_version", "integer"), ("photos", "night", "integer"),
                             ("photos", "align_source", "text"), ("photos", "align_status", "text"),
                             ("photos", "anchor", "text"), ("photos", "align_detail", "text"),
-                            ("photos", "align_folder", "text"),  # pre bracket rule (ticket 33)
-                            ("photos", "weights_version", "text")):  # pre public weights (ticket 36)
+                            ("photos", "align_folder", "text"),  # pre bracket rule (the Night-rule change)
+                            ("photos", "weights_version", "text")):  # pre public weights (the public-weights change, ADR 0003)
         if col not in {r["name"] for r in con.execute(f"pragma table_info({table})")}:
             try:
                 con.execute(f"alter table {table} add column {col} {typ}")
@@ -224,7 +224,7 @@ def save_photo_dates(rows: list[tuple[str, int, int, str | None, bool]]) -> None
                         [(p, size, mtime, t, int(ok)) for p, size, mtime, t, ok in rows])
 
 
-# --- line-ups: day or night, and links between two photos (ticket 33) -----------------------------------------
+# --- line-ups: day or night, and links between two photos (the Night-rule change) -----------------------------------------
 # Facts the line-up rules (lineup.py) read from a file or measured with RoMa. A link is seeded, so the same pair gives
 # the same answer whenever it is measured; it is trusted while both files keep their modification times and under the
 # same `setting` (inference.Real.link_setting: fidelity, RoMa's refinement resolution, weights version). These are
@@ -248,7 +248,7 @@ def save_night(path: str, size: int, mtime_ns: int, value: bool | None) -> None:
 
 
 def save_photo_night(path: str, night: int) -> None:
-    """Note on a stored answer whether its photo is a night photo (lineup.current, for answers from before ticket 33)."""
+    """Note on a stored answer whether its photo is a night photo (lineup.current, for answers from before the Night-rule change)."""
     with closing(_db()) as con, con:
         con.execute("update photos set night=? where path=?", (night, path))
 

@@ -102,7 +102,7 @@ def test_missing_driver_names_the_fix_but_the_install_goes_on(machine):
     machine["smi"] = None
     code, out = run_preflight(["tech@dept.gov", "123456"])
     assert code == 0 and "No NVIDIA driver" in out and "nvidia.com/drivers" in out and "Traceback" not in out
-    assert "with warnings" in out  # story 33: a loud warning, never a crash — the app runs on the CPU
+    assert "with warnings" in out  # a design requirement: a loud warning, never a crash — the app runs on the CPU
 
 
 def test_old_driver_is_explained_by_cuda_version(machine):

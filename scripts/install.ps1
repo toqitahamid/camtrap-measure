@@ -11,13 +11,13 @@
   none (2026-08-21): a portable Git in the user profile, uv's user-scope installer, the app in a folder
   the user picks, shortcuts and the Settings > Apps entry all per-user.
 
-  Where it goes (ticket 24): first it asks where. The answer is a parent folder; everything goes in a
+  Where it goes (the install-folder change): first it asks where. The answer is a parent folder; everything goes in a
   CamTrapMeasure folder inside it (R): R\app is the app, R\data its models and results (CAMTRAP_DATA_DIR),
   R\uv-cache and R\python are uv's download cache and Python (UV_CACHE_DIR, UV_PYTHON_INSTALL_DIR). Those
   three are written to R\camtrap-install.json, which is how the launcher and the uninstaller find them; they
   are environment variables only inside this installer and the launcher, never saved for the whole account.
   Only portable Git and uv.exe stay on C: (small). A machine that already has the app is repaired where it
-  is, without the question: an install from before ticket 24 keeps its app in %LOCALAPPDATA%\CamTrapMeasure
+  is, without the question: an install from before the install-folder change keeps its app in %LOCALAPPDATA%\CamTrapMeasure
   and its data in %USERPROFILE%\.camtrap-measure, untouched.
 
   Every run writes the same lines to CamTrapMeasure-setup.log inside the install folder (R, e.g.
@@ -32,7 +32,7 @@
 param(
     [switch]$Console,
     # A folder of model weights to install instead of downloading them at the first start. The app still
-    # checks the weights repo (public from ticket 36) at every start and fetches only what changed (2026-10-12). Defaults to a
+    # checks the weights repo (public since the public-weights change, ADR 0003) at every start and fetches only what changed (2026-10-12). Defaults to a
     # "weights" folder sitting beside this script, which is what scripts\make_bundle.ps1 builds, so the
     # bundle installs by double-click with no arguments.
     [string]$WeightsFrom,
@@ -76,7 +76,7 @@ if (-not $Console) {
         Add-Type -AssemblyName System.Drawing
         [System.Windows.Forms.Application]::EnableVisualStyles()
         # setup.vbs starts this process hidden (window style 0) so no console shows. Windows applies that
-        # "hidden" to the first window the process shows. Since ticket 24 that first window is the folder
+        # "hidden" to the first window the process shows. Since the install-folder change that first window is the folder
         # question, a modal dialog: it stayed invisible and waited for a click no one could make, and
         # INSTALL.bat seemed to do nothing (2026-09-25). Show-Now makes each window call ShowWindow itself
         # as it loads, which Windows honours. (Showing and hiding a throwaway form first was tried and did
@@ -106,7 +106,7 @@ function Show-Now($window) {
 # (6 GB, cache and environment), 1 GB for results, Python and the base environment (0.3 GB). A warning below
 # this, never a stop.
 $NeedGB = 14
-$LegacyDir = Join-Path $env:LOCALAPPDATA "CamTrapMeasure"  # where every install before ticket 24 put the app
+$LegacyDir = Join-Path $env:LOCALAPPDATA "CamTrapMeasure"  # where every install before the install-folder change put the app
 $EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
 # Standard Windows colours throughout, like any installer: dark text on the light system background. The
 # dark theme was hard to read on a real screen (2026-09-25). Warnings are dark orange, readable on light.
@@ -171,7 +171,7 @@ function Is-Inside($path, $root) {
 }
 
 function Find-KnownRoot {
-    # R of an install made by ticket 24 or later that this machine already has, even one whose run stopped
+    # R of an install made since the install-folder change that this machine already has, even one whose run stopped
     # before the Settings > Apps entry was written; $null when there is none. From, in order: the Settings
     # entry, the user variable an install made before the layout file left behind, and the layout file
     # (camtrap-install.json) in the places the folder question suggests.
@@ -310,7 +310,7 @@ function Ask-Folder($suggest) {
 
 # Already installed: repair it where it is, with no question, and leave its data where it is. The
 # Settings > Apps entry says where; an install from before that entry existed is found at the old place.
-$Root = $null      # R, for an install made by ticket 24 or later; $null for an older one
+$Root = $null      # R, for an install made since the install-folder change; $null for an older one
 $Repair = $false
 $Notes = @()       # for the details pane, which does not exist yet
 $known = $null
@@ -584,7 +584,7 @@ if (Test-Path $pyproject0) {
 }
 # The details pane goes with the window; this file is what a person can send afterwards. It goes in the
 # install folder, next to the app it describes (2026-09-25, the researcher: "write the log inside the
-# camtrap measure folder"). An install from before ticket 24 has no such folder: its log goes in the app
+# camtrap measure folder"). An install from before the install-folder change has no such folder: its log goes in the app
 # folder, kept out of git (below) so the launcher does not take the clone for a changed one and stop
 # updating it. The Desktop and TEMP are the fallbacks. The pane says which one was used.
 $LogHome = if ($Root) { $Root } else { $Dir }
@@ -943,9 +943,9 @@ if ((Run "uv" @("sync", "--frozen") $Dir) -ne 0) {
 # --- 4. the weights, then the checks ----------------------------------------------------------------
 # The checks ask nothing now: they run with no console to ask through, and a bare input() there raised
 # EOFError before a single check was read (2026-08-23). Nothing here needs a person either: the weights repo
-# is public from the release of ticket 36 (it must be public before that ships), so no token is asked for
+# is public since the public-weights change (ADR 0003), so no token is asked for
 # (2026-10-12), and signing in to FlagLabel happens in the app window,
-# which has had its own sign-in since ticket 14.
+# which has had its own sign-in since the one-time-code login change.
 $cfg = Join-Path $DataDir "config.json"  # where the app will look: CAMTRAP_DATA_DIR, set above for this process
 
 # Weights that came with the installer: copy them in, so the first start downloads nothing new.
@@ -974,7 +974,7 @@ if ($WeightsFrom) {
         Detail "Models installed in $target."
     }
     $bundled = $true
-}  # no bundle: the app downloads the weights from the repo (public from ticket 36) at its first start
+}  # no bundle: the app downloads the weights from the repo (public since the public-weights change, ADR 0003) at its first start
 
 if ($bundled) {
     # A label only (2026-10-12): the status line says the models came with the installer. The app checks

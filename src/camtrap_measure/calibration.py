@@ -1,6 +1,6 @@
 """App-level calibration: fit one flag photo, say in plain language when it cannot be, list them per camera.
 
-A flag photo is unusable only when it cannot be fitted at all (ticket 15, the researcher's verdict after
+A flag photo is unusable only when it cannot be fitted at all (the pick-a-flag-photo change, the researcher's verdict after
 the first dept session): not labeled yet in FlagLabel, missing from storage, or too few flag labels for
 the 4-parameter fit. No validity windows, no leave-one-out quality verdict — the user picks the flag
 photo to measure against. Research QC (monotonicity, LOO in `calib/qc.py`) stays a diagnostic.
@@ -19,8 +19,8 @@ from .calib.model_b import MIN_DISTINCT_DISTS, MIN_GROUND_OBS, ModelB
 # How a flag photo is fitted. A calibration fitted under another version is fitted again at the next sync, and an
 # answer measured under one is measured again once (measure.current_answer). Before 1 (stored as None): roll fitted
 # only when direct ground marks cover two transects, and vertical spans projected 6.8 span lengths down to the ground.
-# 1: roll also fitted when vertical-span ground points cover two transects (research folder 47, ticket 29).
-# 2: those points lie 4.8 span lengths below the span, not 6.8 (calib.data.VSPAN_PROJ_RATIO, folder 52, ticket 32).
+# 1: roll also fitted when vertical-span ground points cover two transects (research folder 47, the roll-from-vertical-spans change).
+# 2: those points lie 4.8 span lengths below the span, not 6.8 (calib.data.VSPAN_PROJ_RATIO, folder 52, the span-ratio change).
 VERSION = 2
 
 _DATE_TIME_ORIGINAL, _EXIF_IFD, _MAKE, _MODEL = 0x9003, 0x8769, 0x010F, 0x0110
@@ -92,7 +92,8 @@ def _name_key(name: str) -> list:
 def cameras(sites: list[str], rows: list[dict]) -> list[dict]:
     """Every camera with its flag photos, sorted by image name (natural order); usable ones carry ok=True.
     The frontend defaults to the first usable flag in this list, so the sort order is the default-selection
-    order (ticket, 2026-08-25) — see CONTEXT.md for why this replaced the newest-first order of ticket 15."""
+    order (2026-08-25). It replaced a newest-first order: with that, the default flag photo silently changed
+    whenever a newer flag photo was synced; by name, the lowest-numbered usable flag photo is always the default."""
     by_site: dict[str, list[dict]] = {s: [] for s in sites}
     for r in rows:
         by_site.setdefault(r["site"], []).append(r)

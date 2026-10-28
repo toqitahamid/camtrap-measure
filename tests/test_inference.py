@@ -265,7 +265,7 @@ def test_small_gpu_warning_is_shown(cloud, hub, models_installed, start, monkeyp
 
 def test_an_unusable_range_k_never_reaches_the_window_and_the_run_goes_on(cloud, hub, models_installed, start,
                                                                           monkeypatch, tmp_path):
-    """Ticket 37: Real reads range_k once from its manifest (distance.range_factor). Staff never see k (user decision
+    """The range-factor change (ADR 0004): Real reads range_k once from its manifest (distance.range_factor). Staff never see k (decided
     2026-10-13): an unusable value is not on the status line nor anywhere in /api/status. It goes to the launcher log
     here and to the research log on each measured photo (inference.range_problem: test_lineup). The models still load
     and k falls back to 1.0."""

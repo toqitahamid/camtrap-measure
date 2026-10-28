@@ -6,7 +6,7 @@ list, the table and the frame. A detection row is *suspicious* when its number s
 an analysis unread: the photo did not match its flag photo well (misfiled / moved camera), the detector was
 unsure of the box, SpeciesNet was unsure of the animal, or no ground could be read under it. The density
 estimate leaves such rows out (density.py). The window and the CSV export do not mark them: the export holds
-every result row, data only (user decisions 2026-10-11).
+every result row, data only (decided 2026-10-11).
 """
 
 import csv
@@ -28,7 +28,7 @@ BIN_M = 2  # histogram bin width, metres
 # The seven the user chose (2026-10-11); site, confidence, fidelity, match_score and method were removed. Every row is
 # a MegaDetector-box answer (_one_method).
 COLUMNS = ["photo", "camera", "timestamp", "species", "distance_m", "q05_m", "q95_m"]
-# The distance columns are written in metres to 2 decimals (11.49, not 11.488765716552734; user decision 2026-10-12).
+# The distance columns are written in metres to 2 decimals (11.49, not 11.488765716552734; decided 2026-10-12).
 # Only the CSV text is rounded: the stored values, the window and the summary keep the full number.
 METRES = ("distance_m", "q05_m", "q95_m")
 
@@ -51,7 +51,7 @@ def _detail(row: dict) -> dict:
 
 
 def _day_not_lined_up(why: dict) -> str:
-    """Why a day photo under the day rule (ticket 35) has no line-up the distance can be read through: its own line-up
+    """Why a day photo under the day rule (ADR 0002) has no line-up the distance can be read through: its own line-up
     was weak (no homography, or under lineup.DAY_KEEP points) and no clear day photo near it could be borrowed from."""
     if why.get("why") == lineup.UNPLACED:
         return ("day photo that lines up poorly and could not be placed in time among the photos of its folder, so no "
@@ -64,7 +64,7 @@ def _day_not_lined_up(why: dict) -> str:
 
 
 def _not_lined_up(why: dict) -> str:
-    """Why a night photo has no line-up the distance can be read through (ticket 33). Under the Night rule this is
+    """Why a night photo has no line-up the distance can be read through (the Night-rule change). Under the Night rule this is
     rare: no day photo and no flag photo on either side, a photo that could not be placed in time, or a folder that
     could not be listed when the photo was measured."""
     if why.get("why") == lineup.NO_DAY:
@@ -80,15 +80,15 @@ def _not_lined_up(why: dict) -> str:
 
 def reasons(row: dict) -> list[str]:
     """Why a detection row is suspicious; [] when it is clean. Thresholds are named so the gallery explains itself.
-    The line-up fields (align_source, align_status, align_detail) are absent on rows measured before ticket 33 and on
+    The line-up fields (align_source, align_status, align_detail) are absent on rows measured before the Night-rule change and on
     stand-in backends; those rows read as before. A day photo whose own line-up found no homography (direct, status
     none) reads as a poor or failed line-up, by its points. A night answer (the Night rule) is lined up when its status
     is ok, whatever its score: a night photo that copies the flag photo itself has no points of its own. So is a
-    day-rule answer (ticket 35, source day_borrow): ok when it borrowed a day photo's line-up or kept its own; none,
+    day-rule answer (the day-rule change, source day_borrow): ok when it borrowed a day photo's line-up or kept its own; none,
     with its own reason, when it had neither. What a borrowed answer asks a researcher to check by eye (camera moved,
     move not checked, no photo date) is not a reason: it goes to the researcher log's `night` or `day_borrow` object.
     The reasons themselves are written only to the researcher log, research-log.jsonl, one line per measured photo
-    (measure._log_measured; user decisions 2026-10-11)."""
+    (measure._log_measured; decided 2026-10-11)."""
     out = []
     status, score, source = row.get("align_status"), row["match_score"], row.get("align_source")
     if source in (lineup.NIGHT, "bracket", lineup.DAY_BORROW):  # "bracket": a first-design row, measured again
@@ -121,7 +121,7 @@ def _in_range(captured_at: str | None, date_from: str | None, date_to: str | Non
 
 def _in_folder(path: str, folder: str | None) -> bool:
     """Was this photo measured out of `folder` or a folder inside it? A site folder holds its cameras' folders
-    (ticket 27), so RESULTS for the site folder is every camera in it. On Windows the comparison folds case, as
+    (the site-folder change), so RESULTS for the site folder is every camera in it. On Windows the comparison folds case, as
     the filesystem does: the picker and a typed path can disagree about drive letters and capitals."""
     return not folder or Path(folder) in Path(path).parents
 
@@ -151,7 +151,7 @@ def rows(site=None, date_from=None, date_to=None, folder=None, survey_site=None)
 
 def _one_method(rs: list[dict]) -> list[dict]:
     """Only the MegaDetector-box answers (DEFAULT_METHOD): the window measures with no other method, and the export
-    holds one method (user decisions 2026-10-11, "I don't need sam3", "Export one method"). A photo an older run also
+    holds one method (decided 2026-10-11, "I don't need sam3", "Export one method"). A photo an older run also
     measured with SAM3 keeps one row per animal. Density reads `rows` itself and is not narrowed here."""
     return [r for r in rs if r["method"] == DEFAULT_METHOD]
 
@@ -221,7 +221,7 @@ def folder(path: str, site: str = "", flag: str = "", method: str = DEFAULT_METH
     exactly a row that measuring the folder again would redo; with no flag photo chosen nothing is stale,
     because there is nothing to be stale against.
 
-    A site folder (ticket 27) lists the photos of every camera folder in it, each named by its path inside the
+    A site folder (the site-folder change) lists the photos of every camera folder in it, each named by its path inside the
     site folder ("MAS_CAM01\\IMG_1032.JPG"), and each is stale against the flag photo the site plan gives it by
     date, not against one chosen flag photo. Raises ValueError with the message."""
     from . import batch  # batch asks this module for the site of a camera
@@ -303,7 +303,7 @@ def _wanted(site, date_from, date_to, all_species, folder, survey_site) -> list[
 
 def export_csv(site=None, date_from=None, date_to=None, all_species=False, folder=None, survey_site=None) -> str:
     """The CSV: the column header row, then one row per animal, every result row in the selection. Data only: no
-    `#` note lines and no warning text (user decisions 2026-10-11). The columns are explained in README.md."""
+    `#` note lines and no warning text (decided 2026-10-11). The columns are explained in README.md."""
     buf = io.StringIO()
     w = csv.DictWriter(buf, COLUMNS, extrasaction="ignore", lineterminator="\n")
     w.writeheader()

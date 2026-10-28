@@ -39,16 +39,16 @@ METHODS = {
              "hint": "SAM3 traces each animal and reads the distance where its feet touch the ground. "
                      "Several times slower. Better when an animal is partly hidden."},
 }
-# ponytail: which method is the default is decided by the research-repo comparison (CONTEXT open item 2,
+# ponytail: which method is the default is decided by the research-repo comparison (an open question:
 # bbox-bottom vs mask ground contact on the labeled data); until then the fast one. One-line change.
 DEFAULT_METHOD = "md"
 SPECIES = ["white-tailed deer", "white-tailed deer", "white-tailed deer", "raccoon", "unsure"]
 FAKE_DELAY_S = float(os.environ.get("CAMTRAP_FAKE_DELAY", "0"))  # per photo, to demo the progress display
 DETECT_MODELS = ["MegaDetector", "SpeciesNet"]  # stage one, by the names the status bar shows
 SAM3_MODEL = "SAM 3"                            # stage two's optional extra: only the precise method loads it
-MD_CONF = 0.15  # deliberately low: weak boxes are kept and land in the suspicious gallery (ticket 09), never silently binned
+MD_CONF = 0.15  # deliberately low: weak boxes are kept and land in the suspicious gallery, never silently binned
 MIN_SPECIES_SCORE = 0.2  # below this SpeciesNet is guessing → "unsure" (research knob, detect/speciesnet_wrap.py)
-VRAM_FLOOR_GB = 8  # CONTEXT "Performance envelope": the design floor; smaller cards run, with a warning
+VRAM_FLOOR_GB = 8  # the design floor (the dept workstation has an 8 GB RTX 2060 SUPER); smaller cards run, with a warning
 RUN_VRAM_GB = {distance.RESEARCH: 6.5, distance.FAST: 4.5}  # what one photo needs, weights and working memory
                                                             # together (scripts/profile_run.py, 2026-08-23)
 
@@ -59,8 +59,8 @@ def fidelity() -> str:
     The published pipeline is the default and stays the default — the app exists to put the paper's
     numbers in front of a technician, and a number that is nearly the paper's is worth less than a slow
     one that is. `fidelity` is an expert escape hatch for a computer too small for the published
-    settings: `CAMTRAP_FIDELITY=fast`, or "fidelity": "fast" in config.json. What it costs is in
-    CONTEXT.md, and every measured photo records which one produced it.
+    settings: `CAMTRAP_FIDELITY=fast`, or "fidelity": "fast" in config.json. It costs a few centimetres
+    (see distance.RESEARCH / FAST), and every measured photo records which one produced it.
     """
     from . import store
 
@@ -188,7 +188,7 @@ class Real:
         self.gpu = self._gpu_name()
         self.weights_dir = weights_dir
         self.manifest = json.loads((weights_dir / "manifest.json").read_text())
-        # the range factor k travels with the weights (ticket 37): read once here, applied to every read-out in __call__
+        # the range factor k travels with the weights (the range-factor change, ADR 0004): read once here, applied to every read-out in __call__
         self.range_k, self.range_problem = distance.range_factor(self.manifest)
         self.precision = str(distance.autocast_dtype(torch, self.device, self.fidelity)).replace("torch.", "")
         self.warning = self._card_warning()
@@ -343,7 +343,7 @@ class Real:
         in: an empty frame is finished in stage one and says so at once, while a photo with a deer in it
         is not finished until stage two has aligned it. Each result names its own photo for that reason.
 
-        Each photo with an animal is lined up by the rules in lineup.py (tickets 33 and 35): directly by day when its
+        Each photo with an animal is lined up by the rules in lineup.py (the Night-rule and day-rule changes): directly by day when its
         own line-up is strong, else by the day rule (Copy or Fallback from a clear day photo near it); at night by the
         Night rule, through a day photo of the same camera before or after it (Copy, or Chain when the camera moved),
         never against the flag photo directly. The links a night photo needs are measured when it is measured,
@@ -392,7 +392,7 @@ class Real:
             for d, name, q in zip(animals, names, quantiles):
                 x, y, w, h = d["bbox"]
                 # the one place a range is made: widened by this manifest's range factor k (1.0 = raw) before it is
-                # stored, shown, exported or logged (ticket 37)
+                # stored, shown, exported or logged (the range-factor change, ADR 0004)
                 q05, q50, q95 = distance.widen(*q, self.range_k) if q else (None, None, None)
                 dets.append(Detection(x, y, x + w, y + h, name, float(d["conf"]), q50, q05, q95))
             yield PhotoResult(dets, line.score, p, line.public())
@@ -400,7 +400,7 @@ class Real:
 
     def align_score(self, photo: Path, calibration: dict) -> int:
         """How many points of one photo line up with a flag photo: the run's own RoMa alignment, with no
-        detector and no distance read. What the Compare dialog asks (ticket 27)."""
+        detector and no distance read. What the Compare dialog asks (the site-folder change)."""
         dist = self.measuring()
         ref_crop, _, _ = dist.reference(calibration)
         return dist.align(ref_crop, distance.crop_banner(self._open(photo)))[1]
@@ -472,7 +472,7 @@ class FakeModels(Real):
     homography that shifts by (dx, dy) px (default 8,000 points and a sub-pixel shift). A link decodes both photos
     first, as Real's does, so a broken file fails where it would fail there. The distance read is a plain function
     of where the line-up puts the point, so two line-ups give two numbers. `weights` is the manifest version the
-    links are kept under; `range_k`, when given, is the manifest's range factor (ticket 37). `calls` records every
+    links are kept under; `range_k`, when given, is the manifest's range factor (the range-factor change, ADR 0004). `calls` records every
     model call, and asking a model that is not loaded fails, as running it off the card would."""
 
     DEFAULT_BOX = ("1", 0.40, 0.30, 0.10, 0.20)
@@ -569,7 +569,7 @@ def weights_version() -> str:
 
 
 def range_k() -> float:
-    """The range factor k the running models widen every 90% range by (distance.widen, ticket 37): the loaded
+    """The range factor k the running models widen every 90% range by (distance.widen, the range-factor change, ADR 0004): the loaded
     manifest's `range_k`, or 1.0 (raw) when it has none or an unusable one. 1.0 in Test mode and on the fake, whose
     made-up ranges are never widened. What the researcher log records next to weights_version."""
     return 1.0 if test_mode() else float(getattr(backend, "range_k", 1.0))
@@ -577,7 +577,7 @@ def range_k() -> float:
 
 def range_problem() -> str | None:
     """Why the loaded manifest's `range_k` was not used (distance.range_factor), or None. For the research log only:
-    nothing about k reaches the window or the status payload (user decision 2026-10-13: staff never see k)."""
+    nothing about k reaches the window or the status payload (decided 2026-10-13: staff never see k)."""
     return None if test_mode() else getattr(backend, "range_problem", None)
 
 
@@ -615,7 +615,7 @@ def warmup() -> None:
             warnings.append(w["notice"])
         real = Real(w["dir"])  # constructing it loads nothing: the first run pays for the weights
         if getattr(real, "range_problem", None):  # an unusable range_k: raw ranges. Never in the window (staff never
-            # see k, user decision 2026-10-13): the launcher log here, and the research log on each measured photo
+            # see k, decided 2026-10-13): the launcher log here, and the research log on each measured photo
             from .main import say  # stdlib-only module: no import cycle
 
             say(f"range factor: {real.range_problem}")

@@ -1,5 +1,5 @@
-"""How each photo is lined up with its flag photo before the distance model reads it: the Night rule (ticket 33) and
-the day rule (ticket 35).
+"""How each photo is lined up with its flag photo before the distance model reads it: the Night rule (ADR 0001) and
+the day rule (ADR 0002).
 
 A day photo lines up with the flag photo directly when its own line-up has a homography and DAY_WEAK points or more,
 as before. A weaker day photo follows the day rule (below). A night IR photo does not: against the daytime colour
@@ -19,7 +19,7 @@ its camera instead:
    H(night -> flag) = H(day -> flag) . H(night -> day). Otherwise **Fallback**: copy the nearer day photo.
 4. Only one found: Copy it. None found: no distance.
 
-The day rule (ticket 35, user decisions 2026-10-12) borrows the same way. A day photo whose own line-up has no
+The day rule (ADR 0002, decided 2026-10-12) borrows the same way. A day photo whose own line-up has no
 homography or fewer than DAY_WEAK points finds A and B as above (the photo itself is never its own neighbour), with
 two changes (review, 2026-10-12): its own burst (photos within BURST_S of it) is tried first on each side, with no
 burst-mate skip; and a flag photo stands as A or B only when the other side is a real day photo (the wrong-camera
@@ -33,8 +33,9 @@ of frame-filling day photos have a clearer photo within 120 s. Small animals at 
 were usually right (within about 30 px of strong neighbours), so with no neighbour an own line-up of 2,500 points or
 more is kept. On a wrong camera (54-276 points) the neighbours fail too: no distance instead of a wrong one.
 
-Every rule and threshold is from ../distance_estimation, experiments/refnet, and the design grilling
-(.scratch/app/issues/33-night-bracket-grilling.md, Q1-Q13; the day rule: .scratch/app/issues/35-day-borrow.md):
+Every rule and threshold is from ../distance_estimation, experiments/refnet, and the design review of 2026-10-10/11
+(its questions are cited as Q1-Q13 below; the decisions are in docs/adr/0001 for the Night rule and docs/adr/0002 for
+the day rule):
   43_bracket_rule         Copy against the research night chain (Q1 median 0.017 m, p95 0.090 m)
   38_fleet_anchor_chain   the day-photo search (tries, burst mates) and the shift grid
   59_anchor_threshold     DAY_MIN 4,000 (Q6)
@@ -609,7 +610,7 @@ def log_research(line: dict) -> None:
     whatever reason, never stops a run.
 
     A run that skips current answers adds no lines. "Measure again" adds a new line for the photo; each line carries
-    its time, and the last one per photo is the answer in the store. The file is never trimmed (ticket 33 follow-up
+    its time, and the last one per photo is the answer in the store. The file is never trimmed (a Night-rule follow-up
     G); it grows by about one line per photo measured."""
     try:
         row = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), **line}
@@ -638,7 +639,7 @@ class Check:
 
 
 def weak_direct(known: dict) -> bool:
-    """Was this stored answer lined up directly with fewer than DAY_WEAK points? The day rule (ticket 35) answers such
+    """Was this stored answer lined up directly with fewer than DAY_WEAK points? The day rule (ADR 0002) answers such
     a day photo another way, so it is measured again, once: the new answer is a day-rule one, or direct with DAY_WEAK
     points or more, and never weak direct again. Rows from before line-up versions were all lined up directly. A
     night answer (source NIGHT), a day-rule answer, an answer with no line-up (no animal, no score) and a stand-in

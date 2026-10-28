@@ -3,7 +3,7 @@
 Each check says what it found and, when it fails, what to do about it in plain words — never a stack
 trace. On a console it also collects the FlagLabel login (emailed one-time code) and stores it where the
 app reads it, so the first real launch is already set up. The weights need no credential: the Hugging Face
-repo is public from the release of ticket 36 (2026-10-12). A token someone did set is still checked and a refused
+repo is public since the public-weights change (2026-10-12, ADR 0003). A token someone did set is still checked and a refused
 one named, as a warning: the app then reads the public repo without it.
 The logic lives here (not in the PowerShell installer) so it is testable without a Windows machine.
 """
@@ -65,7 +65,7 @@ def check_gpu() -> Result:
                              capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.SubprocessError):
         out = None
-    # GPU trouble never stops the install: the app runs on the CPU with a loud warning (spec story 33) — but the
+    # GPU trouble never stops the install: the app runs on the CPU with a loud warning (a design requirement) — but the
     # fix is spelled out here, where a technician is still in setup mode.
     if out is None or out.returncode != 0 or not out.stdout.strip():
         return Result("GPU", False, "No NVIDIA driver found (nvidia-smi is missing or failed).",
@@ -301,7 +301,7 @@ def run(ask=input, say=print, prompt: bool | None = None) -> int:
 
 
 def _stored_token() -> Result | None:
-    """A token the weights loader will send, checked. None when there is none: the repo, public from ticket 36,
+    """A token the weights loader will send, checked. None when there is none: the repo, public since the public-weights change (ADR 0003),
     needs no token."""
     token = os.environ.get("HF_TOKEN") or store.config().get("hf_token")
     return check_token(token) if token else None

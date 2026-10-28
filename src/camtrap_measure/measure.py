@@ -11,7 +11,7 @@ then the distance models measure only the photos it found an animal in. The phot
 are finished and written during the first stage, which on a real card-dump is most of them.
 
 A run is a queue of jobs, each a set of photos and the one flag photo they are measured against. A folder
-is one job. A site folder (`batch`, ticket 27) is one job per camera folder and flag photo, with `cameras`
+is one job. A site folder (`batch`, the site-folder change) is one job per camera folder and flag photo, with `cameras`
 in the status saying how far each camera has got.
 """
 
@@ -176,7 +176,7 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, ch
     again. Versions are compared, never clocks (the dept machine's and the cloud's need not agree).
 
     The camera counts too: two cameras can each have an IMG_0001.JPG flag photo, and a photo measured under
-    the wrong one is no answer for the right one (ticket 27). In a site folder `cal` is the flag photo the
+    the wrong one is no answer for the right one (the site-folder change). In a site folder `cal` is the flag photo the
     plan gives this photo by date, so a run split across two visits is current against each.
 
     Fidelity counts for the same reason a relabel does: it is a different set of settings and so a
@@ -186,9 +186,9 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, ch
     So do the fit rules: a calibration fitted again under a new `calibration.VERSION` (the roll rule, research
     folder 47) keeps its annotation `updated_at`, so the answer also records the calibration's `fit_version`.
 
-    And the line-up rules (ticket 33, `lineup.current`): a night photo measured under an earlier line-up version
+    And the line-up rules (the Night-rule change, `lineup.current`): a night photo measured under an earlier line-up version
     (lined up with the flag photo directly, or by the first bracket design) is measured again, once; a day photo's
-    answer stands, unless it was lined up directly with fewer than lineup.DAY_WEAK points (ticket 35: the day rule
+    answer stands, unless it was lined up directly with fewer than lineup.DAY_WEAK points (the day-rule change: the day rule
     measures it again, once). A photo that lacked a day photo on a side is planned again once its folder or the
     camera's flag photos change. `check` carries what that asks of the disk across one listing or run (a run passes
     `lineup.Check(read=True)`).
@@ -197,7 +197,7 @@ def current_answer(known: dict | None, cal: dict, method: str, fidelity: str, ch
     measured again, so a new distance model on the hub turns every older answer "Out of date". An answer stored before
     2026-10-12 (NULL), or `weights` left out, reads as LEGACY_WEIGHTS_VERSION. inference.NO_WEIGHTS_VERSION (no
     manifest anywhere; also the stamp of every Test mode answer) matches no real run's version. The range factor k
-    (ticket 37) needs no check of its own: it lives in the manifest, so a new k ships as a new version."""
+    (the range-factor change, ADR 0004) needs no check of its own: it lives in the manifest, so a new k ships as a new version."""
     return bool(known and known["method"] == method and known.get("fidelity") == fidelity
                 and known["site"] == cal["site"] and known["calibration_image"] == cal["image_name"] and known["calibration_version"] == cal.get("updated_at")
                 and known.get("fit_version") == cal.get("fit_version")
@@ -238,7 +238,7 @@ def _work(run: dict, jobs: list[dict], rerun: bool) -> None:
                 run["camera_i"], cam["status"] = job["camera"], "running"
             if n:
                 # The models were handed one flag photo and the next job has another. The card is handed back
-                # between them, so the detector and the distance models are never on it together (ticket 20).
+                # between them, so the detector and the distance models are never on it together (the staged-models change).
                 _release()
             measured += _job(run, cam, job, known, rerun)
             if cam and run["cancel"]:
@@ -283,16 +283,16 @@ def _log_unreadable(run: dict, p: Path, camera: str, reason: str) -> None:
 
 def _log_measured(p: Path, camera: str, photo: dict, dets: list[dict], alignment: dict | None,
                   range_k: float = 1.0, range_k_problem: str | None = None) -> None:
-    """One researcher-log line for a photo just measured and stored, day or night (user decision 2026-10-11: one log,
+    """One researcher-log line for a photo just measured and stored, day or night (decided 2026-10-11: one log,
     and the reasons go there only). `reasons` are report.reasons of each stored box row, as the store holds it
     (photo fields under box fields), in order and without repeats; [] when there are none. A night photo also carries
-    its Night-rule detail under `night`; a day photo lined up by the day rule (ticket 35: its own line-up was weak)
+    its Night-rule detail under `night`; a day photo lined up by the day rule (ADR 0002: its own line-up was weak)
     carries the day-rule detail under `day_borrow` (path, side, anchor, own points, A and B with their tries, the
     move check, the checks by eye, and why there is no answer). A day photo lined up directly carries neither.
     Every line names the weights manifest version that read it (`weights_version`) and the range factor k its 90%
-    ranges were widened by (`range_k`, inference.range_k(); 1.0 = raw, ticket 37). When the manifest's range_k was
+    ranges were widened by (`range_k`, inference.range_k(); 1.0 = raw, the range-factor change, ADR 0004). When the manifest's range_k was
     unusable, `range_k_problem` says why (inference.range_problem()); the key is there only then. This log is the one
-    place a k problem is recorded: staff never see k (user decision 2026-10-13)."""
+    place a k problem is recorded: staff never see k (decided 2026-10-13)."""
     from .report import reasons  # report imports this module
 
     try:
@@ -334,7 +334,7 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
             cam["done"] += 1
 
     batch = []
-    check = lineup.Check(read=True)  # an answer from before ticket 33 is read once here: was it a night photo?
+    check = lineup.Check(read=True)  # an answer from before the Night-rule change is read once here: was it a night photo?
     for p in job["photos"]:
         had = known.get(str(p))
         # Test mode has no weights version of its own: it redoes no answer for its weights version alone, so its
@@ -364,7 +364,7 @@ def _job(run: dict, cam: dict | None, job: dict, known: dict, rerun: bool) -> in
     for res in inference.backend([p for p, _ in batch], ref, method, progress=progress):
         if res.alignment and res.alignment.get("status") == lineup.UNREAD:
             # day or night could not be read just now (locked, half copied): no answer is kept, so the next run
-            # reads the photo again; neither a direct line-up nor night=0 is guessed for it (ticket 33)
+            # reads the photo again; neither a direct line-up nor night=0 is guessed for it (the Night-rule change)
             count(unreadable=1)
             _log_unreadable(run, res.path, cal["site"], UNREAD_NOW)
             if run["cancel"]:

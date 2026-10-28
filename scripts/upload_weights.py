@@ -1,5 +1,5 @@
 """Stage the model weights folder and (optionally) upload it to the Hugging Face repo the app reads (public from
-the release of ticket 36).
+the public-weights change, ADR 0003).
 
 Run by the researcher, never by the app. Sources are the research caches on the HPC: MegaDetector v1000 from the HF hub cache, SpeciesNet
 v4.0.3a from the kagglehub cache, the paper checkpoint `ckpt_unified_scratch_split2_rollfix/best`
@@ -20,7 +20,7 @@ manifest.json already names this VERSION (a changed file under an unchanged vers
 current); `--force` uploads anyway.
 
 `--range-k K` (or RANGE_K below) writes "range_k": K into the staged manifest: the range factor k by which the app
-widens every 90% range around its median (ticket 37, camtrap_measure.distance.widen). Left out, the manifest has no
+widens every 90% range around its median (the range-factor change, ADR 0004; camtrap_measure.distance.widen). Left out, the manifest has no
 range_k and the app shows the raw range. k must be finite, above 0 and at most RANGE_K_MAX (5); a bad value stops the
 script before anything is copied. k changes every stored range, so a new k needs a new VERSION: `--force` refuses
 when the repo's manifest names this VERSION with another range_k (a missing key counts as 1.0). Staff never see k.
@@ -149,7 +149,7 @@ def remote_manifest() -> dict | None:
 
 def same_range_k(local: dict, remote: dict | None) -> str | None:
     """Why `--force` must not upload `local` over `remote`: another range factor under the same version, or None.
-    A manifest with no range_k has k = 1.0. A new k changes every stored range, so it needs a new VERSION (ticket 37)."""
+    A manifest with no range_k has k = 1.0. A new k changes every stored range, so it needs a new VERSION (the range-factor change, ADR 0004)."""
     if remote is None:
         return None
     lk, rk = local.get("range_k", 1.0), remote.get("range_k", 1.0)

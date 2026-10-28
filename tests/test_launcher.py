@@ -5,7 +5,7 @@ for the whole session — closing it killed a run (reported 2026-08-23). These a
 it, and each one is easy to undo by accident, so each is nailed down here.
 
 The scripts themselves are PowerShell and VBScript: what can be asserted from pytest is their contract,
-not their behaviour. The behaviour was checked by hand on the workstation (CONTEXT, ticket 18).
+not their behaviour. The behaviour was checked by hand on the department workstation (the installer and launcher change).
 """
 
 import struct
@@ -59,7 +59,7 @@ def test_the_installer_and_the_uninstaller_are_windowed_too():
 # --- what the launcher must keep doing ------------------------------------------------------------
 
 def test_the_launcher_keeps_every_promise_the_batch_file_made():
-    """Ticket 11's launcher rules moved into launcher.ps1; none of them may be lost on the way."""
+    """The auto-update launcher's rules moved into launcher.ps1; none of them may be lost on the way."""
     ps = text(SCRIPTS / "launcher.ps1")
     assert "ref.txt" in ps  # the rollback pin
     assert "origin/main" in ps
@@ -247,7 +247,7 @@ def test_the_running_app_is_found_by_its_process_and_a_real_null_class():
     ps = text(SCRIPTS / "launcher.ps1")
     assert "[NullString]::Value" in ps and "FindWindowW($null" not in ps
     assert 'Get-Process -Name "camtrap-measure-app"' in ps and "StartsWith($Dir" in ps
-# --- the setup log (ticket 23) --------------------------------------------------------------------
+# --- the setup log (the installer log change) --------------------------------------------------------------------
 
 def fail_body(install: str) -> str:
     """The body of `function Fail`, up to the next function."""
@@ -267,8 +267,8 @@ def test_every_run_writes_the_details_pane_to_a_file():
 
 
 def test_the_log_says_what_the_machine_is():
-    """Nobody has written the department's hardware down; the log is where it gets recorded (HANDOFF
-    open item 2). Each fact is asked for on its own so a failing query cannot stop an install."""
+    """Nobody has written the department's hardware down; the log is where it gets recorded (an
+    open item from the first install). Each fact is asked for on its own so a failing query cannot stop an install."""
     install = text(SCRIPTS / "install.ps1")
     for query in ("Win32_OperatingSystem", "Win32_Processor", "Win32_ComputerSystem",
                   "Win32_VideoController", "Get-PSDrive -PSProvider FileSystem"):
@@ -303,7 +303,7 @@ def test_no_token_can_reach_the_log():
 
 def test_the_log_goes_in_the_install_folder():
     """2026-09-25, the researcher: "write the log inside the camtrap measure folder". R for an install made
-    by ticket 24 or later, the app folder for an older one; the Desktop and TEMP come last."""
+    since the install-folder change, the app folder for an older one; the Desktop and TEMP come last."""
     install = text(SCRIPTS / "install.ps1")
     block = install.split("$LogCandidates = @(", 1)[1].split("\n)", 1)[0]
     lines = [l.strip() for l in block.strip().splitlines()]
@@ -345,7 +345,7 @@ def test_the_checks_output_is_read_as_utf8():
     assert "Get-Content $out -ErrorAction" not in run  # every read of the output names its encoding
 
 
-# --- the install folder (ticket 24) ---------------------------------------------------------------
+# --- the install folder (the install-folder change) ---------------------------------------------------------------
 
 def test_the_installer_asks_where_in_a_dialog_with_a_folder_picker():
     """2026-09-25: a dept machine failed the free-space check with everything on C:. The researcher asked to pick
@@ -488,7 +488,7 @@ def test_only_the_installed_copy_has_its_layout_read_or_written():
 
 
 def test_a_repair_stays_where_the_app_already_is():
-    """Never move a user's data: an install from before ticket 24 keeps its app and data where they are."""
+    """Never move a user's data: an install from before the install-folder change keeps its app and data where they are."""
     install = text(SCRIPTS / "install.ps1")
     assert "(Get-ItemProperty -Path $Key -ErrorAction Stop).InstallLocation" in install
     assert "if ($known -and (Test-Path -LiteralPath $known)) {\n    $Dir = $known" in install
@@ -563,7 +563,7 @@ def test_the_uninstaller_copy_knows_it_is_the_copy_by_a_flag_not_by_its_path():
 
 def test_every_installer_window_shows_itself_despite_the_hidden_start():
     """2026-09-25: INSTALL.bat did nothing. setup.vbs starts PowerShell hidden, Windows applied that to the
-    first window shown, and since ticket 24 that is the folder question, a modal dialog nobody could see.
+    first window shown, and since the install-folder change that is the folder question, a modal dialog nobody could see.
     Measured under the same hidden start: only an explicit ShowWindow as the window loads made it visible."""
     install = text(SCRIPTS / "install.ps1")
     assert "public static extern bool ShowWindow" in install
@@ -698,7 +698,7 @@ def test_both_scripts_are_ascii():
 def test_run_quotes_each_argument_by_the_windows_rules():
     """2026-09-25, Seth's machine: Start-Process joins its argument list unquoted, so the GPU check reached
     python as `-c import` and said PyTorch saw no GPU on an RTX 6000 Ada. Checked by running Run on python
-    and git with spaces, quotes and trailing backslashes (CONTEXT, 2026-09-25)."""
+    and git with spaces, quotes and trailing backslashes (2026-09-25)."""
     install = text(SCRIPTS / "install.ps1")
     run = install.split("function Run(", 1)[1].split("\nfunction ", 1)[0]
     assert '$line = (@($arguments) | ForEach-Object { Quote-Arg $_ }) -join " "' in run

@@ -1,13 +1,13 @@
 # 0003. The weights repo becomes public, and every install checks it at start
 
-Date: 2026-10-12. Status: accepted; implemented 2026-10-12 on branch `fix/public-weights`, not committed (ticket 36).
+Date: 2026-10-12. Status: accepted; implemented 2026-10-12 on branch `fix/public-weights`, not committed.
 The repo itself is made public as a separate step with the user's OK, and must be public before this ships.
 
 ## Context
 
 The weights live in the Hugging Face repo `toqi/camtrap-measure-weights`, which was private. Reading a private repo
 needs a token, and handing a token to every team machine hands out a credential that cannot be taken back. So
-since ticket 21 (2026-08-24) the team gets the weights inside the installer folder (a "bundle"), and the app never
+since the weights-in-the-installer change (2026-08-24) the team gets the weights inside the installer folder (a "bundle"), and the app never
 asks the hub on a bundle install (`"weights_from": "bundle"` in config.json, no token).
 
 That made the bundle's weights version permanent. A retrained distance model (Run 2, research folders 69 and 70) is
@@ -16,7 +16,7 @@ read them, so nothing could mark them out of date.
 
 ## Decision
 
-User decision, 2026-10-12:
+Decided 2026-10-12:
 
 - The repo becomes public. Every install, a bundle install too, asks the hub at start with no token and downloads
   only the files that changed. A token is optional and still sent when set; a token the hub refuses, or a refused
@@ -56,6 +56,6 @@ User decision, 2026-10-12:
 
 - *Keep the repo private and ship new bundles by hand*: rejected. Every new model would need a USB stick or a share
   visit to every machine, and stale installs would go unnoticed.
-- *Give each machine a read token*: rejected in ticket 21, for the reason above.
+- *Give each machine a read token*: rejected in the weights-in-the-installer change, for the reason above.
 - *Mark old answers by the time they were measured*: rejected. Clocks differ between machines; versions are compared,
   never clocks (as for calibrations).

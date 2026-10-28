@@ -142,7 +142,7 @@ def test_too_few_flags_is_unusable_and_says_how_many(cloud, synced):
 
 
 def test_a_mislabeled_flag_still_fits_the_user_chooses(cloud, synced):
-    # ticket 15: no quality verdict — the dept confirmed its labels and wants no warnings; a labeled photo is usable
+    # the pick-a-flag-photo change: no quality verdict — the dept confirmed its labels and wants no warnings; a labeled photo is usable
     cloud["annotations"] = [{**ANN, "data": flag_photo_data(relabel={("C", 4.0): 30}), "updated_at": "2026-07-01T00:00:00+00:00"}]
     synced.post("/api/sync")
     assert flags(synced)[0]["ok"] is True

@@ -28,7 +28,7 @@ SCRIPT = {
     "IMG_0005.JPG": ([det(d=7.0)], 9),
     "IMG_0006.JPG": ([], None),
     "IMG_0008.JPG": ([det(species="raccoon", conf=0.2, d=4.0)], 300),
-    "IMG_0007.JPG": ([det(species="raccoon", d=7.0)], 300),  # no capture date: measured like any other (ticket 15), in every date range
+    "IMG_0007.JPG": ([det(species="raccoon", d=7.0)], 300),  # no capture date: measured like any other (the pick-a-flag-photo change), in every date range
 }
 
 
@@ -49,7 +49,7 @@ def measured(synced, tmp_path, monkeypatch):
 
 def export(c, **params) -> list[dict]:
     """The export's rows. The file is data only: the column header row first, then the rows, and no `#` note line
-    anywhere (user decision 2026-10-11: "in the csv it should only include data no notes")."""
+    anywhere (decided 2026-10-11: "in the csv it should only include data no notes")."""
     r = c.get("/api/export.csv", params=params)
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv"), r.text
     lines = r.text.splitlines()
@@ -86,7 +86,7 @@ def test_summary_and_export_narrow_to_the_chosen_folder(measured, tmp_path):
 
     elsewhere = measured.get("/api/summary", params={"folder": str(tmp_path / "photos" / "TON_CAM03")}).json()
     assert elsewhere["photos"] == 0 and elsewhere["detections"] == 0 and elsewhere["cameras"] == []
-    # the folder and every folder inside it: a site folder answers for its cameras' folders (ticket 27)
+    # the folder and every folder inside it: a site folder answers for its cameras' folders (the site-folder change)
     assert measured.get("/api/summary", params={"folder": str(tmp_path / "photos")}).json()["photos"] == 8
     assert measured.get("/api/summary", params={"folder": str(tmp_path / "photo")}).json()["photos"] == 0  # not a prefix
 
@@ -95,7 +95,7 @@ def test_summary_and_export_narrow_to_the_chosen_folder(measured, tmp_path):
 
 
 def test_the_export_holds_as_many_rows_as_the_summary_counts(measured):
-    """RESULTS says "Rows in the file" from the summary's deer count. The file holds every result row (user decision
+    """RESULTS says "Rows in the file" from the summary's deer count. The file holds every result row (decided
     2026-10-11, "include all results, remove the warning text"), so the two agree for either species setting."""
     for all_species in (False, True):
         n = measured.get("/api/summary", params={"all_species": all_species}).json()["deer"]
@@ -202,7 +202,7 @@ class Versioned:
 
 
 def test_a_new_weights_version_makes_older_answers_stale_and_measuring_redoes_them(synced, tmp_path, monkeypatch):
-    """Ticket 36: answers carry the weights manifest version that read them. A new version on the hub makes them
+    """The public-weights change (ADR 0003): answers carry the weights manifest version that read them. A new version on the hub makes them
     "Out of date", and measuring the folder redoes exactly those. An answer from before the column counts as
     LEGACY_WEIGHTS_VERSION. The researcher log names the version on each line."""
     import json
@@ -339,7 +339,7 @@ def test_flag_endpoint_serves_synced_flag_photos_only(measured):
 # --- export -----------------------------------------------------------------------------
 
 def test_export_holds_every_deer_row_and_data_only(measured):
-    """User decisions 2026-10-11: the CSV holds every result row ("include all results, remove the warning text"), only
+    """Decided 2026-10-11: the CSV holds every result row ("include all results, remove the warning text"), only
     data ("in the csv it should only include data no notes": no flag or check column, no `#` line; see export()),
     and one method ("Export one method": no method column). The seven columns are the ones the user chose; the 90%
     interval stays ("where is the interval column? It's needed")."""
@@ -354,7 +354,7 @@ def test_export_holds_every_deer_row_and_data_only(measured):
 
 
 def test_export_writes_distances_to_2_decimals_and_leaves_no_distance_empty(monkeypatch):
-    """User decision 2026-10-12: distance_m, q05_m and q95_m are written to 2 decimals (11.49, not
+    """Decided 2026-10-12: distance_m, q05_m and q95_m are written to 2 decimals (11.49, not
     11.488765716552734). A row with no distance keeps its cells empty. Only the CSV text is rounded."""
     full = {"path": "C:\\cams\\IMG_0001.JPG", "site": "TON_CAM02", "captured_at": "2026-05-01T08:00:00",
             "species": "white-tailed deer", "distance_m": 11.488765716552734, "q05_m": 9.004999, "q95_m": 14.0}
@@ -376,7 +376,7 @@ def test_export_all_species_toggle_adds_the_raccoons(measured):
 
 def test_export_holds_one_row_per_animal_when_an_older_run_also_used_sam3(measured, tmp_path):
     """A photo measured with both methods has detection rows under each. The export holds the MegaDetector-box rows
-    only, so each animal is one row (user decision 2026-10-11, "Export one method")."""
+    only, so each animal is one row (decided 2026-10-11, "Export one method")."""
     run(measured, tmp_path / "photos" / "TON_CAM02", method="sam3")
     rows = export(measured)
     assert [r["photo"] for r in rows] == ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0003.JPG", "IMG_0005.JPG"]

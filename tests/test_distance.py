@@ -224,7 +224,7 @@ def test_align_repeats_its_draw_and_restores_torch_state(monkeypatch):
     assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])
 
 
-# --- the range factor k (ticket 37) -----------------------------------------------------------------------------
+# --- the range factor k (the range-factor change, ADR 0004) -----------------------------------------------------------------------------
 
 def test_widen_with_k_1_returns_every_read_out_exactly_as_given():
     """k = 1.0 (no range_k in the manifest) must not move a stored range by even a rounding: the very same objects."""

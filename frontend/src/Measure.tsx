@@ -84,7 +84,7 @@ export default function Measure({
   onMeasure: (paths: string[]) => void
   onChooseFolder: () => void
   onClear: (what: { path?: string; site?: string; everything?: boolean }) => void
-  // ponytail: optional because the ticket's signature stops above; the shell hands these over when the table
+  // ponytail: optional because the original signature stops above; the shell hands these over when the table
   // opens a row here, and when the folder listing itself failed. Omitting them changes nothing.
   focus?: string | null
   error?: string | null

@@ -1,4 +1,4 @@
-"""Model weights: a Hugging Face repo (public from the release of ticket 36) mirrored into a local folder.
+"""Model weights: a Hugging Face repo (public since the public-weights change, ADR 0003) mirrored into a local folder.
 
 The repo holds `manifest.json` ({version, megadetector: <file>, speciesnet: <folder>, ...}) next to the
 files. `snapshot_download` is the whole update mechanism: it compares every file with the hub,
@@ -7,7 +7,7 @@ It also silently returns the local folder whenever the hub is unreachable *or* r
 so reachability is checked explicitly first and reported: offline → cached copy with a notice;
 refused → cached copy with a warning; neither cached → error.
 
-The repo is public from the release of ticket 36 (2026-10-12), so no token is needed: every install, a bundle
+The repo is public since the public-weights change (2026-10-12, ADR 0003), so no token is needed: every install, a bundle
 install too, asks the hub at start and fetches what changed. A token in HF_TOKEN or `~/.camtrap-measure/config.json`
 (`hf_token`) is still used when one is set; a token the hub refuses is dropped for that start and the public repo is
 read without it. With no token set, huggingface_hub still sends a cached `hf auth login` if the machine has one; a

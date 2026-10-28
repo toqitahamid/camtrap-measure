@@ -413,7 +413,7 @@ def flag_photo(site: str, image: str, size: str = "full"):
 @app.get("/api/export.csv")
 def export(site: str | None = None, date_from: date | None = None, date_to: date | None = None,
            all_species: bool = False, folder: str | None = None, survey_site: str | None = None):
-    """The CSV: every result row in the selection, data only (user decisions 2026-10-11)."""
+    """The CSV: every result row in the selection, data only (decided 2026-10-11)."""
     name = report.file_name(site or survey_site, _iso(date_from), _iso(date_to))
     return Response(report.export_csv(site, _iso(date_from), _iso(date_to), all_species, folder, survey_site),
                     media_type="text/csv; charset=utf-8", headers={"content-disposition": f'attachment; filename="{name}"'})

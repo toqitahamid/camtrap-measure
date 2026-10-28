@@ -3,7 +3,7 @@
 Every one of these is a fix for something measured on the dept's RTX 2060 SUPER on 2026-08-23, where a
 photo took 33 seconds and the same run repeated took 3. None of them changes what the app computes by
 more than the method already moves between repeat runs, and each is one careless edit away from coming
-back — so each is nailed down here. The numbers themselves are in CONTEXT.md and reproducible with
+back — so each is nailed down here. The numbers (364 s for 11 photos before, 34 s after) are reproducible with
 `uv run python scripts/profile_run.py`.
 """
 

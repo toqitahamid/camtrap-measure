@@ -1275,7 +1275,7 @@ td.num {
   border-color: var(--amber);
 }
 
-/* Site folder (ticket 27): the camera check, the run and the summary --------------------------------- */
+/* Site folder (the site-folder change): the camera check, the run and the summary --------------------------------- */
 
 .batch-head {
   display: flex;

@@ -354,7 +354,7 @@ export default function Results({ site, cameras, folder, onClear, onChooseFolder
   const peak = Math.max(1, ...bins.map((b) => b.n))
   const mid = medianBin(bins)
   const binWidth = bins.length > 0 ? bins[0].hi - bins[0].lo : 0
-  // The file holds every result row in the selection (user decision 2026-10-11): the deer count, or every animal.
+  // The file holds every result row in the selection (decided 2026-10-11): the deer count, or every animal.
   const exported = summary.deer
 
   const exportParams = new URLSearchParams(query)

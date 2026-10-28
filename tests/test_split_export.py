@@ -1,4 +1,4 @@
-"""The export as one file per site or per camera (ticket 26): the site a camera belongs to, the files the split
+"""The export as one file per site or per camera (the split-export change): the site a camera belongs to, the files the split
 writes into a folder, and the screen's filters applied to each file. (The site column was removed 2026-10-11.)"""
 
 import csv
@@ -57,7 +57,7 @@ def split(c, to: Path, by: str, **params) -> dict:
 
 def read(path: str) -> list[dict]:
     """One written file's rows. The file is data only: the column header row first, no `#` note line anywhere
-    (user decision 2026-10-11)."""
+    (decided 2026-10-11)."""
     lines = Path(path).read_text(encoding="utf-8").splitlines()
     assert lines[0] == ",".join(report.COLUMNS) and not [l for l in lines if l.startswith("#")]
     return list(csv.DictReader(lines))
@@ -76,7 +76,7 @@ def test_site_is_the_name_before_the_last_cam():
 
 
 def test_the_combined_export_names_each_camera_and_has_no_site_column(measured):
-    """The site column was removed (user decision 2026-10-11); the camera column names the camera, and a split by
+    """The site column was removed (decided 2026-10-11); the camera column names the camera, and a split by
     site still groups the cameras by the part of their name before the last _CAM."""
     r = measured.get("/api/export.csv")
     rows = list(csv.DictReader(r.text.splitlines()))

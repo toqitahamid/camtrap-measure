@@ -4,11 +4,11 @@
   and again about the measurements and downloaded models, which are kept unless they are asked for by
   name. Nothing here needs an administrator - everything it removes is this user's.
 
-  Since ticket 24 an install sits under one folder R: R\app (this script's folder), R\data, R\uv-cache and
+  Since the install-folder change an install sits under one folder R: R\app (this script's folder), R\data, R\uv-cache and
   R\python, with the last three named in R\camtrap-install.json (an install made before that file has them
   in user environment variables instead). The app, uv-cache, python and that file go with the first
   question, the data only on the second, and any such variables once the app is gone. An install from
-  before ticket 24 has the app in %LOCALAPPDATA%\CamTrapMeasure and the data in %USERPROFILE%\.camtrap-measure.
+  before the install-folder change has the app in %LOCALAPPDATA%\CamTrapMeasure and the data in %USERPROFILE%\.camtrap-measure.
 
     -Yes   remove the app without the first question (the data question is still asked)
     -FromTemp   internal: this is the copy in TEMP that does the removing (passed by the first stage)
@@ -86,7 +86,7 @@ if (-not (Test-Path $marker)) {
 $Dir = (Get-Content $marker -TotalCount 1).Trim()
 
 $EnvNames = @("CAMTRAP_DATA_DIR", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR")
-# R, for an install made by ticket 24 or later: the app folder is R\app. $null for an older install.
+# R, for an install made since the install-folder change: the app folder is R\app. $null for an older install.
 $Root = $null
 if ([System.IO.Path]::GetFileName($Dir.TrimEnd("\")) -ieq "app") { $Root = Split-Path $Dir.TrimEnd("\") -Parent }
 # The data is where the app has been keeping it: the layout file the installer wrote in R, else the user

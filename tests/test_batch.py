@@ -1,4 +1,4 @@
-"""A site folder (ticket 27): camera folders matched to cameras by name, the camera stamp in the photos checked,
+"""A site folder (the site-folder change): camera folders matched to cameras by name, the camera stamp in the photos checked,
 each photo given its flag photo by date, duplicates caught, and one queue that measures the ticked cameras.
 Supabase is faked at its seam and inference at its boundary, as in test_measure."""
 

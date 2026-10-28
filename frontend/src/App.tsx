@@ -48,7 +48,7 @@ const card = (inf: Inference): string => inf.gpu ?? inf.device ?? ''
 const NOT_LABELLED = 'Label its flag photo in FlagLabel, then press Sync.'
 
 // No DENSITY tab: the app gives distances only; density estimation is the wildlife staff's own task, done outside
-// the app (user decision 2026-10-11).
+// the app (decided 2026-10-11).
 type Section = 'measure' | 'table' | 'results'
 const SECTIONS: { id: Section; label: string; icon: 'measure' | 'table' | 'results' }[] = [
   { id: 'measure', label: 'MEASURE', icon: 'measure' },
@@ -110,7 +110,7 @@ export default function App() {
       ? picked.flag
       : (flags.find((f) => f.ok)?.image_name ?? ''),
     folder: picked.folder,
-    // always the engine's default (the MegaDetector box): the method picker was removed (user decision 2026-10-11)
+    // always the engine's default (the MegaDetector box): the method picker was removed (decided 2026-10-11)
     method: methods.default,
   }
   const siteMode = site !== null && site.status !== 'single'
@@ -643,7 +643,7 @@ export default function App() {
           </div>
         )}
 
-        {/* the Batch "Running" card has its own progress bar: no second one under it (user decision 2026-10-11).
+        {/* the Batch "Running" card has its own progress bar: no second one under it (decided 2026-10-11).
             While it shows, the normal status bar stays, so its warnings (test mode, quick settings) stay visible. */}
         {running && run && !(section === 'measure' && site !== null && site.status === 'ready' && run.kind === 'site' &&
           run.folder === site.folder && run.cameras) ? (

@@ -3,7 +3,7 @@
 Five models do not fit on an 8 GB card beside a Windows desktop, and they never had to: the detector
 answers "is there an animal here" for every photo, and only then do the distance models look at the few
 photos that had one. Holding all of them at once was costing the headroom that decides whether a run
-executes on the GPU or out of system memory (CONTEXT, 2026-08-23).
+executes on the GPU or out of system memory (measured on the dept RTX 2060 SUPER, 2026-08-23).
 
 The consequences are easy to undo by accident — an eager load in `__init__`, a forgotten `release`, a
 result that no longer says which photo it belongs to — so each is nailed down here.

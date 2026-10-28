@@ -1,4 +1,4 @@
-/* MEASURE for a site folder (ticket 27): every camera folder in it, checked before anything is measured, then
+/* MEASURE for a site folder (the site-folder change): every camera folder in it, checked before anything is measured, then
    measured in one go, then what each camera added up to. The engine matches the names, reads the stamps, picks
    each photo's flag photo by date and holds every choice; this section renders its JSON and posts the clicks. */
 

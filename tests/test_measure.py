@@ -13,7 +13,7 @@ from camtrap_measure import api, calibration, inference, store
 
 from tests.conftest import ANN, flag_photo_data, jpeg
 
-IN_WINDOW = "2026:05:01 08:00:00"  # a plausible capture date; nothing depends on it any more (ticket 15)
+IN_WINDOW = "2026:05:01 08:00:00"  # a plausible capture date; nothing depends on it any more (the pick-a-flag-photo change)
 
 
 def folder(tmp_path: Path, site="TON_CAM02", photos: dict[str, bytes] | None = None) -> Path:
@@ -198,7 +198,7 @@ def test_inference_crash_is_an_error_and_keeps_earlier_answers(synced, tmp_path,
     assert [r["distance_m"] for r in results(synced)] == [r["distance_m"] for r in before]  # rows replaced only once new ones exist
 
 
-# --- no windows, no holds (ticket 15) ---------------------------------------------------
+# --- no windows, no holds (the pick-a-flag-photo change) ---------------------------------------------------
 
 def test_photo_without_capture_date_is_measured_anyway(synced, tmp_path):
     st = run(synced, folder(tmp_path, photos={"IMG_0005.JPG": jpeg(date=None)}))
@@ -270,7 +270,7 @@ def test_each_methods_rows_keep_the_alignment_score_they_were_read_under(synced,
     assert {r["method"]: r["match_score"] for r in results(synced)} == {"md": 300, "sam3": 120}
 
 
-# --- cancel, resume, rerun (ticket 10) -------------------------------------------------
+# --- cancel, resume, rerun (the resume and re-measure change) -------------------------------------------------
 
 def gated_backend(gate: threading.Semaphore, seen: list):
     """A backend that needs one gate release per photo and records which photos it was asked for."""
@@ -371,7 +371,7 @@ def test_a_fit_under_older_rules_is_fitted_again_and_its_photos_remeasured_once(
     assert run(synced, d)["skipped"] == 1
 
 
-# --- measuring only the photos you picked (ticket 17) ----------------------------------
+# --- measuring only the photos you picked (the app shell change) ----------------------------------
 
 def picked(c: TestClient, d: Path, photos: list[str]):
     return c.post("/api/run", json={"folder": str(d), "site": SITE, "flag": FLAG, "method": "md", "photos": photos})
@@ -437,7 +437,7 @@ def test_a_file_windows_marks_hidden_or_system_is_not_a_photo(synced, tmp_path):
     assert [r["name"] for r in g["rows"]] == ["IMG_1.JPG"] and g["unreadable"] == 0
 
 
-# --- the weights version an answer was read by (ticket 36) ------------------------------------------------------
+# --- the weights version an answer was read by (the public-weights change, ADR 0003) ------------------------------------------------------
 
 def test_an_answer_is_current_only_under_the_weights_version_that_read_it():
     """A new distance model on the hub turns every older answer "Out of date". An answer stored before answers
@@ -457,7 +457,7 @@ def test_an_answer_is_current_only_under_the_weights_version_that_read_it():
 
 
 def test_an_old_database_gains_the_weights_version_column(tmp_path):
-    """A store written before ticket 36 has no weights_version; opening it adds the column, empty, and keeps rows."""
+    """A store written before the public-weights change (ADR 0003) has no weights_version; opening it adds the column, empty, and keeps rows."""
     import sqlite3
 
     with closing(sqlite3.connect(tmp_path / "camtrap.db")) as con, con:

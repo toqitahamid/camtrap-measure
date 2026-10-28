@@ -37,7 +37,7 @@ type Filter = keyof typeof FILTERS
 
 type SortKey = 'name' | 'time' | 'species' | 'dist' | 'band' | 'conf' | 'status'
 /* ponytail: the header follows the approved mockup and the .tr grid template in index.css (dist, 90%, conf),
-   not the ticket's prose order; the column widths (74 / 100 / 58) are cut for exactly this. The "Lines up"
+   not the order the feature request listed them in; the column widths (74 / 100 / 58) are cut for exactly this. The "Lines up"
    column and the "Needs a look" state were removed 2026-10-11 to simplify the window. */
 const COLUMNS: { key: SortKey; label: string; num?: true }[] = [
   { key: 'name', label: 'File' },
@@ -82,9 +82,9 @@ export default function TableView({
   busy: boolean
   onMeasure: (paths: string[]) => void
   onOpen?: (path: string) => void // none for a site folder: MEASURE shows its cameras, not one photo
-  // where another screen sends the user: one camera folder's photos (ticket 27)
+  // where another screen sends the user: one camera folder's photos (the site-folder change)
   initial?: { filter?: Filter; find?: string }
-  // ponytail: optional because the ticket's signature stops above; the shell hands the folder-listing
+  // ponytail: optional because the original signature stops above; the shell hands the folder-listing
   // failure over so the table says why there are no rows instead of blaming the user for not picking one.
   error?: string | null
 }) {
@@ -154,7 +154,7 @@ export default function TableView({
           <span className="tiny faint">
             {plural(rows.length, 'row')} · {plural(animals, 'animal')}
           </span>
-          {/* no export button here: the one export is in Results (user decision 2026-10-11) */}
+          {/* no export button here: the one export is in Results (decided 2026-10-11) */}
         </div>
 
         {picked.length > 0 && (

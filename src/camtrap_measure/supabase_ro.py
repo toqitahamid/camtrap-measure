@@ -1,6 +1,6 @@
 """The only Supabase client in this app — and it can only read.
 
-Hard constraint (CONTEXT.md): CamTrap Measure never writes to Supabase. This
+Hard constraint of the project: CamTrap Measure never writes to Supabase. This
 module talks to the cloud over plain REST and exposes auth (an emailed one-time
 code, then a session refresh) plus exactly three read operations. There is no write method to call; tests/test_supabase_ro.py
 asserts that stays true and that no other module talks to Supabase.
