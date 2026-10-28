@@ -9,3 +9,9 @@ __pycache__/
 # the seeded design canvas is regenerated from the .dc.html artboards; it is 2 MB of editor payload
 camtrap-measure-app-shell.html
 *.stackdump
+
+# local working notes
+CLAUDE.md
+CONTEXT.md
+HANDOFF.md
+.scratch/
