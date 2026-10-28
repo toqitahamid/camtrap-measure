@@ -67,5 +67,7 @@ Amended after review, user approval 2026-10-12:
 
 ## Evidence
 
-A read-only check of the day animal photos (2026-10-12), summarised in `.scratch/app/issues/35-day-borrow.md`; the
+A read-only check of the day animal photos (2026-10-12): of 1,087 day animal photos (median 8,211 points), 3.5% had
+under 4,000 points, rising to 14% when the animal's box covered half the frame or more, and all 8 verified weak
+frame-filling photos had broken line-ups; 99.3% of frame-filling day photos have a clearer photo within 120 s. The
 Night rule's thresholds come from research folders 38, 58, 59 and 60 (ADR 0001).

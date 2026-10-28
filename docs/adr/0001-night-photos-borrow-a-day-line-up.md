@@ -13,8 +13,8 @@ multiplied with the day photo's line-up to the flag photo.
 
 ## Decision
 
-Use the Night rule (Copy + Chain + Fallback). Details after the grilling of 2026-10-10/11 (see
-`.scratch/app/issues/33-night-bracket-grilling.md`):
+Use the Night rule (Copy + Chain + Fallback). Details after a question-by-question design review on 2026-10-10/11, which
+settled the final rule below and its thresholds:
 
 - A night photo is one where the camera fired its IR flash (EXIF Flash bit 0); if the tag is missing, a grayscale
   thumbnail means night.
