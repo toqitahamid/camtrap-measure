@@ -66,7 +66,7 @@ Wildlife Sustainability Research at Southern Illinois University Carbondale.
 
 ## Requirements
 
-Requirements: Windows 10/11, an NVIDIA GPU (8 GB recommended; less runs with a warning, none
+Windows 10/11, an NVIDIA GPU (8 GB recommended; less runs with a warning, none
 runs on the CPU slowly) with its driver already installed (driver 570 or newer — the one thing
 that does need IT), about 14 GB free on the install drive, the WebView2 runtime (built into Windows 11; the checks name
 the download if it is missing). A Git or uv already on the PATH is used as is.
@@ -202,7 +202,6 @@ and `CAMTRAP_SMOKE_FLAG` (the camera's flag photo + `.json`) are all present. On
 (layered venv on the module torch), then `sbatch scripts/gpu_smoke.sbatch`.
 On the department's Windows machine torch comes from the same frozen `uv sync --extra inference`:
 the lockfile pins the CUDA 12.8 build for Windows.
-
 
 ### Project layout
 
