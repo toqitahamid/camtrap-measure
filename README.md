@@ -16,8 +16,8 @@ No administrator account is needed at any point. It gets Git (a portable copy un
 downloads the app into `<folder>\app`, keeps the models and results in `<folder>\data` and uv's
 cache and Python beside them (remembered in `<folder>\camtrap-install.json`, never in user environment variables), builds its environment (Python 3.12 and the CUDA build of
 PyTorch come from the lockfile — a few GB once), runs the preflight checks before the big
-download, and asks for no Hugging Face credential: the model weights come from a Hugging Face repo that is
-public from the release of ticket 36 (it must be public before that ships), so no token is needed. The app window asks for the **FlagLabel email**, then the **one-time code** FlagLabel
+download, and asks for no Hugging Face credential: the model weights are downloaded from a
+public Hugging Face repo, so no token is needed. The app window asks for the **FlagLabel email**, then the **one-time code** FlagLabel
 emails to it (the app remembers the login; there is no password).
 
 Every failed check prints what it found and what to do, in plain words: GPU driver missing or
@@ -163,7 +163,7 @@ to watch the progress display.
 
 ### Model weights
 
-Weights live in the Hugging Face repo `toqi/camtrap-measure-weights` (public from the release of ticket 36)
+Weights are downloaded from the public Hugging Face repo `toqi/camtrap-measure-weights` (no token needed)
 (`manifest.json` + MegaDetector v1000 + SpeciesNet v4.0.3a + the paper's unified
 distance net + RoMa/DINOv2 + SAM3; staged and pushed by `scripts/upload_weights.py`; each component keeps
 its own licence, listed on the repo's model card). At every start the engine compares the local copy
